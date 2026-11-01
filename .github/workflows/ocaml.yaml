@@ -1,0 +1,15 @@
+name: ocaml
+on: [push, workflow_dispatch]
+jobs:
+  ocaml:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.3"
+      - run: opam install -y hardcaml hardcaml_waveterm ppx_hardcaml ppx_jane core dune
+      - run: opam exec -- dune build
+      - run: opam exec -- dune runtest
+      - name: Generated Verilog matches the committed copy
+        run: git diff --exit-code src/
