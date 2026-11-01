@@ -105,7 +105,7 @@ let%test_unit "model: write transaction, ACKed, with clock stretching" =
     ~sexp_of:[%sexp_of: int * int list * int * int]
     ~f:(fun (address, bytes, half, stretch) ->
       let bytes = List.take bytes 4 in
-      let target = I2c.Target.create ~address ~stretch in
+      let target = I2c.Target.create ~address ~stretch () in
       let r =
         run_on_model
           ~half
@@ -123,7 +123,7 @@ let%test_unit "model: write transaction, ACKed, with clock stretching" =
 ;;
 
 let%test_unit "model: wrong address is NACKed and reported" =
-  let target = I2c.Target.create ~address:0x50 ~stretch:0 in
+  let target = I2c.Target.create ~address:0x50 ~stretch:0 () in
   let bytes = [ 0x12; 0x34 ] in
   let r =
     run_on_model
@@ -143,7 +143,7 @@ let%test_unit "model: wrong address is NACKed and reported" =
 ;;
 
 let%test_unit "model: back-to-back transactions" =
-  let target = I2c.Target.create ~address:0x3C ~stretch:20 in
+  let target = I2c.Target.create ~address:0x3C ~stretch:20 () in
   let words = transaction ~address:0x3C ~bytes:[ 0xAE ] @ transaction ~address:0x3C ~bytes:[ 0x00; 0xFF ] in
   let r =
     run_on_model ~half:3 ~timeout:10_000 ~target ~words ~cycles:(budget ~half:3 ~n:5 ~stretch:20) ()
@@ -158,7 +158,7 @@ let%test_unit "model: back-to-back transactions" =
 ;;
 
 let%test_unit "model: a stretch longer than TIMEOUT is reported and the bus released" =
-  let target = I2c.Target.create ~address:0x20 ~stretch:2_000 in
+  let target = I2c.Target.create ~address:0x20 ~stretch:2_000 () in
   let r =
     run_on_model
       ~half:4
@@ -186,7 +186,7 @@ let%test_unit "planted firmware bug: SDA changed while SCL high is caught" =
       ~with_:"bit:    out pins, 1         ; BUG\n        set pins, 0 "
   in
   assert (not (String.equal mutant Firmware.i2c_controller));
-  let target = I2c.Target.create ~address:0x42 ~stretch:0 in
+  let target = I2c.Target.create ~address:0x42 ~stretch:0 () in
   let bytes = [ 0x5A ] in
   let r =
     run_on_model
@@ -218,7 +218,7 @@ let%test_unit "chip: I2C firmware loaded over SPI writes to a target device" =
     ~f:(fun (address, bytes, stretch) ->
       let bytes = List.take bytes 3 in
       let h = Test_top.create ~half:4 in
-      let target = I2c.Target.create ~address ~stretch in
+      let target = I2c.Target.create ~address ~stretch () in
       let checker = I2c.Checker.create () in
       h.on_cycle
       <- (fun () ->

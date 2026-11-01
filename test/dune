@@ -48,3 +48,19 @@
   (with-stdout-to
    two_protocols.hex
    (run %{dep:../bin/firmware_hex.exe} two_protocols))))
+
+(rule
+ (targets i2c.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i2c.hex
+   (run %{dep:../bin/firmware_hex.exe} i2c))))
+
+(rule
+ (targets bridge.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   bridge.hex
+   (run %{dep:../bin/firmware_hex.exe} bridge))))

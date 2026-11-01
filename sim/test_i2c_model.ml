@@ -29,7 +29,7 @@ let%test_unit "write to the right address: every byte ACKed, delivered, decoded"
     ~sexp_of:[%sexp_of: int * int list * int * int]
     ~f:(fun (address, bytes, half, stretch) ->
       let bytes = List.take bytes 5 in
-      let target = I2c.Target.create ~address ~stretch in
+      let target = I2c.Target.create ~address ~stretch () in
       let trace =
         I2c.Reference_controller.run
           ~steps:(I2c.Reference_controller.write ~address ~bytes ~half)
@@ -51,7 +51,7 @@ let%test_unit "write to the wrong address: NACK, nothing delivered" =
     ~sexp_of:[%sexp_of: int * int * int list]
     ~f:(fun (address, offset, bytes) ->
       let bytes = List.take bytes 3 in
-      let target = I2c.Target.create ~address:((address + offset) % 128) ~stretch:0 in
+      let target = I2c.Target.create ~address:((address + offset) % 128) ~stretch:0 () in
       let trace =
         I2c.Reference_controller.run
           ~steps:(I2c.Reference_controller.write ~address ~bytes ~half:4)
@@ -64,7 +64,7 @@ let%test_unit "write to the wrong address: NACK, nothing delivered" =
 ;;
 
 let%test_unit "clock stretching really holds SCL low" =
-  let target = I2c.Target.create ~address:0x42 ~stretch:50 in
+  let target = I2c.Target.create ~address:0x42 ~stretch:50 () in
   let trace =
     I2c.Reference_controller.run
       ~steps:(I2c.Reference_controller.write ~address:0x42 ~bytes:[ 0xA5 ] ~half:4)
@@ -81,7 +81,7 @@ let%test_unit "clock stretching really holds SCL low" =
 
 (* The checker must reject what it should. Each case is a corrupted bus. *)
 let%test_unit "checker flags a STOP in the middle of a byte" =
-  let target = I2c.Target.create ~address:0x10 ~stretch:0 in
+  let target = I2c.Target.create ~address:0x10 ~stretch:0 () in
   let trace =
     I2c.Reference_controller.run
       ~steps:(I2c.Reference_controller.write ~address:0x10 ~bytes:[ 0xFF ] ~half:4)
@@ -102,7 +102,7 @@ let%test_unit "checker flags a STOP with no START" =
 
 let%test_unit "checker reads data on SCL rising edges, not levels" =
   (* SDA glitching while SCL is low must not change the decoded byte. *)
-  let target = I2c.Target.create ~address:0x55 ~stretch:0 in
+  let target = I2c.Target.create ~address:0x55 ~stretch:0 () in
   let trace =
     I2c.Reference_controller.run
       ~steps:(I2c.Reference_controller.write ~address:0x55 ~bytes:[ 0x3C ] ~half:6)
@@ -112,4 +112,36 @@ let%test_unit "checker reads data on SCL rising edges, not levels" =
   let events, _ = decode glitched in
   let events_clean, _ = decode trace in
   [%test_result: I2c.Event.t list] events ~expect:events_clean
+;;
+
+let%test_unit "read: the target sends its bytes MSB first until the controller NACKs" =
+  Quickcheck.test
+    (Quickcheck.Generator.tuple4
+       (Int.gen_incl 0 127)
+       (Quickcheck.Generator.list_non_empty (Int.gen_incl 0 255))
+       (Int.gen_incl 2 20)
+       (Int.gen_incl 0 60))
+    ~trials:300
+    ~sexp_of:[%sexp_of: int * int list * int * int]
+    ~f:(fun (address, bytes, half, stretch) ->
+      let bytes = List.take bytes 5 in
+      (* One spare byte scripted: it must not be sent after the NACK. *)
+      let target = I2c.Target.create ~to_send:(bytes @ [ 0x99 ]) ~address ~stretch () in
+      let count = List.length bytes in
+      let trace =
+        I2c.Reference_controller.run
+          ~steps:(I2c.Reference_controller.read ~address ~count ~half)
+          ~target
+      in
+      let events, errors = decode trace in
+      let open I2c.Event in
+      [%test_result: string list] errors ~expect:[];
+      [%test_result: I2c.Event.t list]
+        events
+        ~expect:
+          ((Start :: Byte { value = (address lsl 1) lor 1; ack = true }
+            :: List.mapi bytes ~f:(fun i v -> Byte { value = v; ack = i < count - 1 }))
+           @ [ Stop ]);
+      [%test_result: int list] (I2c.Target.sent target) ~expect:bytes;
+      [%test_result: int list] (I2c.Target.received target) ~expect:[])
 ;;

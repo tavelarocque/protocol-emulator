@@ -28,7 +28,7 @@ weakest for this job:
 |---|---|---|
 | Waiting on a pin | blocks forever | optional timeout from a dedicated per-thread counter, then a jump to a per-thread vector |
 | I2C / open-drain | emulated by toggling pin direction | per-pin open-drain mode in hardware |
-| Bit timing | fractional clock divider per state machine | counter loops on X/Y, value supplied by the host at run time |
+| Bit timing | fractional clock divider per state machine | integer clock divider per thread, or counter loops on X/Y with the count supplied by the host at run time |
 | Program loading | host bus inside the RP2040 | SPI slave port, so an external host can load firmware |
 | Undefined encodings | n/a | every word is defined; reserved encodings are NOP |
 
@@ -75,6 +75,7 @@ That is exactly I2C's wired-AND bus.
 | `timeout_vector` | jump target when a `wait ... timeout` expires |
 | `timeout` | cycles (0 to 65535) a `wait ... timeout` may stall before it expires |
 | `sideset_base`, `sideset_count` | first side-set pin, and how many of the delay field's top bits (0 to 3) are side-set values |
+| `clkdiv` | the thread runs one cycle in every `clkdiv` (0 and 1: every cycle). Between those ticks it does nothing at all, so delays and wait timeouts count in ticks |
 
 Pin ranges wrap modulo 8.
 
@@ -91,6 +92,20 @@ On every clock cycle:
      the instruction's delay field.
 3. Pin writes take effect at the end of the cycle. If two threads write the
    same pin in the same cycle, the higher-numbered thread wins.
+
+A thread with `clkdiv` above 1 takes step 2 only on its ticks, one cycle in
+every `clkdiv`; on other cycles it holds its whole state. Its first tick is
+the first cycle it is enabled.
+
+### Chaining threads
+
+With the host's CHAIN bit set, thread 0's RX FIFO feeds thread 1's TX FIFO:
+in any cycle that starts with the first non-empty and the second not full,
+one word moves across. Like every FIFO rule, this is judged at the start of
+the cycle, so a word thread 0 pushes reaches thread 1 two cycles later at
+the earliest. While chained, the host cannot pop thread 0's RX FIFO or push
+to thread 1's TX FIFO. This is what lets one thread's protocol feed another
+with no host in the data path (`Firmware.Bridge`: I2C reads in, SPI out).
 
 ## Encoding
 
@@ -255,6 +270,15 @@ rates.
   the pin rule above built structurally (thread 1's datapath starts from
   thread 0's result). Programs written for one thread run unchanged.
 
+- **v1.2.** A clock divider per thread (CLKDIV) and CHAIN. Both came from
+  trying to build an I2C-to-SPI bridge. The first I2C controller spent 16
+  of its 49 words on delay loops, so it could not fit in memory beside the
+  SPI controller and had no room for reads. With the divider, the new
+  controller (`Firmware.i2c`) does reads and writes in 25 words, with the
+  bit rate set by the divider (6 ticks a bit). CHAIN removes the host from
+  the bridge's data path. With CLKDIV at 0 and CHAIN clear, everything
+  behaves exactly as v1.1.
+
 ## Open questions for review
 
 - **Bit order.** OUT and IN both shift right, so data leaves LSB first and
@@ -262,10 +286,9 @@ rates.
   that are MSB first (SPI, I2C) therefore take bit-reversed bytes from the
   host, and a thread cannot bridge an MSB-first protocol into an LSB-first
   one (UART) by itself. PIO solves this with a per-thread shift direction.
-- **Clock divider.** PIO's per-thread divider would delete the delay loops
-  that make up a third of the I2C controller (16 of 49 words), freeing
-  memory for a second program and for I2C reads.
-
+- **Fractional divider.** PIO's divider has 8 fractional bits; this one is
+  an integer. UART baud rates that do not divide the clock still need the
+  X/Y loop for fine timing.
 - **Autopush / autopull.** PIO has them. They save one instruction per word
   but complicate timing. Left out of v0.
 - **IRQ / thread sync.** Not in v0. Full-duplex UART does not need it; SPI

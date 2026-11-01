@@ -18,13 +18,13 @@ and moves data through each thread's 4-deep TX and RX FIFOs. The two threads
 run at the same time, each executing one instruction per clock; if both
 write the same pin in the same cycle, thread 1 wins.
 
-Thread 0's registers are at 0x41-0x4C; thread 1 has an identical bank at
-0x51-0x5C. CTRL and PIN_MODES are global.
+Thread 0's registers are at 0x41-0x4D; thread 1 has an identical bank at
+0x51-0x5D. CTRL and PIN_MODES are global.
 
 | Address | Register |
 |---|---|
 | 0x00-0x3F | program memory (write) |
-| 0x40 | CTRL: bit 0 enables thread 0, bit 1 thread 1 |
+| 0x40 | CTRL: bit 0 enables thread 0, bit 1 thread 1; bit 2 CHAIN (thread 0's RX FIFO feeds thread 1's TX FIFO) |
 | 0x41 | START address |
 | 0x42 | OUT pins: base [2:0], count [7:4] |
 | 0x43 | SET pins: base [2:0], count [7:4] |
@@ -37,7 +37,8 @@ Thread 0's registers are at 0x41-0x4C; thread 1 has an identical bank at
 | 0x4A | STATUS: pc [13:8], enable [7], RX level [6:4], TX level [2:0] |
 | 0x4B | TIMEOUT: max cycles a timed wait stalls |
 | 0x4C | SIDESET: base pin [2:0], count [5:4] |
-| 0x51-0x5C | thread 1: same layout as 0x41-0x4C (0x57 unused) |
+| 0x4D | CLKDIV: the thread runs one cycle in every CLKDIV (0, 1: every cycle) |
+| 0x51-0x5D | thread 1: same layout as 0x41-0x4D (0x57 unused) |
 
 Status pins: uo[1] thread 0 running, uo[2] thread 0 RX data waiting, uo[3]
 thread 0 TX FIFO full; uo[4]-uo[6] the same for thread 1.
@@ -56,6 +57,14 @@ controller at address 0 and the UART transmitter at address 26. Configure
 thread 0 for SPI (SIDESET 0x10, OUT 0x31, IN base 2) and thread 1 for UART
 on P4 (START 26, OUT 0x14, SET 0x14 in its bank at 0x50), set PIN_MODES to
 0x0145, and write 3 to CTRL. SPI words go to 0x48, UART words to 0x58.
+
+The I2C-to-SPI bridge: `test/bridge.hex` holds the I2C controller at 0 and
+the side-set SPI controller at 25. Thread 0 runs I2C on P0 (SDA) and P1
+(SCL), open-drain; thread 1 runs SPI on P2-P5 (SCK, MOSI, MISO, CS_N).
+Writing 7 to CTRL starts both threads with CHAIN set: the host queues an
+I2C read on thread 0 and each byte read comes out over SPI with no further
+host involvement, one SPI transfer per I2C read. `test/test.py`
+(`test_bridge`) has the full register setup.
 
 ## External hardware
 

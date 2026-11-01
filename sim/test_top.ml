@@ -89,6 +89,20 @@ let load_image h image =
 
 let load_firmware h source = load_image h (Asm.assemble source)
 
+(* Writes every field of a thread's configuration into its bank. *)
+let configure h ~thread (c : Isa.Thread_config.t) =
+  let w a v = write h (Top.Addr.for_thread thread a) v in
+  w Top.Addr.start c.start;
+  w Top.Addr.out_cfg (c.out_base lor (c.out_count lsl 4));
+  w Top.Addr.set_cfg (c.set_base lor (c.set_count lsl 4));
+  w Top.Addr.in_base c.in_base;
+  w Top.Addr.threshold c.threshold;
+  w Top.Addr.timeout_vector c.timeout_vector;
+  w Top.Addr.timeout c.timeout;
+  w Top.Addr.sideset (c.sideset_base lor (c.sideset_count lsl 4));
+  w Top.Addr.clkdiv c.clkdiv
+;;
+
 let push ?(thread = 0) h v =
   while tx_level ~thread h >= Isa.fifo_depth do
     ()
@@ -143,10 +157,11 @@ let%test_unit "configuration registers read back what was written" =
       ; timeout_vector, 0x3F
       ; timeout, 0xFFFF
       ; sideset, 0x3F
+      ; clkdiv, 0xFFFF
       ]
   in
   let registers =
-    Top.Addr.[ ctrl, 0x3; pin_modes, 0xFFFF ]
+    Top.Addr.[ ctrl, 0x7; pin_modes, 0xFFFF ]
     @ per_thread
     @ List.map per_thread ~f:(fun (a, m) -> Top.Addr.for_thread 1 a, m)
   in

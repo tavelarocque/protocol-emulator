@@ -28,7 +28,9 @@
    unused in thread 1's bank.
      0x00-0x3F  program memory word (write), shared by both threads
      0x40       CTRL (global): bit 0 = thread 0 enable, bit 1 = thread 1
-                enable. One write starts or stops both together.
+                enable. One write starts or stops both together. Bit 2 =
+                CHAIN: thread 0's RX FIFO feeds thread 1's TX FIFO directly,
+                and the host cannot pop thread 0 or push thread 1.
      0x47       PIN_MODES (global), 2 bits per pin: 0 input, 1 push-pull,
                 2 open-drain
      bank + 0x1 START address [5:0]
@@ -43,6 +45,8 @@
                 [2:0] tx level
      bank + 0xB TIMEOUT [15:0]: max cycles a [wait ... timeout] stalls
      bank + 0xC SIDESET: base pin [2:0], count [5:4] (0..3 delay bits used)
+     bank + 0xD CLKDIV [15:0]: the thread runs one cycle in every CLKDIV
+                (0 and 1: every cycle)
    Configuration registers read back what was written; unmapped addresses
    read 0. Pin conflicts: if both threads write a pin in the same cycle,
    thread 1 wins. *)
@@ -90,9 +94,10 @@ module Addr = struct
   let status = 0x4A
   let timeout = 0x4B
   let sideset = 0x4C
+  let clkdiv = 0x4D
   let bank_size = 0x10
   let for_thread n a = a + (bank_size * n)
-  let last = for_thread 1 sideset
+  let last = for_thread 1 clkdiv
 end
 
 let bit s i = select s i i
@@ -124,7 +129,7 @@ let create (i : _ I.t) : _ O.t =
   let write_to a = data_done &: is_write &: (addr ==:. a) in
   (* --- Configuration registers. --- *)
   let config ?(init = 0) width = Variable.reg (spec_to (of_int ~width init)) ~width in
-  let enables = config 2 in
+  let ctrl = config 3 in
   let pin_modes = config 16 in
   (* One bank of per-thread registers. Returns its writes as (address,
      register, write rule), its RX pop strobe, and the thread's core inputs. *)
@@ -138,6 +143,7 @@ let create (i : _ I.t) : _ O.t =
     let timeout_vector = config 6 in
     let timeout = config 16 in
     let sideset = config 6 in
+    let clkdiv = config 16 in
     let writes =
       List.map
         [ Addr.start, start
@@ -148,6 +154,7 @@ let create (i : _ I.t) : _ O.t =
         ; Addr.timeout_vector, timeout_vector
         ; Addr.timeout, timeout
         ; Addr.sideset, sideset
+        ; Addr.clkdiv, clkdiv
         ]
         ~f:(fun (offset, (r : Variable.t)) ->
           let addr = a offset in
@@ -155,7 +162,7 @@ let create (i : _ I.t) : _ O.t =
     in
     let rx_pop = wire 1 in
     let core_in =
-      { Pe_core.Thread_in.enable = bit enables.value n
+      { Pe_core.Thread_in.enable = bit ctrl.value n
       ; start = start.value
       ; out_base = select out_cfg.value 2 0
       ; out_count = select out_cfg.value 7 4
@@ -167,6 +174,7 @@ let create (i : _ I.t) : _ O.t =
       ; timeout = timeout.value
       ; sideset_base = select sideset.value 2 0
       ; sideset_count = select sideset.value 5 4
+      ; clkdiv = clkdiv.value
       ; tx_push = write_to (a Addr.tx_fifo)
       ; tx_data = data_now
       ; rx_pop
@@ -188,6 +196,7 @@ let create (i : _ I.t) : _ O.t =
       ; prog_data = data_now
       ; pin_modes = pin_modes.value
       ; pins_in = i.uio_in
+      ; chain = bit ctrl.value 2
       ; t0 = bank_in 0
       ; t1 = bank_in 1
       }
@@ -197,7 +206,7 @@ let create (i : _ I.t) : _ O.t =
   (* Read data, selected by the address in the command byte as it completes. *)
   let read_addr = select cmd_now 6 0 in
   let table = Array.create ~len:(Addr.last + 2) (zero 16) in
-  table.(Addr.ctrl) <- uresize enables.value 16;
+  table.(Addr.ctrl) <- uresize ctrl.value 16;
   table.(Addr.pin_modes) <- pin_modes.value;
   List.iteri banks ~f:(fun n (writes, _, _) ->
     let a = Addr.for_thread n in
@@ -205,7 +214,7 @@ let create (i : _ I.t) : _ O.t =
     List.iter writes ~f:(fun (addr, (r : Variable.t), _) -> table.(addr) <- uresize r.value 16);
     table.(a Addr.rx_fifo) <- mux2 (rx_nonempty n) t.rx_data (zero 16);
     table.(a Addr.status)
-    <- concat_msb [ zero 2; t.pc; bit enables.value n; t.rx_level; gnd; t.tx_level ]);
+    <- concat_msb [ zero 2; t.pc; bit ctrl.value n; t.rx_level; gnd; t.tx_level ]);
   (* The last entry is zero, and mux repeats it for higher addresses. *)
   let read_value = mux read_addr (Array.to_list table) in
   List.iteri banks ~f:(fun n (_, rx_pop, _) ->
@@ -230,7 +239,7 @@ let create (i : _ I.t) : _ O.t =
              (fall &: (bit_count.value >=:. 9))
              [ miso_shift <-- sll miso_shift.value 1 ]
          ]
-     ; when_ (write_to Addr.ctrl) [ enables <-- select data_now 1 0 ]
+     ; when_ (write_to Addr.ctrl) [ ctrl <-- select data_now 2 0 ]
      ; when_ (write_to Addr.pin_modes) [ pin_modes <-- data_now ]
      ]
      @ List.concat_map banks ~f:(fun (writes, _, _) ->
@@ -238,10 +247,10 @@ let create (i : _ I.t) : _ O.t =
   { O.uo_out =
       concat_lsb
         [ msb miso_shift.value
-        ; bit enables.value 0
+        ; bit ctrl.value 0
         ; rx_nonempty 0
         ; tx_full 0
-        ; bit enables.value 1
+        ; bit ctrl.value 1
         ; rx_nonempty 1
         ; tx_full 1
         ; gnd

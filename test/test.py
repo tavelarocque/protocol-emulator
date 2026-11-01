@@ -181,25 +181,36 @@ def i2c_words(address, data):
 
 
 class I2cTarget:
-    def __init__(self, address, stretch):
+    """Writes: ACKs and collects bytes. Reads: sends to_send MSB first,
+    changing SDA only while SCL is low, until the controller NACKs."""
+
+    def __init__(self, address, stretch, to_send=()):
         self.address, self.stretch = address, stretch
         self.state, self.bits, self.shift = "idle", 0, 0
-        self.first = True
+        self.first, self.reading = True, False
         self.stretch_left = 0
         self.prev = (1, 1)
-        self.received = []
+        self.received, self.to_send, self.sent = [], list(to_send), []
+        self.out, self.acked = 0xFF, False
+
+    def _load(self):
+        self.out = self.to_send.pop(0) if self.to_send else 0xFF
+        self.sent.append(self.out)
 
     def drive(self):
         """(pull SDA low, pull SCL low) for this cycle."""
-        return self.state == "ack", self.stretch_left > 0
+        sending_zero = self.state == "tx" and not (self.out >> (7 - self.bits)) & 1
+        return self.state == "ack" or sending_zero, self.stretch_left > 0
 
     def step(self, sda, scl):
         psda, pscl = self.prev
         if self.stretch_left:
             self.stretch_left -= 1
+        rise, fall = (not pscl and scl), (pscl and not scl)
         if pscl and scl and sda != psda:
             if sda == 0:
                 self.state, self.bits, self.shift, self.first = "rx", 0, 0, True
+                self.reading = False
             else:
                 self.state = "idle"
         elif self.state == "rx" and not pscl and scl:
@@ -207,14 +218,32 @@ class I2cTarget:
             self.bits += 1
         elif self.state == "rx" and self.bits == 8 and pscl and not scl:
             if self.first:
-                ok = (self.shift >> 1) == self.address and not (self.shift & 1)
-                self.state = "ack" if ok else "ignore"
+                self.reading = bool(self.shift & 1)
+                self.state = "ack" if (self.shift >> 1) == self.address else "ignore"
             else:
                 self.received.append(self.shift)
                 self.state = "ack"
-        elif self.state == "ack" and pscl and not scl:
-            self.state, self.bits, self.shift, self.first = "rx", 0, 0, False
+        elif self.state == "ack" and fall:
+            self.bits, self.shift, self.first = 0, 0, False
             self.stretch_left = self.stretch
+            if self.reading:
+                self._load()
+                self.state = "tx"
+            else:
+                self.state = "rx"
+        elif self.state == "tx" and fall:
+            self.bits += 1
+            if self.bits == 8:
+                self.state = "cack"
+        elif self.state == "cack" and rise:
+            self.acked = sda == 0
+        elif self.state == "cack" and fall:
+            if self.acked:
+                self._load()
+                self.state, self.bits = "tx", 0
+                self.stretch_left = self.stretch
+            else:
+                self.state = "ignore"
         self.prev = (sda, scl)
 
 
@@ -455,3 +484,114 @@ async def test_two_protocols(dut):
     uart = uart_decode(samples, divisor)
     assert uart == data, f"UART sent {data}, decoded {uart}"
     assert int(dut.uo_out.value) & 0b10010 == 0b10010, "both threads reported running"
+
+
+# --- I2C controller v2 (clock divider; reads and writes) ---------------------
+
+CLKDIV = 0x4D
+I2C_STUCK = 18  # Firmware.i2c_stuck; checked by the OCaml tests
+
+
+async def configure_i2c(dut, bank=0, clkdiv=3):
+    await write(dut, OUT_CFG + bank, 0x10)  # OUT: SDA (P0), 1 pin
+    await write(dut, SET_CFG + bank, 0x10)  # SET: SDA (P0), 1 pin
+    await write(dut, IN_BASE + bank, 0)
+    await write(dut, SIDESET + bank, 0x11)  # side-set: SCL (P1), 1 bit
+    await write(dut, TIMEOUT_VECTOR + bank, I2C_STUCK)
+    await write(dut, TIMEOUT + bank, 10000)
+    await write(dut, CLKDIV + bank, clkdiv)
+
+
+def i2c_write_word(b, stop):
+    return rev8(b) | (1 << 8) | (int(stop) << 9)
+
+
+def i2c_read_word(last):
+    return 0xFF | (int(last) << 8) | (int(last) << 9)
+
+
+@cocotb.test()
+async def test_i2c_register_read(dut):
+    """Divider-timed I2C: write a register pointer, then read three bytes."""
+    await reset(dut)
+    address, register, data = 0x48, 0x0F, [0xC3, 0x00, 0x7E]
+    target, monitor = I2cTarget(address, stretch=30, to_send=data), I2cMonitor()
+    await load(dut, firmware("i2c"))
+    await configure_i2c(dut)
+    await write(dut, PIN_MODES, 0b1010)  # P0 SDA, P1 SCL open-drain
+    bus = cocotb.start_soon(i2c_bus(dut, target, monitor))
+    await write(dut, CTRL, 1)
+    words = [i2c_write_word(address << 1, False), i2c_write_word(register, True),
+             i2c_write_word((address << 1) | 1, False)]
+    words += [i2c_read_word(i == len(data) - 1) for i in range(len(data))]
+    for w in words:
+        await push(dut, w)
+    reports = [await pop(dut) for _ in words]
+    await ClockCycles(dut.clk, 400)
+    bus.cancel()
+    assert monitor.errors == [], monitor.errors
+    expected = ["START", (address << 1, "ACK"), (register, "ACK"), "STOP",
+                "START", ((address << 1) | 1, "ACK")]
+    expected += [(b, "ACK" if i < len(data) - 1 else "NACK") for i, b in enumerate(data)]
+    assert monitor.events == expected + ["STOP"], f"bus: {monitor.events}"
+    assert target.received == [register], f"target got {target.received}"
+    assert [rev8(r & 0xFF) for r in reports[3:]] == data, f"reports {reports}"
+    assert reports[-1] & 0x100, "last byte reported as NACKed"
+
+
+# --- The bridge: I2C read in, SPI out, chained, no host in the data path -----
+
+BRIDGE_SPI_ORIGIN = 25  # Firmware.Bridge.spi_origin; checked by the OCaml tests
+
+
+@cocotb.test()
+async def test_bridge(dut):
+    """Thread 0 reads an I2C device; CHAIN feeds each byte to thread 1, which
+    sends it over SPI. The host only queues the read and drains SPI replies."""
+    await reset(dut)
+    address, data = 0x29, [0x12, 0xF0, 0x81]
+    sent = [(address << 1) | 1] + data
+    responses = [0x5A, 0x00, 0xFF, 0x3C]
+    target, i2c_mon = I2cTarget(address, stretch=20, to_send=data), I2cMonitor()
+    slave, spi_mon = SpiSlave(responses), SpiMonitor()
+    await load(dut, firmware("bridge"))
+    await configure_i2c(dut)
+    await write(dut, START + BANK1, BRIDGE_SPI_ORIGIN)
+    await write(dut, SIDESET + BANK1, 0x12)  # SCK = P2 by side-set
+    await write(dut, OUT_CFG + BANK1, 0x33)  # MOSI P3, (MISO P4), CS_N P5
+    await write(dut, IN_BASE + BANK1, 4)  # MISO
+    await write(dut, PIN_MODES, 0b01_00_01_01_10_10)
+
+    async def buses():
+        while True:
+            await FallingEdge(dut.clk)
+            out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+            t_sda, t_scl = target.drive()
+            sda = 0 if (oe & 1 or t_sda) else 1
+            scl = 0 if (oe & 2 or t_scl) else 1
+            sck = (out >> 2) & 1 if oe & 4 else 0
+            mosi = (out >> 3) & 1 if oe & 8 else 0
+            cs_n = (out >> 5) & 1 if oe & 32 else 1
+            target.step(sda, scl)
+            i2c_mon.step(sda, scl)
+            spi_mon.step(sck, mosi, slave.miso, cs_n)
+            slave.step(sck, mosi, cs_n)
+            dut.uio_in.value = 0xEC | sda | (scl << 1) | (slave.miso << 4)
+
+    bus = cocotb.start_soon(buses())
+    await write(dut, CTRL, 0b111)  # both threads, CHAIN
+    words = [i2c_write_word((address << 1) | 1, False)]
+    words += [i2c_read_word(i == len(data) - 1) for i in range(len(data))]
+    for w in words:
+        await push(dut, w)
+    replies = [rev8((await pop(dut, bank=BANK1)) & 0xFF) for _ in sent]
+    await ClockCycles(dut.clk, 400)
+    bus.cancel()
+    assert i2c_mon.errors == [], i2c_mon.errors
+    assert spi_mon.errors == [], spi_mon.errors
+    expected_i2c = ["START", ((address << 1) | 1, "ACK")]
+    expected_i2c += [(b, "ACK" if i < len(data) - 1 else "NACK") for i, b in enumerate(data)]
+    assert i2c_mon.events == expected_i2c + ["STOP"], f"I2C: {i2c_mon.events}"
+    assert spi_mon.events == ["SELECT"] + list(zip(sent, responses)) + ["DESELECT"], f"SPI: {spi_mon.events}"
+    assert slave.received == sent, f"SPI device got {slave.received}"
+    assert replies == responses, f"host got {replies}"

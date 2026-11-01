@@ -32,6 +32,7 @@ type thread_state =
   ; delay_left : int
   ; waiting : bool
   ; wait_count : int
+  ; div_count : int
   ; tx_level : int
   ; rx_level : int
   ; popped : int option
@@ -72,6 +73,13 @@ let random_config rs =
     ; sideset_base = rand 8
     ; (* Half the trials without side-set, half with 1 to 3 side-set bits. *)
       sideset_count = (if rand 2 = 0 then 0 else 1 + rand 3)
+    ; (* Mostly full speed, so programs get somewhere in 300 cycles. *)
+      clkdiv =
+        (match rand 4 with
+         | 0 -> 0
+         | 1 -> 1
+         | 2 -> 2 + rand 2
+         | _ -> rand 6)
     }
   in
   config
@@ -158,6 +166,10 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
      rate, which left both threads running together only 31% of the
      time. *)
   let enabled = Array.init Rtl.num_threads ~f:(fun _ -> rand 8 > 0) in
+  (* A third of the trials chain thread 0's output into thread 1. The host
+     keeps trying to use the chained FIFO ends, which both implementations
+     must ignore. *)
+  let chain = rand 3 = 0 in
   let sim = Sim.create (Rtl.create ?mutation) in
   let i : _ Rtl.I.t = Cyclesim.inputs sim in
   let o : _ Rtl.O.t = Cyclesim.outputs sim in
@@ -180,7 +192,9 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
     set ti.timeout_vector config.timeout_vector;
     set ti.timeout config.timeout;
     set ti.sideset_base config.sideset_base;
-    set ti.sideset_count config.sideset_count);
+    set ti.sideset_count config.sideset_count;
+    set ti.clkdiv config.clkdiv);
+  set i.chain (Bool.to_int chain);
   set
     i.pin_modes
     (Array.foldi modes ~init:0 ~f:(fun p acc m -> acc lor (mode_code m lsl (2 * p))));
@@ -196,6 +210,7 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
       ~pin_modes:modes
       ~threads:configs
   in
+  Isa.set_chain model chain;
   let rec loop cycle =
     if cycle >= cycles
     then None
@@ -229,15 +244,26 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
           let key =
             if not th.enabled
             then "(thread disabled)"
+            else if th.div_count > 0
+            then "(between divider ticks)"
             else if th.delay_left > 0
             then "(delay cycle)"
             else classify model ~thread:n ~word ~inputs:pins
           in
           Hashtbl.incr table key;
-          if th.enabled && th.delay_left = 0 && th.config.sideset_count > 0
+          if th.enabled && th.div_count = 0 && th.delay_left = 0 && th.config.sideset_count > 0
           then Hashtbl.incr table "(side-set driving pins)";
-          if drives_pins th (Isa.Instruction.decode word) then incr drivers
+          if th.div_count = 0 && drives_pins th (Isa.Instruction.decode word)
+          then incr drivers
         done;
+        let t0 = Isa.thread model 0
+        and t1 = Isa.thread model 1 in
+        if chain
+           && (not (Queue.is_empty t0.rx_fifo))
+           && Queue.length t1.tx_fifo < Isa.fifo_depth
+        then Hashtbl.incr table "(chain moved a word)";
+        if chain && Queue.length t1.tx_fifo >= Isa.fifo_depth && not (Queue.is_empty t0.rx_fifo)
+        then Hashtbl.incr table "(chain blocked: thread 1 TX full)";
         if !drivers = 2 then Hashtbl.incr table "(both threads drive pins in one cycle)";
         if (Isa.thread model 0).enabled && (Isa.thread model 1).enabled
         then Hashtbl.incr table "(both threads enabled)");
@@ -245,9 +271,13 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
       Isa.step model ~inputs:pins;
       let popped =
         List.mapi host ~f:(fun n (push, push_value, pop) ->
-          if push then assert (Isa.push_tx model ~thread:n push_value);
+          (* The host's push and pop are refused at the chained ends. *)
+          let push_ok = if push then Isa.push_tx model ~thread:n push_value else false in
+          if push && not push_ok then assert (chain && n = 1);
           let model_popped = if pop then Isa.pop_rx model ~thread:n else None in
-          let rtl_popped = Option.some_if pop (get (Rtl.O.thread o_before n).rx_data) in
+          let rtl_popped =
+            Option.some_if (pop && not (chain && n = 0)) (get (Rtl.O.thread o_before n).rx_data)
+          in
           model_popped, rtl_popped)
       in
       let rtl_thread n =
@@ -262,6 +292,7 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
         ; delay_left = get t.delay_left
         ; waiting = get t.waiting = 1
         ; wait_count = get t.wait_count
+        ; div_count = get t.div_count
         ; tx_level = get t.tx_level
         ; rx_level = get t.rx_level
         ; popped = snd (List.nth_exn popped n)
@@ -279,6 +310,7 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
         ; delay_left = th.delay_left
         ; waiting = th.waiting
         ; wait_count = th.wait_count
+        ; div_count = th.div_count
         ; tx_level = Queue.length th.tx_fifo
         ; rx_level = Queue.length th.rx_fifo
         ; popped = fst (List.nth_exn popped n)
@@ -303,6 +335,7 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
               (instructions : (int * string) list)
               (expected : state)
               (rtl : state)
+              (chain : bool)
               (configs : Isa.Thread_config.t list)]))
   in
   loop 0
@@ -337,7 +370,8 @@ let%expect_test "coverage of the differential test" =
     ; "mov (reserved -> nop)"; "set pins"; "set x"; "set y"
     ; "set (reserved -> nop)"; "nop"; "(delay cycle)"; "(side-set driving pins)"
     ; "(thread disabled)"; "(both threads enabled)"
-    ; "(both threads drive pins in one cycle)"
+    ; "(both threads drive pins in one cycle)"; "(between divider ticks)"
+    ; "(chain moved a word)"; "(chain blocked: thread 1 TX full)"
     ]
   in
   List.iter required ~f:(fun key ->
@@ -348,47 +382,50 @@ let%expect_test "coverage of the differential test" =
   |> List.iter ~f:(fun (key, n) ->
     printf "%-40s %6d  %5.1f%%\n" key n (100. *. Float.of_int n /. Float.of_int total));
   [%expect {|
-    (both threads drive pins in one cycle)    22472    4.8%
-    (both threads enabled)                   104825   22.3%
-    (delay cycle)                             49012   10.4%
-    (side-set driving pins)                  101854   21.7%
-    (thread disabled)                         15652    3.3%
-    in null                                    1450    0.3%
-    in pins                                    1869    0.4%
-    in x                                       2083    0.4%
-    in y                                       1782    0.4%
-    jmp !isrf                                  1432    0.3%
-    jmp !osre                                  1151    0.2%
-    jmp !x                                     1434    0.3%
-    jmp !y                                     2226    0.5%
-    jmp (always)                               2289    0.5%
-    jmp x!=y                                   2253    0.5%
-    jmp x--                                    1237    0.3%
-    jmp y--                                    1269    0.3%
-    mov (reserved -> nop)                      2841    0.6%
-    mov to isr                                  770    0.2%
-    mov to null                                 653    0.1%
-    mov to osr                                  620    0.1%
-    mov to pins                                 794    0.2%
-    mov to x                                    605    0.1%
-    mov to y                                    542    0.1%
-    nop                                        7547    1.6%
-    out null                                   1906    0.4%
-    out pins                                   1679    0.4%
-    out x                                      1935    0.4%
-    out y                                      1849    0.4%
-    pull                                       2803    0.6%
-    pull: stalled, TX empty                   33010    7.0%
-    push                                       3393    0.7%
-    push: stalled, RX full                     8453    1.8%
-    set (reserved -> nop)                      1937    0.4%
-    set pins                                   1531    0.3%
-    set x                                      2146    0.5%
-    set y                                      2178    0.5%
-    wait: condition met                        5184    1.1%
-    wait: stalled                             54754   11.7%
-    wait: stalled, spending timeout budget    14622    3.1%
-    wait: timed out                            3109    0.7%
+    (between divider ticks)                   57365   13.4%
+    (both threads drive pins in one cycle)    10472    2.4%
+    (both threads enabled)                   104986   24.4%
+    (chain blocked: thread 1 TX full)          2327    0.5%
+    (chain moved a word)                        293    0.1%
+    (delay cycle)                             36512    8.5%
+    (side-set driving pins)                   71477   16.6%
+    (thread disabled)                         15597    3.6%
+    in null                                    1345    0.3%
+    in pins                                    1130    0.3%
+    in x                                       1472    0.3%
+    in y                                       1171    0.3%
+    jmp !isrf                                   794    0.2%
+    jmp !osre                                   886    0.2%
+    jmp !x                                     1327    0.3%
+    jmp !y                                     1580    0.4%
+    jmp (always)                               1135    0.3%
+    jmp x!=y                                   2416    0.6%
+    jmp x--                                     782    0.2%
+    jmp y--                                     649    0.2%
+    mov (reserved -> nop)                      2548    0.6%
+    mov to isr                                  602    0.1%
+    mov to null                                 401    0.1%
+    mov to osr                                  434    0.1%
+    mov to pins                                 766    0.2%
+    mov to x                                    516    0.1%
+    mov to y                                    473    0.1%
+    nop                                        5327    1.2%
+    out null                                   1424    0.3%
+    out pins                                   1183    0.3%
+    out x                                      1337    0.3%
+    out y                                      1329    0.3%
+    pull                                       1898    0.4%
+    pull: stalled, TX empty                   29970    7.0%
+    push                                       2386    0.6%
+    push: stalled, RX full                     4275    1.0%
+    set (reserved -> nop)                      1545    0.4%
+    set pins                                   1248    0.3%
+    set x                                      1505    0.4%
+    set y                                      1415    0.3%
+    wait: condition met                        3949    0.9%
+    wait: stalled                             38744    9.0%
+    wait: stalled, spending timeout budget    10794    2.5%
+    wait: timed out                            1770    0.4%
     |}]
 ;;
 
@@ -410,12 +447,13 @@ let%expect_test "every planted bug in the core is caught" =
         (Sexp.to_string (Rtl.Mutation.sexp_of_t mutation))
         (seed + 1));
   [%expect {|
-    Xdec_never_decrements        caught by program #6
-    Wait_timeout_ignores_budget  caught by program #6
-    Delay_field_ignored          caught by program #1
-    Set_pins_count_off_by_one    caught by program #6
-    Push_not_right_justified     caught by program #21
-    Pin_priority_inverted        caught by program #4
+    Xdec_never_decrements        caught by program #2
+    Wait_timeout_ignores_budget  caught by program #4
+    Delay_field_ignored          caught by program #2
+    Set_pins_count_off_by_one    caught by program #4
+    Push_not_right_justified     caught by program #4
+    Pin_priority_inverted        caught by program #10
     Fetch_port_crossed           caught by program #1
+    Chain_ignores_full           caught by program #25
     |}]
 ;;

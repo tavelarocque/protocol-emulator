@@ -41,6 +41,7 @@ type sample =
   ; lines : int
   ; tx_head : int option (* None = TX FIFO empty *)
   ; rx_full : bool
+  ; tick : bool (* false: between clock-divider ticks *)
   ; config : Isa.Thread_config.t
   }
 
@@ -58,6 +59,7 @@ let random_sample rs word =
     ; timeout = (if r 2 = 0 then r 4 else r 65536)
     ; sideset_base = r 8
     ; sideset_count = r 4
+    ; clkdiv = r 4
     }
   in
   let state =
@@ -79,6 +81,7 @@ let random_sample rs word =
   ; lines = r 256
   ; tx_head = (if r 2 = 0 then None else Some (r 65536))
   ; rx_full = r 2 = 0
+  ; tick = r 4 > 0
   ; config
   }
 ;;
@@ -114,6 +117,8 @@ let run_model s =
   th.delay_left <- s.state.delay_left;
   th.waiting <- s.state.waiting = 1;
   th.wait_count <- s.state.wait_count;
+  (* A thread is between ticks while its divider counter is non-zero. *)
+  th.div_count <- (if s.tick then 0 else 1);
   m.pin_out <- s.state.pin_out;
   Option.iter s.tx_head ~f:(Queue.enqueue th.tx_fifo);
   if s.rx_full then for k = 1 to Isa.fifo_depth do Queue.enqueue th.rx_fifo k done;
@@ -149,6 +154,7 @@ let run_spec s =
     Spec_bits.step
       state
       { P.Step_in.enable = Bits.vdd
+      ; tick = Bits.of_bool s.tick
       ; instr = b 16 s.word
       ; lines = b 8 s.lines
       ; tx_empty = Bits.of_bool (Option.is_none s.tx_head)
@@ -231,5 +237,6 @@ let%expect_test "every planted RTL bug is refuted with a counterexample" =
     Push_not_right_justified     SAT: counterexample found
     Pin_priority_inverted        SAT: counterexample found
     Fetch_port_crossed           SAT: counterexample found
+    Chain_ignores_full           SAT: counterexample found
     |}]
 ;;

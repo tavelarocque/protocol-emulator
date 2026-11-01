@@ -263,8 +263,13 @@ module Make (C : Comb.S) = struct
           }
       }
     in
+    (* Between clock-divider ticks the thread is frozen: [none] is the
+       current state with no FIFO strobes. *)
     let r =
-      pick (~:(i.enable)) held (pick (s.delay_left <>:. 0) counting_down executed)
+      pick
+        (~:(i.enable))
+        held
+        (pick (~:(i.tick)) none (pick (s.delay_left <>:. 0) counting_down executed))
     in
     (* The value offered to the RX FIFO is always the right-justified ISR; the
        FIFO only takes it when [push] is high. (Defining it as zero when not

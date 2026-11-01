@@ -225,6 +225,93 @@ next:   pull                side 0 ; next byte; SCK stays low until it arrives
 |}
 ;;
 
+(* I2C controller, reads and writes, timed by the clock divider.
+
+   The same 9-clock routine moves every byte in either direction: it shifts
+   9 bits out on SDA (8 data bits, then the ACK slot) while sampling SDA on
+   each clock. Writing a byte, the host's data goes out and the slot is
+   released so the target can ACK. Reading, the host sends 0xFF (SDA
+   released) and puts its own ACK or NACK in the slot. Either way what was
+   sampled is what was on the bus, so the RX word reports it all.
+
+   Pins: P0 = SDA (open-drain), P1 = SCL (open-drain, driven by side-set).
+   Config: out_base 0, out_count 1, set_base 0, set_count 1 (SDA); in_base 0;
+   sideset_base 1, sideset_count 1 (SCL); timeout_vector = [i2c_stuck];
+   TIMEOUT = the longest clock stretch to tolerate, in ticks;
+   CLKDIV = clock / (6 x bit rate), so 17 for 98 kHz at 10 MHz.
+
+   Every bit is 6 ticks, SCL low for 3 and high for 3, which meets
+   standard-mode (100 kHz) timing whenever a tick is at least 1.6 us. START
+   and STOP hold SDA for 3 ticks around the SCL edge.
+
+   Host protocol on the TX FIFO, one word per byte:
+     bits 7:0  the byte, bit-reversed (OUT shifts LSB first; I2C is MSB
+               first). 0xFF to read a byte.
+     bit 8     the ACK slot: 1 when writing (release SDA so the target can
+               ACK); when reading, 0 = ACK (send more), 1 = NACK (last byte)
+     bit 9     1 = send STOP after this byte, ending the transaction
+   The first byte after idle (the address, with R/W in bit 0) gets a START.
+   RX FIFO, one word per byte as seen on the bus: bits 7:0 the byte,
+   bit-reversed; bit 8 the ACK slot, 0 = ACK, 1 = NACK. 0x200 = the bus was
+   stuck (SCL held low longer than TIMEOUT); the firmware then releases both
+   lines and returns to idle.
+
+   One property is deliberate: the RX word of a read's last byte has bit 8
+   set (the controller's NACK), which is exactly the "last byte" flag of the
+   SPI firmware's TX words. That is what lets [Bridge] below chain them. *)
+let i2c =
+  {|
+        .side_set 1
+idle:   pull                side 1     ; bus idle: both lines released
+        set pins, 0         side 1 [2] ; START: SDA falls while SCL is high
+byte:   set y, 8            side 0     ; SCL low; 9 bits: 8 data + ACK slot
+bit:    out pins, 1         side 0 [1] ; SDA = next bit while SCL is low
+        nop                 side 1     ; release SCL
+        wait 1 pin 1 timeout side 1    ; until SCL is really high: the target may stretch
+        in pins, 1          side 1     ; sample SDA
+        jmp y-- bit         side 0     ; SCL low
+        push                side 0     ; the byte and its ACK slot, as seen on the bus
+        out x, 1            side 0     ; X = STOP flag (word bit 9)
+        jmp !x next         side 0
+        set pins, 0         side 0     ; STOP: SDA low while SCL is low,
+        nop                 side 1     ; release SCL,
+        wait 1 pin 1 timeout side 1 [1]
+        set pins, 1         side 1     ; then SDA rises while SCL is high
+        jmp idle            side 1
+next:   pull                side 0     ; next byte; SCL held low until it arrives
+        jmp byte            side 0
+stuck:  mov isr, null       side 1     ; timeout vector: SCL never went high
+        in null, 9          side 1
+        set x, 1            side 1
+        in x, 1             side 1
+        push                side 1     ; report 0x200: bus stuck
+        set pins, 1         side 1     ; release SDA (side-set released SCL)
+        jmp idle            side 1
+|}
+;;
+
+(* Address of [stuck:] in [i2c]; the tests check it still points there. *)
+let i2c_stuck = 18
+
+(* Host-side words for [i2c]. *)
+let i2c_write_word ~stop byte = reverse_byte byte lor (1 lsl 8) lor (Bool.to_int stop lsl 9)
+let i2c_read_word ~last = 0xFF lor (Bool.to_int last lsl 8) lor (Bool.to_int last lsl 9)
+
+let i2c_config =
+  { Isa.Thread_config.default with
+    out_base = 0
+  ; out_count = 1
+  ; set_base = 0
+  ; set_count = 1
+  ; in_base = 0
+  ; sideset_base = 1
+  ; sideset_count = 1
+  ; timeout_vector = i2c_stuck
+  ; timeout = 10_000
+  ; clkdiv = 17
+  }
+;;
+
 (* Two protocols at once, one per thread, from one shared memory image:
    [spi_fast] on thread 0 (P0 SCK, P1 MOSI, P2 MISO, P3 CS_N) and [uart_tx]
    on thread 1 (P4 TX). Each program keeps its own host protocol on its own
@@ -264,10 +351,52 @@ module Two_protocols = struct
   let mode_bits = 0b01_01_00_01_01
 end
 
+(* An I2C-to-SPI bridge with no host in the data path: [i2c] on thread 0
+   reads a sensor, CHAIN carries each byte it pushes straight into thread
+   1's TX FIFO, and [spi_fast] on thread 1 sends it out. One SPI transfer
+   (CS low to CS high) mirrors one I2C read byte for byte, address byte
+   first, ending on the byte the controller NACKed. The host only queues the
+   I2C read commands, and drains the SPI device's replies from thread 1's
+   RX FIFO (or the SPI thread stalls once it has four).
+
+   Pins: P0 SDA, P1 SCL (open-drain); P2 SCK, P3 MOSI, P4 MISO, P5 CS_N
+   (push-pull, MISO input). [spi_fast] is position-independent apart from
+   its config, so it moves to P2..P5 by changing its bases. *)
+module Bridge = struct
+  let i2c_origin = 0
+  let i2c_program = Asm.assemble ~origin:i2c_origin i2c
+  let spi_origin = i2c_origin + Array.length i2c_program
+  let spi = Asm.assemble ~origin:spi_origin spi_fast
+  let image = Asm.link [ i2c_origin, i2c_program; spi_origin, spi ]
+  let i2c_config = { i2c_config with start = i2c_origin }
+
+  let spi_config =
+    { Isa.Thread_config.default with
+      start = spi_origin
+    ; sideset_base = 2
+    ; sideset_count = 1
+    ; out_base = 3
+    ; out_count = 3
+    ; in_base = 4
+    ; threshold = 8
+    }
+  ;;
+
+  (* P0, P1 open-drain; P2, P3, P5 push-pull; P4 input. *)
+  let mode_bits = 0b01_00_01_01_10_10
+
+  (* Host words for one I2C read of [count] bytes from [address]. *)
+  let read_command ~address ~count =
+    i2c_write_word ~stop:false ((address lsl 1) lor 1)
+    :: List.init count ~f:(fun i -> i2c_read_word ~last:(i = count - 1))
+  ;;
+end
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo
   ; "i2c_controller", i2c_controller
   ; "spi_controller", spi_controller
   ; "spi_fast", spi_fast
+  ; "i2c", i2c
   ]

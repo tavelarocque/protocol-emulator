@@ -39,6 +39,7 @@ module Thread_in = struct
     ; timeout : 'a [@bits 16] (* max cycles a [wait ... timeout] stalls *)
     ; sideset_base : 'a [@bits 3]
     ; sideset_count : 'a [@bits 2] (* top bits of the delay field that are side-set *)
+    ; clkdiv : 'a [@bits 16] (* one tick every [clkdiv] cycles; 0 and 1: every cycle *)
     ; tx_push : 'a
     ; tx_data : 'a [@bits 16]
     ; rx_pop : 'a
@@ -63,6 +64,7 @@ module Thread_out = struct
     ; delay_left : 'a [@bits 4]
     ; waiting : 'a
     ; wait_count : 'a [@bits 16]
+    ; div_count : 'a [@bits 16]
     }
   [@@deriving hardcaml]
 end
@@ -76,6 +78,7 @@ module I = struct
     ; prog_data : 'a [@bits 16]
     ; pin_modes : 'a [@bits 16] (* 2 bits per pin: 0 input, 1 push-pull, 2 open-drain *)
     ; pins_in : 'a [@bits 8]
+    ; chain : 'a (* thread 0's RX FIFO feeds thread 1's TX FIFO *)
     ; t0 : 'a Thread_in.t [@rtlprefix "t0_"]
     ; t1 : 'a Thread_in.t [@rtlprefix "t1_"]
     }
@@ -101,7 +104,7 @@ end
    and asserts that both the differential test and the formal proof catch
    it. The first five are in a thread's datapath and are planted in thread 1
    only, so catching them proves the tests really exercise the second
-   thread. The last two are in how the threads are put together. *)
+   thread. The rest are in how the threads are put together. *)
 module Mutation = struct
   type t =
     | Xdec_never_decrements
@@ -111,6 +114,7 @@ module Mutation = struct
     | Push_not_right_justified
     | Pin_priority_inverted (* thread 0 wins a pin both threads write *)
     | Fetch_port_crossed (* thread 1 fetches from thread 0's pc *)
+    | Chain_ignores_full (* the chain moves a word into a full FIFO, losing it *)
   [@@deriving sexp_of, enumerate, equal]
 end
 
@@ -178,6 +182,7 @@ end
 module Step_in = struct
   type 'a t =
     { enable : 'a
+    ; tick : 'a (* from the thread's clock divider; low: hold everything *)
     ; instr : 'a [@bits 16]
     ; lines : 'a [@bits 8]
     ; tx_empty : 'a
@@ -244,7 +249,7 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
     let c = select instr 3 0 in
     mux2 (c ==:. 0) (of_int ~width:5 16) (uresize c 5)
   in
-  let executing = i.enable &: (s.delay_left ==:. 0) in
+  let executing = i.enable &: i.tick &: (s.delay_left ==:. 0) in
   let x_nz = s.x <>:. 0 in
   let y_nz = s.y <>:. 0 in
   (* JMP *)
@@ -340,6 +345,9 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
         ; waiting <--. 0
         ; wait_count <--. 0
         ]
+      @@ elif
+           ~:(i.tick)
+           [ (* Between clock-divider ticks: nothing changes. *) ]
       @@ elif
            (s.delay_left <>:. 0)
            [ delay_left <-- s.delay_left -:. 1 ]
@@ -472,20 +480,47 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
     let pc = List.nth_exn pcs (if n = 1 && is Fetch_port_crossed then 0 else n) in
     mux pc program
   in
+  (* --- Clock dividers: the thread ticks when its counter is 0, then
+     reloads it with [clkdiv - 1]. Held at 0 while disabled, so a thread's
+     first enabled cycle is a tick. --- *)
+  let dividers =
+    List.map threads ~f:(fun (n, _) ->
+      let ti = I.thread i n in
+      let d = wire 16 in
+      let q = reg spec d -- sprintf "t%d_div_count" n in
+      let tick = q ==:. 0 in
+      d
+      <== mux2
+            ~:(ti.enable)
+            (zero 16)
+            (mux2 tick (mux2 (ti.clkdiv ==:. 0) (zero 16) (ti.clkdiv -:. 1)) (q -:. 1));
+      q, tick)
+  in
   (* --- FIFOs. The thread-side strobes are wires, assigned when the
-     thread's step is built. --- *)
+     thread's step is built. With [chain] set, a mover takes thread 0's RX
+     head into thread 1's TX FIFO whenever the first is non-empty and the
+     second not full (both judged at the start of the cycle), and the host
+     loses access to those two ends. --- *)
+  let move = wire 1 in
+  let move_data = wire 16 in
   let fifos =
     List.map threads ~f:(fun (n, _) ->
       let ti = I.thread i n in
       let pull = wire 1 in
       let push = wire 1 in
       let push_value = wire 16 in
+      let host_push, host_data =
+        if n = 1
+        then move |: (ti.tx_push &: ~:(i.chain)), mux2 move move_data ti.tx_data
+        else ti.tx_push, ti.tx_data
+      in
+      let host_pop = if n = 0 then move |: (ti.rx_pop &: ~:(i.chain)) else ti.rx_pop in
       let tx =
         Tiny_fifo.create
           ~name:(sprintf "t%d_tx" n)
           spec
-          ~push:ti.tx_push
-          ~data:ti.tx_data
+          ~push:host_push
+          ~data:host_data
           ~pop:pull
       in
       let rx =
@@ -494,10 +529,15 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
           spec
           ~push
           ~data:push_value
-          ~pop:ti.rx_pop
+          ~pop:host_pop
       in
       pull, push, push_value, tx, rx)
   in
+  (let _, _, _, _, (rx0 : Tiny_fifo.t) = List.nth_exn fifos 0 in
+   let _, _, _, (tx1 : Tiny_fifo.t), _ = List.nth_exn fifos 1 in
+   let room = if is Chain_ignores_full then vdd else ~:(tx1.full) in
+   move <== (i.chain &: ~:(rx0.empty) &: room);
+   move_data <== rx0.head);
   (* --- Step the threads in priority order, threading the pin value
      through: the later thread's writes land on top. --- *)
   let order = if is Pin_priority_inverted then [ 1; 0 ] else [ 0; 1 ] in
@@ -520,6 +560,7 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
         step
           { q with pin_out = pins_so_far }
           { Step_in.enable = ti.enable
+          ; tick = snd (List.nth_exn dividers n)
           ; instr = fetch n
           ; lines
           ; tx_empty = tx.empty
@@ -571,6 +612,7 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
     ; delay_left = q.delay_left
     ; waiting = q.waiting
     ; wait_count = q.wait_count
+    ; div_count = fst (List.nth_exn dividers n)
     }
   in
   { O.pin_out; pads_out; pads_oe; t0 = thread_out 0; t1 = thread_out 1 }

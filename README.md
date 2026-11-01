@@ -10,7 +10,8 @@ fixed logic. Written in Hardcaml, taped out through
 [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (6x4 tiles).
 
 **Status:** a complete two-thread chip running all three required protocols,
-two at a time. An SPI host port loads firmware and configuration into a
+two at a time, including an I2C-to-SPI bridge that runs with no host in the
+data path. An SPI host port loads firmware and configuration into a
 PIO-style core: two threads sharing a 64-word program memory and 8 protocol
 pins (input, push-pull or open-drain each). UART TX, I2C controller (with clock
 stretching and timeouts) and SPI controller firmware, loaded over SPI, run on
@@ -28,6 +29,8 @@ The instruction set ([`docs/isa.md`](docs/isa.md)) follows the RP2040's PIO:
 - two threads, each with its own PC, registers, FIFOs and configuration,
   running every cycle from one shared program memory; when both write a pin
   in the same cycle, thread 1 wins
+- a clock divider per thread, and CHAIN, which feeds thread 0's output
+  straight into thread 1
 
 It departs from PIO where PIO is weakest for protocol emulation:
 
@@ -41,14 +44,18 @@ It departs from PIO where PIO is weakest for protocol emulation:
 
 Firmware ([`model/firmware.ml`](model/firmware.ml)): UART TX in 15
 instructions, SPI controller in 27 (9 cycles per bit), side-set SPI in 26 (2
-cycles per bit, 5 Mbit/s at 10 MHz), I2C controller in 49 (program memory is 64
-words). The assembler places a program at any origin, so two fit in one image:
-side-set SPI at 0 and UART at 26 is the two-thread demo. The ISA is at v1.1:
+cycles per bit, 5 Mbit/s at 10 MHz), I2C controller in 49 (writes only, timed
+by loops), and I2C controller with reads in 25 (timed by the clock divider);
+program memory is 64 words. The assembler places a program at any origin, so
+two fit in one image: side-set SPI beside UART, and the bridge, divider I2C
+beside side-set SPI with CHAIN carrying every byte read over I2C out over SPI.
+The ISA is at v1.2:
 writing the I2C controller showed that 32 words was too small and that a wait
 timeout counted down in Y could never exceed one half bit-period, so the memory
 doubled and timeouts got their own counter; writing SPI showed that toggling a
 clock with a separate instruction costs most of the bit time, so side-set
-followed.
+followed; building the bridge showed that the I2C controller's delay loops
+were a third of its size, so the clock divider followed.
 
 ## Verification
 
@@ -62,7 +69,7 @@ independent protocol oracles.
 | ISA encoding | all 65,536 instruction words | exhaustive encode/decode and disassemble/assemble round trips |
 | Firmware | UART TX on the model | cycle-exact against an ideal waveform, plus a mid-bit-sampling receiver, over random bytes and baud rates |
 | Core RTL | `hw/pe_core.ml` against the model | lockstep differential test: 400 random programs × 300 cycles, both threads with random configs, random pins, host traffic on both threads and threads enabled and disabled at random; the full state of both threads and the pins compared every cycle |
-| Two threads | demo image on the model and the chip | SPI and UART running together, each judged by its own oracle; isolation: the SPI waveform is identical, cycle for cycle, whether or not the UART thread runs |
+| Two threads | demo images on the model and the chip | SPI and UART running together, each judged by its own oracle; isolation: the SPI waveform is identical, cycle for cycle, whether or not the UART thread runs; the bridge: an I2C read (checked by the I2C oracles) comes out as one SPI transfer (checked by the SPI oracles), with the host never touching the data |
 | Whole chip | `hw/top.ml` through its pins only | bit-banged SPI host: register read-back, echo firmware through both FIFOs, UART firmware decoded on the pin |
 | Protocols | UART, I2C, SPI firmware | independent protocol oracles on the pins: UART waveform + receiver; I2C bus checker + target device that ACKs and stretches SCL; SPI mode-0 checker + slave with scripted responses |
 | Silicon netlist | post-layout gates | the same chip-level tests in cocotb, with separate Python protocol models, on RTL and gate-level netlist |
@@ -77,11 +84,11 @@ has not been shown to work.
 | Layer | Planted bugs | Caught |
 |---|---|---|
 | UART bring-up | 3 (short stop bit, MSB-first, slow bits) | 3, with the oracle that caught each |
-| Core RTL | 7: five datapath bugs planted in thread 1 only (X never decrements, timeout ignores budget, delay ignored, SET ignores pin count, PUSH not right-justified), and two in how the threads are joined (pin priority inverted, thread 1 fetching from thread 0's PC) | all 7, within 21 random programs |
+| Core RTL | 8: five datapath bugs planted in thread 1 only (X never decrements, timeout ignores budget, delay ignored, SET ignores pin count, PUSH not right-justified), and three in how the threads are joined (pin priority inverted, thread 1 fetching from thread 0's PC, CHAIN moving a word into a full FIFO) | all 8, within 25 random programs |
 | Firmware | start bit 1 cycle short, wrong loop condition | both |
 | SPI port | MISO shifts one edge early | 3 of 4 system tests |
-| Formal proof | the same 7 core bugs | all 7 refuted with SAT counterexamples |
-| I2C firmware | SDA moved before SCL falls | caught by the bus checker |
+| Formal proof | the same 8 core bugs | all 8 refuted with SAT counterexamples |
+| I2C firmware | SDA moved before SCL falls; STOP raised with SCL low (divider version) | both, by the bus checker |
 | SPI firmware | MOSI moved after SCK rises | caught by the mode-0 checker |
 
 Two oracles exist because each misses things alone. A start bit one cycle
@@ -107,12 +114,11 @@ difference in the RX FIFO's data wires that never reaches behaviour; the spec
 now matches. See [`docs/related-work.md`](docs/related-work.md) for the
 literature this draws on.
 
-Two limits found while building the two-thread demo, both recorded in
+One limit found while building the bridge, recorded in
 [`docs/isa.md`](docs/isa.md): nothing in the ISA can reverse a word's bit
-order, so a thread cannot bridge an MSB-first protocol into an LSB-first one;
-and the I2C controller's delay loops take a third of its 49 words, so it does
-not fit beside fast SPI. A per-thread clock divider (as PIO has) would fix the
-second.
+order, so a thread cannot bridge an MSB-first protocol (SPI, I2C) into an
+LSB-first one (UART) by itself. MSB-first to MSB-first, as in the bridge,
+works.
 
 ## Layout
 

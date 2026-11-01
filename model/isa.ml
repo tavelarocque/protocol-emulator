@@ -278,6 +278,9 @@ module Thread_config = struct
     ; sideset_base : int (* first side-set pin *)
     ; sideset_count : int
       (* 0..3: how many of the delay field's top bits are side-set values *)
+    ; clkdiv : int
+      (* 0..65535: the thread executes one cycle in every [clkdiv]; 0 and 1
+         both mean every cycle *)
     }
   [@@deriving sexp_of]
 
@@ -293,6 +296,7 @@ module Thread_config = struct
     ; timeout = 0
     ; sideset_base = 0
     ; sideset_count = 0
+    ; clkdiv = 0
     }
   ;;
 end
@@ -309,7 +313,8 @@ module Thread = struct
     ; mutable osr_count : int (* bits shifted out since the last refill *)
     ; mutable delay_left : int
     ; mutable waiting : bool (* stalled in a [wait ... timeout] *)
-    ; mutable wait_count : int (* cycles of that wait's budget left *)
+    ; mutable wait_count : int (* ticks of that wait's budget left *)
+    ; mutable div_count : int (* cycles until the thread's next tick *)
     ; tx_fifo : int Queue.t (* host -> thread *)
     ; rx_fifo : int Queue.t (* thread -> host *)
     ; mutable enabled : bool
@@ -328,7 +333,8 @@ module Thread = struct
     t.osr_count <- t.config.threshold (* OSR starts empty *);
     t.delay_left <- 0;
     t.waiting <- false;
-    t.wait_count <- 0
+    t.wait_count <- 0;
+    t.div_count <- 0
   ;;
 
   let create (config : Thread_config.t) =
@@ -343,6 +349,7 @@ module Thread = struct
     ; delay_left = 0
     ; waiting = false
     ; wait_count = 0
+    ; div_count = 0
     ; tx_fifo = Queue.create ()
     ; rx_fifo = Queue.create ()
     ; enabled = true
@@ -354,6 +361,8 @@ type t =
   { program : Instruction.t array
   ; pin_modes : Pin_mode.t array
   ; threads : Thread.t array
+  ; mutable chain : bool
+    (* thread 0's RX FIFO feeds thread 1's TX FIFO, one word per cycle *)
   ; mutable pin_out : int
   ; mutable cycle : int
   }
@@ -372,6 +381,7 @@ let create ~program ~pin_modes ~threads =
   { program
   ; pin_modes = Array.copy pin_modes
   ; threads = Array.of_list_map threads ~f:Thread.create
+  ; chain = false
   ; pin_out = mask num_pins (* all high: idle for UART, released for open-drain *)
   ; cycle = 0
   }
@@ -431,10 +441,9 @@ let eval_cond (th : Thread.t) (cond : Cond.t) =
   | Isr_not_full -> th.isr_count < th.config.threshold
 ;;
 
-let exec t (th : Thread.t) ~lines_now ~pin_out =
-  if not th.enabled
-  then Thread.reset th
-  else if th.delay_left > 0
+(* One tick of a thread: count down a delay, or execute an instruction. *)
+let tick t (th : Thread.t) ~lines_now ~pin_out =
+  if th.delay_left > 0
   then th.delay_left <- th.delay_left - 1
   else (
     let cfg = th.config in
@@ -549,28 +558,64 @@ let exec t (th : Thread.t) ~lines_now ~pin_out =
       th.delay_left <- delay)
 ;;
 
+let exec t (th : Thread.t) ~lines_now ~pin_out =
+  if not th.enabled
+  then Thread.reset th
+  else if th.div_count > 0
+  then
+    (* The clock divider: between ticks the thread does nothing at all,
+       so delays, wait timeouts and side-set all count in ticks. *)
+    th.div_count <- th.div_count - 1
+  else (
+    th.div_count <- max 0 (th.config.clkdiv - 1);
+    tick t th ~lines_now ~pin_out)
+;;
+
 (* One clock cycle. Every thread sees the same snapshot of the pins; pin
    writes take effect at the end of the cycle; if two threads write the same
-   pin in the same cycle, the higher-numbered thread wins. *)
+   pin in the same cycle, the higher-numbered thread wins.
+
+   With [chain] set, one word moves from thread 0's RX FIFO to thread 1's TX
+   FIFO in any cycle that starts with the first non-empty and the second not
+   full. Like every FIFO rule here it is judged at the start of the cycle,
+   so a word thread 0 pushes is not available to thread 1 until the cycle
+   after it moves. *)
 let step t ~inputs =
   let lines_now = lines t ~inputs in
   let pin_out = ref t.pin_out in
+  let move =
+    t.chain
+    && Array.length t.threads = 2
+    && (not (Queue.is_empty t.threads.(0).rx_fifo))
+    && Queue.length t.threads.(1).tx_fifo < fifo_depth
+  in
   Array.iter t.threads ~f:(fun th -> exec t th ~lines_now ~pin_out);
+  if move then Queue.enqueue t.threads.(1).tx_fifo (Queue.dequeue_exn t.threads.(0).rx_fifo);
   t.pin_out <- !pin_out;
   t.cycle <- t.cycle + 1
 ;;
 
-(* Host side of the FIFOs. [push_tx] returns false if the FIFO is full. *)
+(* Host side of the FIFOs. [push_tx] returns false if the FIFO is full.
+   While [chain] is set the host cannot push to thread 1 or pop from thread
+   0: those ends belong to the chain. *)
+let chained t ~thread ~end_ =
+  t.chain && Array.length t.threads = 2 && thread = (match end_ with `Tx -> 1 | `Rx -> 0)
+;;
+
 let push_tx t ~thread v =
   let q = t.threads.(thread).tx_fifo in
-  if Queue.length q >= fifo_depth
+  if Queue.length q >= fifo_depth || chained t ~thread ~end_:`Tx
   then false
   else (
     Queue.enqueue q (v land word_mask);
     true)
 ;;
 
-let pop_rx t ~thread = Queue.dequeue t.threads.(thread).rx_fifo
+let pop_rx t ~thread =
+  if chained t ~thread ~end_:`Rx then None else Queue.dequeue t.threads.(thread).rx_fifo
+;;
+
+let set_chain t b = t.chain <- b
 
 (* Threads are enabled when created. While disabled, a thread is held in
    its initial state from the next step on, as the hardware's enable bit

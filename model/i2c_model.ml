@@ -4,9 +4,12 @@
    The bus is two open-drain lines with pull-ups: a line is low if any
    device pulls it low. Everything here runs one step per core clock cycle.
 
-   [Target] is a simulated I2C device: it watches for START, clocks in
-   bytes on SCL rising edges, ACKs its own address and every data byte
-   after it, and can stretch the clock (hold SCL low) after each byte.
+   [Target] is a simulated I2C device: it watches for START, ACKs its own
+   address, and can stretch the clock (hold SCL low) after each byte. Written
+   to (address + W), it clocks in bytes on SCL rising edges and ACKs each.
+   Read from (address + R), it shifts its scripted bytes out MSB first,
+   changing SDA only while SCL is low, and stops sending when the
+   controller NACKs.
 
    [Checker] is a passive bus monitor. It decodes START, STOP, bytes and
    ACK/NACK from the two lines alone, and flags protocol violations. It
@@ -99,7 +102,9 @@ module Target = struct
     | Idle
     | Receiving of int (* bits received so far in this byte *)
     | Acking (* holding SDA low through the ninth clock *)
-    | Ignoring (* address did not match: wait for STOP *)
+    | Sending of int (* bits of [out_byte] already sent *)
+    | Controller_ack (* SDA released; the controller ACKs or NACKs *)
+    | Ignoring (* not addressed, or the read ended: wait for STOP *)
 
   type t =
     { address : int (* 7-bit *)
@@ -110,10 +115,15 @@ module Target = struct
     ; mutable stretch_left : int
     ; mutable prev_sda : bool
     ; mutable prev_scl : bool
+    ; mutable reading : bool (* this transaction is a read *)
+    ; mutable out_byte : int
+    ; mutable acked : bool (* the controller's answer on the ninth clock *)
+    ; to_send : int Queue.t (* scripted bytes for reads; 0xFF when empty *)
+    ; sent : int Queue.t
     ; received : int Queue.t (* data bytes written to this device *)
     }
 
-  let create ~address ~stretch =
+  let create ?(to_send = []) ~address ~stretch () =
     { address
     ; stretch
     ; phase = Idle
@@ -122,13 +132,31 @@ module Target = struct
     ; stretch_left = 0
     ; prev_sda = true
     ; prev_scl = true
+    ; reading = false
+    ; out_byte = 0xFF
+    ; acked = false
+    ; to_send = Queue.of_list to_send
+    ; sent = Queue.create ()
     ; received = Queue.create ()
     }
   ;;
 
+  let load_next t =
+    t.out_byte <- Option.value (Queue.dequeue t.to_send) ~default:0xFF;
+    Queue.enqueue t.sent t.out_byte
+  ;;
+
   (* What the target drives this cycle, decided from its state at the start
      of the cycle: (pull SDA low, pull SCL low). *)
-  let drive t = (match t.phase with Acking -> true | _ -> false), t.stretch_left > 0
+  let drive t =
+    let sda_low =
+      match t.phase with
+      | Acking -> true
+      | Sending n -> (t.out_byte lsr (7 - n)) land 1 = 0
+      | _ -> false
+    in
+    sda_low, t.stretch_left > 0
+  ;;
 
   (* Observe the resolved bus levels for this cycle and update state. *)
   let step t ~sda ~scl =
@@ -142,7 +170,8 @@ module Target = struct
        then (
          t.phase <- Receiving 0;
          t.shift <- 0;
-         t.first_byte <- true)
+         t.first_byte <- true;
+         t.reading <- false)
        else t.phase <- Idle)
      else
        match t.phase with
@@ -154,7 +183,8 @@ module Target = struct
          if t.first_byte
          then (
            let addr = t.shift lsr 1 and read = t.shift land 1 = 1 in
-           if addr = t.address && not read then t.phase <- Acking else t.phase <- Ignoring)
+           t.reading <- read;
+           if addr = t.address then t.phase <- Acking else t.phase <- Ignoring)
          else (
            Queue.enqueue t.received t.shift;
            t.phase <- Acking)
@@ -162,14 +192,29 @@ module Target = struct
          (* End of the ACK clock: release SDA, maybe stretch, next byte. *)
          t.first_byte <- false;
          t.shift <- 0;
-         t.phase <- Receiving 0;
-         t.stretch_left <- t.stretch
+         t.stretch_left <- t.stretch;
+         if t.reading
+         then (
+           load_next t;
+           t.phase <- Sending 0)
+         else t.phase <- Receiving 0
+       | Sending n when fall ->
+         t.phase <- (if n = 7 then Controller_ack else Sending (n + 1))
+       | Controller_ack when rise -> t.acked <- not sda
+       | Controller_ack when fall ->
+         if t.acked
+         then (
+           load_next t;
+           t.stretch_left <- t.stretch;
+           t.phase <- Sending 0)
+         else t.phase <- Ignoring
        | _ -> ());
     t.prev_sda <- sda;
     t.prev_scl <- scl
   ;;
 
   let received t = Queue.to_list t.received
+  let sent t = Queue.to_list t.sent
 end
 
 (* --- A reference controller, for testing the two models above ----------- *)
@@ -186,6 +231,21 @@ module Reference_controller = struct
     | Wait_scl_high
     | Hold of int
 
+  let start ~half =
+    [ Drive { sda = true; scl = true }; Hold half; Drive { sda = false; scl = true }; Hold half ]
+  ;;
+
+  let stop ~half =
+    [ Drive { sda = false; scl = false }
+    ; Hold half
+    ; Drive { sda = false; scl = true }
+    ; Wait_scl_high
+    ; Hold half
+    ; Drive { sda = true; scl = true }
+    ; Hold half
+    ]
+  ;;
+
   let write ~address ~bytes ~half =
     let bit b =
       [ Drive { sda = b; scl = false }
@@ -197,16 +257,31 @@ module Reference_controller = struct
       ]
     in
     let byte v = List.concat_map (List.init 8 ~f:(fun i -> (v lsr (7 - i)) land 1 = 1)) ~f:bit @ bit true in
-    [ Drive { sda = true; scl = true }; Hold half; Drive { sda = false; scl = true }; Hold half ]
+    start ~half
     @ List.concat_map ((address lsl 1) :: bytes) ~f:byte
-    @ [ Drive { sda = false; scl = false }
+    @ stop ~half
+  ;;
+
+  (* An ideal I2C read of [count] bytes: the controller releases SDA for the
+     data bits and ACKs every byte except the last, which it NACKs. *)
+  let read ~address ~count ~half =
+    let bit b =
+      [ Drive { sda = b; scl = false }
       ; Hold half
-      ; Drive { sda = false; scl = true }
+      ; Drive { sda = b; scl = true }
       ; Wait_scl_high
       ; Hold half
-      ; Drive { sda = true; scl = true }
-      ; Hold half
+      ; Drive { sda = b; scl = false }
       ]
+    in
+    let address_byte =
+      List.concat_map
+        (List.init 8 ~f:(fun i -> (((address lsl 1) lor 1) lsr (7 - i)) land 1 = 1))
+        ~f:bit
+      @ bit true
+    in
+    let data i = List.concat (List.init 8 ~f:(fun _ -> bit true)) @ bit (i = count - 1) in
+    start ~half @ address_byte @ List.concat (List.init count ~f:data) @ stop ~half
   ;;
 
   (* Run the controller against [target], returning the resolved bus levels
