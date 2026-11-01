@@ -5,14 +5,22 @@
       words, each from a random state with random inputs and configuration.
       This anchors the spec to the model everything else is tested against.
 
-   2. The equivalence proof. The chip core is built twice: once with its
-      real datapath, once with the spec substituted for it, everything else
-      identical. Hardcaml's sequential equivalence checker cuts both circuits
-      at their registers, so every register becomes a free variable, and asks
-      a SAT solver whether any state and any inputs make the next-state or
-      outputs differ. UNSAT is a proof: one clock of the RTL equals one step
-      of the spec, for every state, instruction word, pin input, FIFO state
-      and configuration.
+   2. The equivalence proof. The two-thread core is built twice: once with
+      its real datapath in both threads, once with the spec substituted in
+      both, everything else identical. Hardcaml's sequential equivalence
+      checker cuts both circuits at their registers, so every register
+      becomes a free variable, and asks a SAT solver whether any state and
+      any inputs make the next-state or outputs differ. UNSAT is a proof: one
+      clock of the RTL equals one step of the spec in each thread, for every
+      state of both threads, instruction word, pin input, FIFO state and
+      configuration, including thread 1 starting from whatever pin value
+      thread 0 just produced.
+
+      What the proof does not cover: the code that composes the threads
+      (shared memory read ports, pin priority, per-thread FIFOs) is the same
+      in both builds. That part is checked by the differential test in
+      test_core.ml against the reference model, which composes threads its
+      own way.
 
    3. Test the proof: every planted RTL bug must make it SAT, with a
       counterexample. A proof that cannot fail proves nothing. *)
@@ -221,5 +229,7 @@ let%expect_test "every planted RTL bug is refuted with a counterexample" =
     Delay_field_ignored          SAT: counterexample found
     Set_pins_count_off_by_one    SAT: counterexample found
     Push_not_right_justified     SAT: counterexample found
+    Pin_priority_inverted        SAT: counterexample found
+    Fetch_port_crossed           SAT: counterexample found
     |}]
 ;;

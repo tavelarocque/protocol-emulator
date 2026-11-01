@@ -225,6 +225,45 @@ next:   pull                side 0 ; next byte; SCK stays low until it arrives
 |}
 ;;
 
+(* Two protocols at once, one per thread, from one shared memory image:
+   [spi_fast] on thread 0 (P0 SCK, P1 MOSI, P2 MISO, P3 CS_N) and [uart_tx]
+   on thread 1 (P4 TX). Each program keeps its own host protocol on its own
+   thread's FIFOs; neither knows the other exists. The UART program is
+   assembled to run from just after the SPI one. *)
+module Two_protocols = struct
+  let spi_origin = 0
+  let spi = Asm.assemble ~origin:spi_origin spi_fast
+  let uart_origin = spi_origin + Array.length spi
+  let uart = Asm.assemble ~origin:uart_origin uart_tx
+  let image = Asm.link [ spi_origin, spi; uart_origin, uart ]
+
+  let spi_config =
+    { Isa.Thread_config.default with
+      start = spi_origin
+    ; sideset_base = 0
+    ; sideset_count = 1
+    ; out_base = 1
+    ; out_count = 3
+    ; in_base = 2
+    ; threshold = 8
+    }
+  ;;
+
+  let uart_config =
+    { Isa.Thread_config.default with
+      start = uart_origin
+    ; out_base = 4
+    ; out_count = 1
+    ; set_base = 4
+    ; set_count = 1
+    ; threshold = 8
+    }
+  ;;
+
+  (* P0, P1, P3, P4 push-pull; P2 (MISO) and the rest inputs. *)
+  let mode_bits = 0b01_01_00_01_01
+end
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo

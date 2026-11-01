@@ -18,7 +18,11 @@
      set  pins|x|y, N       (N = 0..31)
 
    [Isa.Instruction.to_string] produces this same syntax, and the test suite
-   checks that disassembling then reassembling any 16-bit word round-trips. *)
+   checks that disassembling then reassembling any 16-bit word round-trips.
+
+   Both threads run from one shared program memory, so a program can be
+   assembled to run from any [origin]: labels then resolve to absolute
+   addresses from there. [link] places several programs in one image. *)
 
 open! Core
 open Isa
@@ -85,7 +89,7 @@ let parse_mov_loc ~line = function
   | s -> error ~line (sprintf "bad MOV operand %S" s)
 ;;
 
-let assemble (source : string) : Instruction.t array =
+let assemble ?(origin = 0) (source : string) : Instruction.t array =
   (* Pass 1: strip comments, peel off labels, assign addresses. *)
   let labels = Hashtbl.create (module String) in
   let body = Queue.create () in
@@ -114,17 +118,20 @@ let assemble (source : string) : Instruction.t array =
         let lbl = String.strip lbl in
         if Hashtbl.mem labels lbl then error ~line (sprintf "duplicate label %S" lbl);
         (* A label names the address of the next instruction. *)
-        Hashtbl.set labels ~key:lbl ~data:(Queue.length body);
+        Hashtbl.set labels ~key:lbl ~data:(origin + Queue.length body);
         String.strip rest
       | _ -> text
     in
     if not (String.is_empty text) then Queue.enqueue body (line, text));
   let body = Queue.to_list body in
-  if List.length body > program_size
+  if origin < 0 || origin + List.length body > program_size
   then
     raise_s
       [%message
-        "program too long" ~instructions:(List.length body : int) (program_size : int)];
+        "program does not fit"
+          (origin : int)
+          ~instructions:(List.length body : int)
+          (program_size : int)];
   (* Pass 2: parse each instruction. *)
   List.map body ~f:(fun (line, text) ->
     let num tok =
@@ -187,4 +194,23 @@ let assemble (source : string) : Instruction.t array =
      | exn -> error ~line (Exn.to_string exn));
     instr)
   |> Array.of_list
+;;
+
+(* One memory image from programs assembled at their origins. Words no
+   program uses are 0, which decodes as "jmp 0". Overlaps are an error. *)
+let link (parts : (int * Instruction.t array) list) : Instruction.t array =
+  let image = Array.create ~len:program_size None in
+  List.iter parts ~f:(fun (origin, program) ->
+    Array.iteri program ~f:(fun k instr ->
+      let a = origin + k in
+      if a >= program_size
+      then raise_s [%message "program does not fit" (origin : int) (a : int)];
+      if Option.is_some image.(a)
+      then raise_s [%message "programs overlap" (a : int)];
+      image.(a) <- Some instr));
+  (* Trim after the last used word, so loading the image writes no more
+     than it needs to. *)
+  let length = ref 0 in
+  Array.iteri image ~f:(fun a w -> if Option.is_some w then length := a + 1);
+  Array.init !length ~f:(fun a -> Option.value image.(a) ~default:(Instruction.decode 0))
 ;;

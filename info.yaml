@@ -37,12 +37,12 @@ pinout:
 
   # Outputs
   uo[0]: "MISO"
-  uo[1]: "RUNNING"
-  uo[2]: "RX_READY"
-  uo[3]: "TX_FULL"
-  uo[4]: ""
-  uo[5]: ""
-  uo[6]: ""
+  uo[1]: "T0_RUNNING"
+  uo[2]: "T0_RX_READY"
+  uo[3]: "T0_TX_FULL"
+  uo[4]: "T1_RUNNING"
+  uo[5]: "T1_RX_READY"
+  uo[6]: "T1_TX_FULL"
   uo[7]: ""
 
   # Bidirectional pins

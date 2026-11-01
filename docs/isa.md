@@ -36,8 +36,9 @@ weakest for this job:
 
 - **Program memory:** 64 words of 16 bits, shared by all threads. Resets to
   0, which decodes as `jmp 0`.
-- **Threads:** 2 in the spec and model (1 in the first hardware build). Each
-  has its own PC, configuration, registers and FIFOs.
+- **Threads:** 2. Each has its own PC, configuration, registers and FIFOs,
+  and its own read port into the shared program memory, so both execute an
+  instruction every cycle.
 - **Per-thread registers**, all 16 bits:
   - `X`, `Y`: scratch and loop counters.
   - `OSR` (output shift register), with a count of bits shifted out since
@@ -202,20 +203,22 @@ the TX FIFO is empty.
 **`set dst, value`** writes a 5-bit immediate to `pins` (`set_count` pins
 from `set_base`), `x` or `y`.
 
-## Host interface (planned)
+## Host interface
 
 The host talks to the chip over a small SPI slave port on the dedicated
 input/output pins: 3 inputs (SCK, CS, MOSI) and 1 output (MISO). Through it
-the host can:
+the host:
 
-- write program memory
-- write thread configuration and pin modes
-- enable or disable threads
-- push to TX FIFOs and pop from RX FIFOs
-- read status (FIFO levels, PCs)
+- writes program memory (one image for both threads; the assembler can
+  place each program at its own origin)
+- writes each thread's configuration, in two identical register banks
+- sets the pin modes, shared by both threads
+- enables threads through one CTRL register, so a single write can start or
+  stop both in the same cycle
+- pushes to each thread's TX FIFO and pops from its RX FIFO
+- reads status (FIFO levels, PCs)
 
-The 8 bidirectional pins are the protocol pins. The register map comes with
-the hardware design.
+The register map is in `docs/info.md` and `hw/top.ml`.
 
 ## Example: UART TX
 
@@ -246,7 +249,22 @@ rates.
   makes the low-speed USB stretch goal possible at all: at 10 MHz a USB
   low-speed bit is about 6.7 cycles.
 
+- **Hardware: two threads.** Not an ISA change: the spec and model always
+  had two threads. The chip now builds both, with per-thread register banks
+  (thread 1's at 0x50), one read port per thread into the shared memory, and
+  the pin rule above built structurally (thread 1's datapath starts from
+  thread 0's result). Programs written for one thread run unchanged.
+
 ## Open questions for review
+
+- **Bit order.** OUT and IN both shift right, so data leaves LSB first and
+  arrives MSB first, and nothing in the ISA can reverse a word. Protocols
+  that are MSB first (SPI, I2C) therefore take bit-reversed bytes from the
+  host, and a thread cannot bridge an MSB-first protocol into an LSB-first
+  one (UART) by itself. PIO solves this with a per-thread shift direction.
+- **Clock divider.** PIO's per-thread divider would delete the delay loops
+  that make up a third of the I2C controller (16 of 49 words), freeing
+  memory for a second program and for I2C reads.
 
 - **Autopush / autopull.** PIO has them. They save one instruction per word
   but complicate timing. Left out of v0.

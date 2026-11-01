@@ -40,3 +40,11 @@
   (with-stdout-to
    spi_fast.hex
    (run %{dep:../bin/firmware_hex.exe} spi_fast))))
+
+(rule
+ (targets two_protocols.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   two_protocols.hex
+   (run %{dep:../bin/firmware_hex.exe} two_protocols))))

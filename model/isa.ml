@@ -1,4 +1,4 @@
-(* Executable reference model of the protocol-emulator ISA (v0).
+(* Executable reference model of the protocol-emulator ISA.
 
    This is the specification in code form: docs/isa.md describes it in prose,
    and every hardware implementation of the core is checked against this
@@ -312,7 +312,24 @@ module Thread = struct
     ; mutable wait_count : int (* cycles of that wait's budget left *)
     ; tx_fifo : int Queue.t (* host -> thread *)
     ; rx_fifo : int Queue.t (* thread -> host *)
+    ; mutable enabled : bool
+      (* a disabled thread is held in its initial state; its FIFOs keep
+         their contents *)
     }
+
+  (* The state a thread starts in, and is held in while disabled. *)
+  let reset t =
+    t.pc <- t.config.start;
+    t.x <- 0;
+    t.y <- 0;
+    t.isr <- 0;
+    t.isr_count <- 0;
+    t.osr <- 0;
+    t.osr_count <- t.config.threshold (* OSR starts empty *);
+    t.delay_left <- 0;
+    t.waiting <- false;
+    t.wait_count <- 0
+  ;;
 
   let create (config : Thread_config.t) =
     { config
@@ -328,6 +345,7 @@ module Thread = struct
     ; wait_count = 0
     ; tx_fifo = Queue.create ()
     ; rx_fifo = Queue.create ()
+    ; enabled = true
     }
   ;;
 end
@@ -345,7 +363,7 @@ let create ~program ~pin_modes ~threads =
   then raise_s [%message "program too long" (Array.length program : int)];
   if Array.length pin_modes <> num_pins then raise_s [%message "need one mode per pin"];
   if List.is_empty threads || List.length threads > 2
-  then raise_s [%message "v0 supports 1 or 2 threads"];
+  then raise_s [%message "1 or 2 threads"];
   (* Unwritten program memory resets to 0, which decodes as "jmp 0". *)
   let program =
     Array.init program_size ~f:(fun i ->
@@ -414,7 +432,9 @@ let eval_cond (th : Thread.t) (cond : Cond.t) =
 ;;
 
 let exec t (th : Thread.t) ~lines_now ~pin_out =
-  if th.delay_left > 0
+  if not th.enabled
+  then Thread.reset th
+  else if th.delay_left > 0
   then th.delay_left <- th.delay_left - 1
   else (
     let cfg = th.config in
@@ -551,3 +571,8 @@ let push_tx t ~thread v =
 ;;
 
 let pop_rx t ~thread = Queue.dequeue t.threads.(thread).rx_fifo
+
+(* Threads are enabled when created. While disabled, a thread is held in
+   its initial state from the next step on, as the hardware's enable bit
+   does. *)
+let set_enabled t ~thread b = t.threads.(thread).enabled <- b

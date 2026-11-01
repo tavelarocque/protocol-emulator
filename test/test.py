@@ -77,16 +77,19 @@ async def load(dut, words):
         await write(dut, addr, w)
 
 
-async def push(dut, v):
-    while (await read(dut, STATUS)) & 0x7 >= FIFO_DEPTH:
-        pass
-    await write(dut, TX_FIFO, v)
+BANK1 = 0x10  # thread 1's registers are thread 0's plus this
 
 
-async def pop(dut):
-    while ((await read(dut, STATUS)) >> 4) & 0x7 == 0:
+async def push(dut, v, bank=0):
+    while (await read(dut, STATUS + bank)) & 0x7 >= FIFO_DEPTH:
         pass
-    return await read(dut, RX_FIFO)
+    await write(dut, TX_FIFO + bank, v)
+
+
+async def pop(dut, bank=0):
+    while ((await read(dut, STATUS + bank)) >> 4) & 0x7 == 0:
+        pass
+    return await read(dut, RX_FIFO + bank)
 
 
 def uart_decode(samples, divisor):
@@ -401,3 +404,54 @@ async def test_spi_fast(dut):
     """Side-set SPI firmware: 2 core clocks per bit."""
     await reset(dut)
     await spi_transfer(dut, fast=True)
+
+
+# --- Two threads ------------------------------------------------------------
+
+START = 0x41
+UART_ORIGIN = 26  # Firmware.Two_protocols.uart_origin; checked by the OCaml tests
+
+
+@cocotb.test()
+async def test_two_protocols(dut):
+    """Side-set SPI on thread 0 and UART on thread 1, running together from
+    one memory image, each checked by its own Python oracle."""
+    await reset(dut)
+    sent, responses = [0x3C, 0xC3, 0x01], [0x81, 0x7E, 0xF0]
+    divisor, data = 12, [0xA5, 0x0F, 0x80]
+    slave, monitor = SpiSlave(responses), SpiMonitor()
+    await load(dut, firmware("two_protocols"))
+    # Thread 0: SPI on P0..P3, SCK by side-set.
+    await write(dut, SIDESET, 0x10)
+    await write(dut, OUT_CFG, 0x31)
+    await write(dut, IN_BASE, 2)
+    # Thread 1: UART on P4, running from where the image put it.
+    await write(dut, START + BANK1, UART_ORIGIN)
+    await write(dut, OUT_CFG + BANK1, 0x14)
+    await write(dut, SET_CFG + BANK1, 0x14)
+    await write(dut, PIN_MODES, 0b01_01_00_01_01)  # P0, P1, P3, P4 push-pull
+    bus = cocotb.start_soon(spi_bus(dut, slave, monitor))
+    samples = []
+
+    async def record():
+        while True:
+            await RisingEdge(dut.clk)
+            samples.append((int(dut.uio_out.value) >> 4) & 1)
+
+    recorder = cocotb.start_soon(record())
+    await write(dut, CTRL, 0b11)  # both threads start in the same cycle
+    for w in [divisor - 4] + data:
+        await push(dut, w, bank=BANK1)
+    for i, b in enumerate(sent):
+        await push(dut, rev8(b) | ((i == len(sent) - 1) << 8))
+    got = [rev8((await pop(dut)) & 0xFF) for _ in sent]
+    await ClockCycles(dut.clk, (FIFO_DEPTH + 1) * (10 * divisor + 4))
+    bus.cancel()
+    recorder.cancel()
+    assert monitor.errors == [], monitor.errors
+    assert monitor.events == ["SELECT"] + list(zip(sent, responses)) + ["DESELECT"], monitor.events
+    assert slave.received == sent, f"slave got {slave.received}"
+    assert got == responses, f"host got {got}"
+    uart = uart_decode(samples, divisor)
+    assert uart == data, f"UART sent {data}, decoded {uart}"
+    assert int(dut.uo_out.value) & 0b10010 == 0b10010, "both threads reported running"

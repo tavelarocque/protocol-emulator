@@ -78,27 +78,29 @@ let transfer h ~write ~addr ~data =
 
 let write h addr data = ignore (transfer h ~write:true ~addr ~data : int)
 let read h addr = transfer h ~write:false ~addr ~data:0
-let tx_level h = read h Top.Addr.status land 0x7
-let rx_level h = (read h Top.Addr.status lsr 4) land 0x7
+let status ?(thread = 0) h = read h (Top.Addr.for_thread thread Top.Addr.status)
+let tx_level ?thread h = status ?thread h land 0x7
+let rx_level ?thread h = (status ?thread h lsr 4) land 0x7
 
-let load_firmware h source =
+let load_image h image =
   write h Top.Addr.ctrl 0;
-  Array.iteri (Asm.assemble source) ~f:(fun a instr ->
-    write h a (Isa.Instruction.encode instr))
+  Array.iteri image ~f:(fun a instr -> write h a (Isa.Instruction.encode instr))
 ;;
 
-let push h v =
-  while tx_level h >= Isa.fifo_depth do
+let load_firmware h source = load_image h (Asm.assemble source)
+
+let push ?(thread = 0) h v =
+  while tx_level ~thread h >= Isa.fifo_depth do
     ()
   done;
-  write h Top.Addr.tx_fifo v
+  write h (Top.Addr.for_thread thread Top.Addr.tx_fifo) v
 ;;
 
-let pop h =
-  while rx_level h = 0 do
+let pop ?(thread = 0) h =
+  while rx_level ~thread h = 0 do
     ()
   done;
-  read h Top.Addr.rx_fifo
+  read h (Top.Addr.for_thread thread Top.Addr.rx_fifo)
 ;;
 
 (* --- Register file ------------------------------------------------------ *)
@@ -115,20 +117,38 @@ let%test_unit "reset values" =
   [%test_result: int] (rx_level h) ~expect:0
 ;;
 
+let%test_unit "thread 1's bank resets like thread 0's, and the unused slots read 0" =
+  let h = create ~half:4 in
+  let t1 = Top.Addr.for_thread 1 in
+  [%test_result: int] (read h (t1 Top.Addr.out_cfg)) ~expect:0x10;
+  [%test_result: int] (read h (t1 Top.Addr.set_cfg)) ~expect:0x10;
+  [%test_result: int] (read h (t1 Top.Addr.threshold)) ~expect:8;
+  [%test_result: int] (status ~thread:1 h) ~expect:0;
+  write h (t1 Top.Addr.ctrl) 0xFFFF;
+  write h (t1 Top.Addr.pin_modes) 0xFFFF;
+  [%test_result: int] (read h (t1 Top.Addr.ctrl)) ~expect:0;
+  [%test_result: int] (read h (t1 Top.Addr.pin_modes)) ~expect:0;
+  [%test_result: int] (read h Top.Addr.ctrl) ~expect:0 ~message:"global CTRL untouched";
+  [%test_result: int] (read h Top.Addr.pin_modes) ~expect:0
+;;
+
 let%test_unit "configuration registers read back what was written" =
-  let registers =
+  let per_thread =
     Top.Addr.
-      [ ctrl, 0x1
-      ; start, 0x3F
+      [ start, 0x3F
       ; out_cfg, 0xFF
       ; set_cfg, 0xFF
       ; in_base, 0x7
       ; threshold, 0x1F
       ; timeout_vector, 0x3F
-      ; pin_modes, 0xFFFF
       ; timeout, 0xFFFF
       ; sideset, 0x3F
       ]
+  in
+  let registers =
+    Top.Addr.[ ctrl, 0x3; pin_modes, 0xFFFF ]
+    @ per_thread
+    @ List.map per_thread ~f:(fun (a, m) -> Top.Addr.for_thread 1 a, m)
   in
   Quickcheck.test
     (Quickcheck.Generator.both (Int.gen_incl 4 8) (Int.gen_incl 0 0xFFFF))
