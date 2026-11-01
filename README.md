@@ -54,6 +54,6 @@ dune promote    # accept expect-test output after checking the diff
 
 Updated weekly from the hardening reports.
 
-| Week | Design | Cells | Utilisation | Clock | Worst slack |
-|------|--------|-------|-------------|-------|-------------|
+| Week | Design | Std cells | Utilisation (6x4) | Timing target | Setup slack | Hold slack |
+|------|--------|-----------|-------------------|---------------|-------------|------------|
 | 1    | uart_tx | | | | |
