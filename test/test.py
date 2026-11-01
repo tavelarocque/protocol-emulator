@@ -279,7 +279,7 @@ async def test_i2c(dut):
 # P0 SCK, P1 MOSI, P3 CS_N are driven by the chip; P2 MISO by the slave.
 # Undriven pins read as the board pulls them: SCK low, CS_N high.
 
-OUT_CFG, IN_BASE = 0x42, 0x44
+OUT_CFG, IN_BASE, SIDESET = 0x42, 0x44, 0x4C
 
 
 def rev8(b):
@@ -356,26 +356,28 @@ async def spi_bus(dut, slave, monitor):
         sck = (out & 1) if oe & 1 else 0
         mosi = ((out >> 1) & 1) if oe & 2 else 0
         cs_n = ((out >> 3) & 1) if oe & 8 else 1
-        miso = slave.miso
-        dut.uio_in.value = miso << 2
-        monitor.step(sck, mosi, miso, cs_n)
+        monitor.step(sck, mosi, slave.miso, cs_n)
         slave.step(sck, mosi, cs_n)
+        # Respond before the chip's next sample (well under one clock, as
+        # real SPI devices do); the side-set firmware relies on it.
+        dut.uio_in.value = slave.miso << 2
 
 
-@cocotb.test()
-async def test_spi(dut):
-    """SPI controller firmware loaded over SPI, full duplex with a slave."""
-    await reset(dut)
+async def spi_transfer(dut, fast):
     sent, responses = [0x9F, 0x00, 0xA5], [0x11, 0xEF, 0x5A]
     slave, monitor = SpiSlave(responses), SpiMonitor()
-    await load(dut, firmware("spi_controller"))
-    await write(dut, SET_CFG, 0x10)  # SET drives SCK: base 0, count 1
+    if fast:
+        await load(dut, firmware("spi_fast"))
+        await write(dut, SIDESET, 0x10)  # side-set drives SCK: base 0, count 1
+    else:
+        await load(dut, firmware("spi_controller"))
+        await write(dut, SET_CFG, 0x10)  # SET drives SCK: base 0, count 1
     await write(dut, OUT_CFG, 0x31)  # OUT/MOV: base 1 (MOSI), count 3 (.., CS_N)
     await write(dut, IN_BASE, 2)  # MISO
     await write(dut, PIN_MODES, 0b01_00_01_01)  # P0, P1, P3 push-pull; P2 input
     bus = cocotb.start_soon(spi_bus(dut, slave, monitor))
     await write(dut, CTRL, 1)
-    words = [1] + [rev8(b) | ((i == len(sent) - 1) << 8) for i, b in enumerate(sent)]
+    words = ([] if fast else [1]) + [rev8(b) | ((i == len(sent) - 1) << 8) for i, b in enumerate(sent)]
     for w in words:
         await push(dut, w)
     got = [rev8((await pop(dut)) & 0xFF) for _ in sent]
@@ -385,3 +387,17 @@ async def test_spi(dut):
     assert monitor.events == ["SELECT"] + list(zip(sent, responses)) + ["DESELECT"], monitor.events
     assert slave.received == sent, f"slave got {slave.received}"
     assert got == responses, f"host got {got}"
+
+
+@cocotb.test()
+async def test_spi(dut):
+    """SPI controller firmware loaded over SPI, full duplex with a slave."""
+    await reset(dut)
+    await spi_transfer(dut, fast=False)
+
+
+@cocotb.test()
+async def test_spi_fast(dut):
+    """Side-set SPI firmware: 2 core clocks per bit."""
+    await reset(dut)
+    await spi_transfer(dut, fast=True)

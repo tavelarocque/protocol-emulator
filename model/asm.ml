@@ -89,9 +89,25 @@ let assemble (source : string) : Instruction.t array =
   (* Pass 1: strip comments, peel off labels, assign addresses. *)
   let labels = Hashtbl.create (module String) in
   let body = Queue.create () in
+  (* [.side_set N]: from here on, the top N bits of every instruction's
+     delay field are side-set values, given as [side V]. Must match the
+     thread's SIDESET count register. *)
+  let side_set = ref 0 in
   List.iteri (String.split_lines source) ~f:(fun i raw ->
     let line = i + 1 in
     let text = String.strip (strip_comment raw) in
+    let text =
+      match tokens text with
+      | [ ".side_set"; n ] ->
+        (match Int.of_string_opt n with
+         | Some n when n >= 0 && n <= 3 ->
+           if Queue.length body > 0
+           then error ~line ".side_set must come before the first instruction";
+           side_set := n
+         | _ -> error ~line ".side_set takes 0 to 3");
+        ""
+      | _ -> text
+    in
     let text =
       match String.lsplit2 text ~on:':' with
       | Some (lbl, rest) when is_label (String.strip lbl) ->
@@ -133,6 +149,21 @@ let assemble (source : string) : Instruction.t array =
         ->
         List.rev rest, num (String.sub last ~pos:1 ~len:(String.length last - 2))
       | _ -> toks, 0
+    in
+    let n = !side_set in
+    let toks, delay =
+      match List.rev toks with
+      | v :: "side" :: rest ->
+        if n = 0 then error ~line "side without .side_set";
+        let v = num v in
+        if v < 0 || v >= 1 lsl n
+        then error ~line (sprintf "side value %d does not fit in %d bits" v n);
+        if delay >= 1 lsl (4 - n)
+        then error ~line (sprintf "delay %d does not fit in %d bits after side-set" delay (4 - n));
+        List.rev rest, (v lsl (4 - n)) lor delay
+      | _ ->
+        if n > 0 then error ~line "every instruction needs [side V] after .side_set";
+        toks, delay
     in
     let op : Instruction.op =
       match toks with

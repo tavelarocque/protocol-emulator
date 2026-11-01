@@ -34,6 +34,7 @@
      0x49       RX FIFO (read pops; reads 0 if empty)
      0x4A       STATUS (read): [13:8] pc, [7] enable, [6:4] rx level, [2:0] tx level
      0x4B       TIMEOUT [15:0]: max cycles a [wait ... timeout] stalls
+     0x4C       SIDESET: base pin [2:0], count [5:4] (0..3 delay bits used)
    Configuration registers read back what was written. *)
 
 open! Core
@@ -73,6 +74,7 @@ module Addr = struct
   let rx_fifo = 0x49
   let status = 0x4A
   let timeout = 0x4B
+  let sideset = 0x4C
 end
 
 let bit s i = select s i i
@@ -112,6 +114,7 @@ let create (i : _ I.t) : _ O.t =
   let threshold = config ~init:8 5 in
   let timeout_vector = config 6 in
   let timeout = config 16 in
+  let sideset = config 6 in
   let pin_modes = config 16 in
   (* --- The core. Host-side strobes are wires assigned below. --- *)
   let rx_pop = wire 1 in
@@ -132,6 +135,8 @@ let create (i : _ I.t) : _ O.t =
       ; threshold = threshold.value
       ; timeout_vector = timeout_vector.value
       ; timeout = timeout.value
+      ; sideset_base = select sideset.value 2 0
+      ; sideset_count = select sideset.value 5 4
       ; pin_modes = pin_modes.value
       ; pins_in = i.uio_in
       ; tx_push = write_to Addr.tx_fifo
@@ -152,7 +157,7 @@ let create (i : _ I.t) : _ O.t =
   (* Read data, selected by the address in the command byte as it completes. *)
   let read_addr = select cmd_now 6 0 in
   let read_value =
-    let table = Array.create ~len:(Addr.timeout + 2) (zero 16) in
+    let table = Array.create ~len:(Addr.sideset + 2) (zero 16) in
     table.(Addr.ctrl) <- uresize enable.value 16;
     table.(Addr.start) <- uresize start.value 16;
     table.(Addr.out_cfg) <- uresize out_cfg.value 16;
@@ -164,6 +169,7 @@ let create (i : _ I.t) : _ O.t =
     table.(Addr.rx_fifo) <- core.rx_data;
     table.(Addr.status) <- status;
     table.(Addr.timeout) <- timeout.value;
+    table.(Addr.sideset) <- uresize sideset.value 16;
     (* The last entry is zero, and mux repeats it for higher addresses. *)
     mux read_addr (Array.to_list table)
   in
@@ -195,6 +201,7 @@ let create (i : _ I.t) : _ O.t =
     ; when_ (write_to Addr.threshold) [ threshold <-- select data_now 4 0 ]
     ; when_ (write_to Addr.timeout_vector) [ timeout_vector <-- select data_now 5 0 ]
     ; when_ (write_to Addr.timeout) [ timeout <-- data_now ]
+    ; when_ (write_to Addr.sideset) [ sideset <-- select data_now 5 0 ]
     ; when_ (write_to Addr.pin_modes) [ pin_modes <-- data_now ]
     ];
   { O.uo_out =

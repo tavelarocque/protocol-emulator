@@ -275,6 +275,9 @@ module Thread_config = struct
     ; threshold : int (* bits per OSR/ISR word, 1..16 *)
     ; timeout_vector : int
     ; timeout : int (* max cycles a [wait ... timeout] stalls, 0..65535 *)
+    ; sideset_base : int (* first side-set pin *)
+    ; sideset_count : int
+      (* 0..3: how many of the delay field's top bits are side-set values *)
     }
   [@@deriving sexp_of]
 
@@ -288,6 +291,8 @@ module Thread_config = struct
     ; threshold = 8
     ; timeout_vector = 0
     ; timeout = 0
+    ; sideset_base = 0
+    ; sideset_count = 0
     }
   ;;
 end
@@ -414,6 +419,11 @@ let exec t (th : Thread.t) ~lines_now ~pin_out =
   else (
     let cfg = th.config in
     let instr = t.program.(th.pc) in
+    (* Side-set: the top [sideset_count] bits of the 4-bit delay field are
+       values for the side-set pins; the rest is the delay. *)
+    let n = cfg.sideset_count in
+    let side = instr.delay lsr (4 - n) in
+    let delay = instr.delay land mask (4 - n) in
     let result =
       match instr.op with
       | Nop -> `Next
@@ -504,16 +514,19 @@ let exec t (th : Thread.t) ~lines_now ~pin_out =
          | Y -> th.y <- value);
         `Next
     in
+    (* Side-set pins are driven on every cycle the instruction executes,
+       stalled or not, and win over the instruction's own pin write. *)
+    pin_out := write_pins !pin_out ~base:cfg.sideset_base ~count:n side;
     match result with
     | `Stall -> ()
     | `Next ->
       th.waiting <- false;
       th.pc <- (th.pc + 1) % program_size;
-      th.delay_left <- instr.delay
+      th.delay_left <- delay
     | `Goto addr ->
       th.waiting <- false;
       th.pc <- addr;
-      th.delay_left <- instr.delay)
+      th.delay_left <- delay)
 ;;
 
 (* One clock cycle. Every thread sees the same snapshot of the pins; pin

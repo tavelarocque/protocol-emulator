@@ -127,6 +127,7 @@ let%test_unit "configuration registers read back what was written" =
       ; timeout_vector, 0x3F
       ; pin_modes, 0xFFFF
       ; timeout, 0xFFFF
+      ; sideset, 0x3F
       ]
   in
   Quickcheck.test

@@ -1,4 +1,4 @@
-# Protocol emulator ISA, v1
+# Protocol emulator ISA, v1.1
 
 This document describes the instruction set in prose. The normative version
 is the executable model in `model/isa.ml`: where the two disagree, the model
@@ -73,6 +73,7 @@ That is exactly I2C's wired-AND bus.
 | `threshold` | bits per word (1 to 16): when the OSR counts as empty and the ISR as full |
 | `timeout_vector` | jump target when a `wait ... timeout` expires |
 | `timeout` | cycles (0 to 65535) a `wait ... timeout` may stall before it expires |
+| `sideset_base`, `sideset_count` | first side-set pin, and how many of the delay field's top bits (0 to 3) are side-set values |
 
 Pin ranges wrap modulo 8.
 
@@ -100,7 +101,30 @@ On every clock cycle:
 ```
 
 `delay` (0 to 15) is the number of extra idle cycles after the instruction
-completes.
+completes. With side-set enabled (`sideset_count = n > 0`), the top `n` bits
+of this field are side-set values and only the low `4 - n` bits are delay.
+
+### Side-set
+
+Side-set drives up to three pins as a side effect of any instruction, so a
+clock edge costs no instruction of its own. With `sideset_count = n`, the
+top `n` bits of the delay field are written to `n` pins starting at
+`sideset_base` (wrapping modulo 8) on every cycle the instruction executes:
+including cycles where it stalls, but not delay cycles. If the instruction
+also writes those pins, side-set wins.
+
+In assembly, `.side_set n` before the first instruction turns it on, and
+from then on every instruction must say `side V`:
+
+```
+        .side_set 1
+        out pins, 1   side 0   ; MOSI out, SCK low
+        in pins, 1    side 1   ; SCK high, sample MISO
+```
+
+The encoding of the 16-bit word is unchanged; side-set only changes how the
+thread interprets the delay field, so with `sideset_count = 0` everything is
+exactly v1.
 
 | op | Mnemonic | Operand bits |
 |---|---|---|
@@ -216,12 +240,15 @@ rates.
   could never be longer than one half bit-period, far shorter than the
   milliseconds real I2C devices may stretch the clock.
 
+- **v1.1.** Side-set, configured per thread through a new SIDESET register.
+  The SPI controller written without it needs 9 cycles per bit at full
+  speed; with it, 2 (`model/firmware.ml`, `spi_fast`). That is also what
+  makes the low-speed USB stretch goal possible at all: at 10 MHz a USB
+  low-speed bit is about 6.7 cycles.
+
 ## Open questions for review
 
 - **Autopush / autopull.** PIO has them. They save one instruction per word
   but complicate timing. Left out of v0.
-- **Side-set.** PIO can drive a clock pin in the same cycle as another
-  instruction, which matters for fast SPI. A candidate for v1, using some of
-  the delay bits.
 - **IRQ / thread sync.** Not in v0. Full-duplex UART does not need it; SPI
   with separate RX and TX threads might.

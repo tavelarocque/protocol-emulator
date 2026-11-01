@@ -50,11 +50,22 @@ type outcome =
   ; sck_rises : int list (* cycles of SCK rising edges, for bit timing *)
   }
 
-let run_on_model ?(source = Firmware.spi_controller) ~half ~responses ~words ~cycles () =
-  let m = Isa.create ~program:(Asm.assemble source) ~pin_modes:modes ~threads:[ config ] in
+(* [spi_fast]: SCK comes from side-set instead of SET. *)
+let fast_config = { config with sideset_base = 0; sideset_count = 1 }
+
+let run_on_model
+  ?(source = Firmware.spi_controller)
+  ?(cfg = config)
+  ?half
+  ~responses
+  ~words
+  ~cycles
+  ()
+  =
+  let m = Isa.create ~program:(Asm.assemble source) ~pin_modes:modes ~threads:[ cfg ] in
   let slave = Spi.Slave.create ~responses in
   let checker = Spi.Checker.create () in
-  let pending = Queue.of_list (half :: words) in
+  let pending = Queue.of_list (Option.to_list half @ words) in
   let host_rx = Queue.create () in
   let rises = Queue.create () in
   let prev_sck = ref false in
@@ -182,7 +193,7 @@ let%test_unit "planted firmware bug: MOSI changed while SCK high is caught" =
 ;;
 
 (* The number that decides whether the ISA needs side-set. *)
-let%expect_test "bit timing" =
+let%expect_test "bit timing (loop-timed firmware)" =
   List.iter [ 0; 1; 4 ] ~f:(fun half ->
     let r = run_on_model ~half ~responses:[ 0 ] ~words:(transfer [ 0x55 ]) ~cycles:300 () in
     let periods =
@@ -202,9 +213,46 @@ let%expect_test "bit timing" =
     |}]
 ;;
 
+let run_fast = run_on_model ~source:Firmware.spi_fast ~cfg:fast_config
+
+let%test_unit "model: side-set SPI, full-duplex transfers of random bytes" =
+  Quickcheck.test
+    (Quickcheck.Generator.both
+       (Quickcheck.Generator.list_non_empty (Int.gen_incl 0 255))
+       (Quickcheck.Generator.list_non_empty (Int.gen_incl 0 255)))
+    ~trials:200
+    ~sexp_of:[%sexp_of: int list * int list]
+    ~f:(fun (sent, responses) ->
+      let sent = List.take sent 6 in
+      let responses =
+        List.init (List.length sent) ~f:(fun i ->
+          Option.value (List.nth responses i) ~default:(i * 53 % 256))
+      in
+      let r = run_fast ~responses ~words:(transfer sent) ~cycles:(60 + (30 * List.length sent)) () in
+      [%test_result: string list] r.errors ~expect:[];
+      [%test_result: Spi.Event.t list] r.events ~expect:(expected_events ~sent ~responses);
+      [%test_result: int list] r.received_by_slave ~expect:sent;
+      [%test_result: int list] r.received_by_host ~expect:responses)
+;;
+
+let%expect_test "side-set SPI bit timing" =
+  let r = run_fast ~responses:[ 0; 0 ] ~words:(transfer [ 0x55; 0xAA ]) ~cycles:200 () in
+  let periods =
+    List.zip_exn (List.drop_last_exn r.sck_rises) (List.tl_exn r.sck_rises)
+    |> List.map ~f:(fun (a, b) -> b - a)
+  in
+  let within_byte = List.filteri periods ~f:(fun i _ -> (i + 1) % 8 <> 0) in
+  printf
+    !"cycles per bit within a byte %{sexp:int list}, %.2f Mbit/s at 10 MHz; byte-to-byte gap %d\n"
+    (List.dedup_and_sort within_byte ~compare)
+    (10. /. Float.of_int (List.hd_exn within_byte))
+    (List.nth_exn periods 7);
+  [%expect {| cycles per bit within a byte (2), 5.00 Mbit/s at 10 MHz; byte-to-byte gap 7 |}]
+;;
+
 (* --- The whole chip, over SPI ------------------------------------------- *)
 
-let%test_unit "chip: SPI firmware loaded over SPI talks to a slave device" =
+let chip_test ~fast =
   Quickcheck.test
     (Quickcheck.Generator.both
        (Quickcheck.Generator.list_non_empty (Int.gen_incl 0 255))
@@ -229,16 +277,27 @@ let%test_unit "chip: SPI firmware loaded over SPI talks to a slave device" =
            and mosi = driven 1 && level 1
            and cs_n = (not (driven 3)) || level 3 in
            let miso = Spi.Slave.miso slave in
-           (Test_top.i h).uio_in := Bits.of_int ~width:8 (Bool.to_int miso lsl 2);
            Spi.Checker.step checker ~sck ~mosi ~miso ~cs_n;
-           Spi.Slave.step slave ~sck ~mosi ~cs_n);
-      Test_top.load_firmware h Firmware.spi_controller;
-      Test_top.write h Top.Addr.set_cfg 0x10 (* SET: base 0 (SCK), count 1 *);
+           Spi.Slave.step slave ~sck ~mosi ~cs_n;
+           (* The slave reacts to this cycle's SCK edge before the chip's
+              next sample: a response time under one core clock (100 ns at
+              10 MHz), as real SPI devices manage in tens of ns. The
+              side-set firmware samples MISO exactly one clock after SCK
+              falls, so it depends on this; the loop-timed one has slack. *)
+           (Test_top.i h).uio_in
+           := Bits.of_int ~width:8 (Bool.to_int (Spi.Slave.miso slave) lsl 2));
+      if fast
+      then (
+        Test_top.load_firmware h Firmware.spi_fast;
+        Test_top.write h Top.Addr.sideset 0x10 (* side-set: base 0 (SCK), count 1 *))
+      else (
+        Test_top.load_firmware h Firmware.spi_controller;
+        Test_top.write h Top.Addr.set_cfg 0x10 (* SET: base 0 (SCK), count 1 *));
       Test_top.write h Top.Addr.out_cfg 0x31 (* OUT: base 1 (MOSI), count 3 *);
       Test_top.write h Top.Addr.in_base 2 (* MISO *);
       Test_top.write h Top.Addr.pin_modes mode_bits;
       Test_top.write h Top.Addr.ctrl 1;
-      List.iter (half :: transfer sent) ~f:(Test_top.push h);
+      List.iter ((if fast then [] else [ half ]) @ transfer sent) ~f:(Test_top.push h);
       let got =
         List.map sent ~f:(fun _ -> Firmware.reverse_byte (Test_top.pop h land 0xFF))
       in
@@ -249,4 +308,12 @@ let%test_unit "chip: SPI firmware loaded over SPI talks to a slave device" =
         ~expect:(expected_events ~sent ~responses);
       [%test_result: int list] (Spi.Slave.received slave) ~expect:sent;
       [%test_result: int list] got ~expect:responses)
+;;
+
+let%test_unit "chip: SPI firmware loaded over SPI talks to a slave device" =
+  chip_test ~fast:false
+;;
+
+let%test_unit "chip: side-set SPI firmware loaded over SPI talks to a slave device" =
+  chip_test ~fast:true
 ;;

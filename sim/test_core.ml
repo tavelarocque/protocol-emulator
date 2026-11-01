@@ -59,6 +59,9 @@ let random_config rs =
          | 0 -> 0
          | 1 | 2 -> rand 8
          | _ -> rand 65536)
+    ; sideset_base = rand 8
+    ; (* Half the trials without side-set, half with 1 to 3 side-set bits. *)
+      sideset_count = (if rand 2 = 0 then 0 else 1 + rand 3)
     }
   in
   let modes =
@@ -145,6 +148,8 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
   set i.threshold config.threshold;
   set i.timeout_vector config.timeout_vector;
   set i.timeout config.timeout;
+  set i.sideset_base config.sideset_base;
+  set i.sideset_count config.sideset_count;
   set
     i.pin_modes
     (Array.foldi modes ~init:0 ~f:(fun p acc m -> acc lor (mode_code m lsl (2 * p))));
@@ -183,7 +188,9 @@ let run_trial ?coverage ?mutation ~seed ~cycles () =
           then "(delay cycle)"
           else classify model ~word:words.(pc_before) ~inputs:pins
         in
-        Hashtbl.incr table key);
+        Hashtbl.incr table key;
+        if th.delay_left = 0 && config.sideset_count > 0
+        then Hashtbl.incr table "(side-set driving pins)");
       Isa.step model ~inputs:pins;
       if push then assert (Isa.push_tx model ~thread:0 push_value);
       let model_popped = if pop then Isa.pop_rx model ~thread:0 else None in
@@ -268,7 +275,7 @@ let%expect_test "coverage of the differential test" =
     ; "push: stalled, RX full"; "pull"; "pull: stalled, TX empty"; "mov to x"
     ; "mov to y"; "mov to pins"; "mov to isr"; "mov to osr"; "mov to null"
     ; "mov (reserved -> nop)"; "set pins"; "set x"; "set y"
-    ; "set (reserved -> nop)"; "nop"; "(delay cycle)"
+    ; "set (reserved -> nop)"; "nop"; "(delay cycle)"; "(side-set driving pins)"
     ]
   in
   List.iter required ~f:(fun key ->
@@ -279,43 +286,44 @@ let%expect_test "coverage of the differential test" =
   |> List.iter ~f:(fun (key, n) ->
     printf "%-40s %6d  %5.1f%%\n" key n (100. *. Float.of_int n /. Float.of_int total));
   [%expect {|
-    (delay cycle)                             35991   30.0%
-    in null                                     700    0.6%
-    in pins                                     666    0.6%
-    in x                                        718    0.6%
-    in y                                        672    0.6%
-    jmp !isrf                                   807    0.7%
-    jmp !osre                                  1001    0.8%
-    jmp !x                                      767    0.6%
-    jmp !y                                      688    0.6%
-    jmp (always)                                645    0.5%
-    jmp x!=y                                   1267    1.1%
-    jmp x--                                     499    0.4%
-    jmp y--                                     429    0.4%
-    mov (reserved -> nop)                      1236    1.0%
-    mov to isr                                  239    0.2%
-    mov to null                                 333    0.3%
-    mov to osr                                  292    0.2%
-    mov to pins                                 399    0.3%
-    mov to x                                    159    0.1%
-    mov to y                                    292    0.2%
-    nop                                        2685    2.2%
-    out null                                    743    0.6%
-    out pins                                    529    0.4%
-    out x                                       586    0.5%
-    out y                                       665    0.6%
-    pull                                       1101    0.9%
-    pull: stalled, TX empty                   19912   16.6%
-    push                                       1185    1.0%
-    push: stalled, RX full                     4759    4.0%
-    set (reserved -> nop)                       726    0.6%
-    set pins                                    576    0.5%
-    set x                                       689    0.6%
-    set y                                       718    0.6%
-    wait: condition met                        1974    1.6%
-    wait: stalled                             25674   21.4%
-    wait: stalled, spending timeout budget     7955    6.6%
-    wait: timed out                            1723    1.4%
+    (delay cycle)                             24466   14.0%
+    (side-set driving pins)                   54762   31.3%
+    in null                                     685    0.4%
+    in pins                                     917    0.5%
+    in x                                        870    0.5%
+    in y                                        963    0.6%
+    jmp !isrf                                   578    0.3%
+    jmp !osre                                   879    0.5%
+    jmp !x                                     1057    0.6%
+    jmp !y                                      982    0.6%
+    jmp (always)                               1065    0.6%
+    jmp x!=y                                   1466    0.8%
+    jmp x--                                     513    0.3%
+    jmp y--                                     641    0.4%
+    mov (reserved -> nop)                      1562    0.9%
+    mov to isr                                  485    0.3%
+    mov to null                                 310    0.2%
+    mov to osr                                  357    0.2%
+    mov to pins                                 361    0.2%
+    mov to x                                    226    0.1%
+    mov to y                                    295    0.2%
+    nop                                        3681    2.1%
+    out null                                   1017    0.6%
+    out pins                                    811    0.5%
+    out x                                       952    0.5%
+    out y                                       844    0.5%
+    pull                                       1619    0.9%
+    pull: stalled, TX empty                   19591   11.2%
+    push                                       1566    0.9%
+    push: stalled, RX full                     2576    1.5%
+    set (reserved -> nop)                       885    0.5%
+    set pins                                    801    0.5%
+    set x                                       831    0.5%
+    set y                                      1071    0.6%
+    wait: condition met                        2598    1.5%
+    wait: stalled                             32463   18.6%
+    wait: stalled, spending timeout budget     8466    4.8%
+    wait: timed out                            1550    0.9%
     |}]
 ;;
 
@@ -336,10 +344,10 @@ let%expect_test "every planted bug in the core is caught" =
         (Sexp.to_string (Rtl.Mutation.sexp_of_t mutation))
         (seed + 1));
   [%expect {|
-    Xdec_never_decrements        caught by program #7
-    Wait_timeout_ignores_budget  caught by program #4
+    Xdec_never_decrements        caught by program #2
+    Wait_timeout_ignores_budget  caught by program #6
     Delay_field_ignored          caught by program #1
-    Set_pins_count_off_by_one    caught by program #4
-    Push_not_right_justified     caught by program #15
+    Set_pins_count_off_by_one    caught by program #6
+    Push_not_right_justified     caught by program #10
     |}]
 ;;

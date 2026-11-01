@@ -48,6 +48,8 @@ let random_sample rs word =
     ; threshold = 1 + r 16
     ; timeout_vector = r 64
     ; timeout = (if r 2 = 0 then r 4 else r 65536)
+    ; sideset_base = r 8
+    ; sideset_count = r 4
     }
   in
   let state =
@@ -153,6 +155,8 @@ let run_spec s =
       ; threshold = b 5 c.threshold
       ; timeout_vector = b 6 c.timeout_vector
       ; timeout = b 16 c.timeout
+      ; sideset_base = b 3 c.sideset_base
+      ; sideset_count = b 2 c.sideset_count
       }
   in
   { next = P.Thread_state.map out.next ~f:Bits.to_int

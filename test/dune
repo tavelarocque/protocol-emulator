@@ -32,3 +32,11 @@
   (with-stdout-to
    spi_controller.hex
    (run %{dep:../bin/firmware_hex.exe} spi_controller))))
+
+(rule
+ (targets spi_fast.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   spi_fast.hex
+   (run %{dep:../bin/firmware_hex.exe} spi_fast))))

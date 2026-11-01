@@ -31,6 +31,7 @@ TX and RX FIFOs.
 | 0x49 | RX FIFO (read) |
 | 0x4A | STATUS: pc [13:8], enable [7], RX level [6:4], TX level [2:0] |
 | 0x4B | TIMEOUT: max cycles a timed wait stalls |
+| 0x4C | SIDESET: base pin [2:0], count [5:4] |
 
 ## How to test
 

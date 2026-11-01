@@ -267,3 +267,56 @@ let%test_unit "UART TX firmware: back-to-back bytes decode with a real receiver"
         (Uart_model.decode ~divisor line)
         ~expect:(Ok bytes))
 ;;
+
+(* --- Side-set ------------------------------------------------------------ *)
+
+let side_config ~n =
+  { Isa.Thread_config.default with sideset_base = 2; sideset_count = n; set_base = 2 }
+;;
+
+let%test_unit "side-set drives its pins and wins over the instruction's own write" =
+  let m =
+    machine ~configs:[ side_config ~n:1 ] ".side_set 1\nset pins, 0 side 1\nhang: jmp hang side 1"
+  in
+  run m ~cycles:1 ~inputs:0;
+  [%test_result: int] ((Isa.pin_out m lsr 2) land 1) ~expect:1
+;;
+
+let%test_unit "side-set is driven while the instruction stalls" =
+  let m = machine ~configs:[ side_config ~n:1 ] ".side_set 1\npull side 0\nnop side 1" in
+  run m ~cycles:1 ~inputs:0;
+  (* Still stalled on the empty FIFO, but the side pin went low. *)
+  [%test_result: int] (Isa.thread m 0).pc ~expect:0;
+  [%test_result: int] ((Isa.pin_out m lsr 2) land 1) ~expect:0
+;;
+
+let%test_unit "side-set splits the delay field: value on top, delay below" =
+  let m =
+    machine
+      ~configs:[ side_config ~n:2 ]
+      ".side_set 2\nnop side 2 [3]\nnop side 1\nhang: jmp hang side 1"
+  in
+  let program = Asm.assemble ".side_set 2\nnop side 2 [3]" in
+  [%test_result: int] program.(0).delay ~expect:((2 lsl 2) lor 3);
+  run m ~cycles:1 ~inputs:0;
+  [%test_result: int] ((Isa.pin_out m lsr 2) land 3) ~expect:2;
+  [%test_result: int] (Isa.thread m 0).delay_left ~expect:3;
+  run m ~cycles:4 ~inputs:0;
+  [%test_result: int] (Isa.thread m 0).pc ~expect:2;
+  [%test_result: int] ((Isa.pin_out m lsr 2) land 3) ~expect:1
+;;
+
+let%test_unit "assembler enforces side-set syntax" =
+  List.iter
+    [ "nop side 1" (* side without .side_set *)
+    ; ".side_set 1\nnop" (* missing side *)
+    ; ".side_set 1\nnop side 2" (* value too wide *)
+    ; ".side_set 2\nnop side 0 [4]" (* delay too wide after side-set *)
+    ; "nop\n.side_set 1" (* directive after the first instruction *)
+    ; ".side_set 4"
+    ]
+    ~f:(fun src ->
+      match Asm.assemble src with
+      | _ -> raise_s [%message "assembler accepted bad side-set input" (src : string)]
+      | exception _ -> ())
+;;

@@ -64,7 +64,17 @@ module Make (C : Comb.S) = struct
 
   let step (s : C.t P.Thread_state.t) (i : C.t P.Step_in.t) : C.t P.Step_out.t =
     let ins = i.instr in
-    let delay = select ins 12 9 in
+    (* Side-set splits the 4-bit delay field: with n side-set bits the
+       value is field[3:4-n] and the delay is field[3-n:0]. Written as a
+       per-n case split rather than the RTL's shifts. *)
+    let field = select ins 12 9 in
+    let n = i.sideset_count in
+    let delay =
+      mux n [ field; uresize (select field 2 0) 4; uresize (select field 1 0) 4; uresize (select field 0 0) 4 ]
+    in
+    let side =
+      mux n [ zero 8; uresize (select field 3 3) 8; uresize (select field 3 2) 8; uresize (select field 3 1) 8 ]
+    in
     let count =
       let c = select ins 3 0 in
       mux2 (c ==:. 0) (of_int ~width:5 16) (uresize c 5)
@@ -222,6 +232,16 @@ module Make (C : Comb.S) = struct
            ~f:(fun n r -> n, r))
         ~init:r_nop
         ~f:(fun (n, r) acc -> pick (select ins 15 13 ==:. n) r acc)
+    in
+    (* Side-set is driven on every executing cycle, stalled or not, over
+       whatever the instruction wrote. *)
+    let executed =
+      { executed with
+        st =
+          { executed.st with
+            pin_out = write_pins executed.st.pin_out ~base:i.sideset_base ~count:n side
+          }
+      }
     in
     let counting_down =
       { none with st = { s with delay_left = s.delay_left -:. 1 } }

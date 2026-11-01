@@ -30,6 +30,8 @@ module I = struct
     ; threshold : 'a [@bits 5]
     ; timeout_vector : 'a [@bits 6]
     ; timeout : 'a [@bits 16] (* max cycles a [wait ... timeout] stalls *)
+    ; sideset_base : 'a [@bits 3]
+    ; sideset_count : 'a [@bits 2] (* top bits of the delay field that are side-set *)
     ; pin_modes : 'a [@bits 16] (* 2 bits per pin: 0 input, 1 push-pull, 2 open-drain *)
     ; pins_in : 'a [@bits 8]
     ; tx_push : 'a
@@ -151,6 +153,8 @@ module Step_in = struct
     ; threshold : 'a [@bits 5]
     ; timeout_vector : 'a [@bits 6]
     ; timeout : 'a [@bits 16]
+    ; sideset_base : 'a [@bits 3]
+    ; sideset_count : 'a [@bits 2]
     }
   [@@deriving hardcaml]
 end
@@ -251,6 +255,8 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
          ; threshold = i.threshold
          ; timeout_vector = i.timeout_vector
          ; timeout = i.timeout
+         ; sideset_base = i.sideset_base
+         ; sideset_count = i.sideset_count
          }
      in
      thread_pull <== out.pull;
@@ -273,7 +279,13 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
    | None ->
   (* --- Decode. --- *)
   let op = select instr 15 13 in
-  let delay = select instr 12 9 in
+  (* The 4-bit delay field: its top [sideset_count] bits are side-set
+     values, the rest is the delay. *)
+  let delay_field = select instr 12 9 in
+  let side_bits =
+    log_shift srl delay_field (of_int ~width:3 4 -: uresize i.sideset_count 3)
+  in
+  let delay = delay_field &: log_shift srl (ones 4) i.sideset_count in
   let is_op n = op ==:. n in
   let count =
     let c = select instr 3 0 in
@@ -343,6 +355,22 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
   in
   let set_value = uresize (select instr 4 0) 16 in
   let set_count = if is Set_pins_count_off_by_one then i.set_count +:. 1 else i.set_count in
+  (* What the instruction itself writes to the pins this cycle (if it
+     completes); side-set is then applied on top. *)
+  let instr_pins =
+    let write ~base ~count ~value = write_pins ~current:pin_out.value ~base ~count ~value in
+    let writes_pins ~op ~sel = advance &: is_op op &: sel in
+    mux2
+      (writes_pins ~op:3 ~sel:(select instr 8 7 ==:. 0))
+      (write ~base:i.out_base ~count ~value:out_data)
+    @@ mux2
+         (writes_pins ~op:5 ~sel:(mov_valid &: (mov_dst ==:. 2)))
+         (write ~base:i.out_base ~count:i.out_count ~value:mov_value)
+    @@ mux2
+         (writes_pins ~op:6 ~sel:(set_dst ==:. 0))
+         (write ~base:i.set_base ~count:set_count ~value:set_value)
+    @@ pin_out.value
+  in
   compile
     [ if_
         ~:(i.enable)
@@ -366,6 +394,14 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
              when_
                (is_op 1 &: ~:wait_ok &: wait_timeout &: ~:budget_zero)
                [ waiting <--. 1; wait_count <-- budget -:. 1 ]
+           ; (* Pins: the instruction's own write, then side-set on top. Side-set
+                applies on every executing cycle, stalled or not. *)
+             pin_out
+             <-- write_pins
+                   ~current:instr_pins
+                   ~base:i.sideset_base
+                   ~count:i.sideset_count
+                   ~value:(uresize side_bits 8)
            ; when_
                advance
                [ pc <-- next_pc
@@ -388,15 +424,7 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
                        ; osr_count <-- saturating_add osr_count.value count
                        ; switch
                            (select instr 8 7)
-                           [ ( of_int ~width:2 0
-                             , [ pin_out
-                                 <-- write_pins
-                                       ~current:pin_out.value
-                                       ~base:i.out_base
-                                       ~count
-                                       ~value:out_data
-                               ] )
-                           ; of_int ~width:2 1, [ x <-- out_data ]
+                           [ of_int ~width:2 1, [ x <-- out_data ]
                            ; of_int ~width:2 2, [ y <-- out_data ]
                            ]
                        ] )
@@ -413,14 +441,6 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
                                mov_dst
                                [ of_int ~width:3 0, [ x <-- mov_value ]
                                ; of_int ~width:3 1, [ y <-- mov_value ]
-                               ; ( of_int ~width:3 2
-                                 , [ pin_out
-                                     <-- write_pins
-                                           ~current:pin_out.value
-                                           ~base:i.out_base
-                                           ~count:i.out_count
-                                           ~value:mov_value
-                                   ] )
                                ; of_int ~width:3 3, [ isr <-- mov_value; isr_count <--. 0 ]
                                ; of_int ~width:3 4, [ osr <-- mov_value; osr_count <--. 0 ]
                                ]
@@ -429,15 +449,7 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
                    ; ( of_int ~width:3 6
                      , [ switch
                            set_dst
-                           [ ( of_int ~width:2 0
-                             , [ pin_out
-                                 <-- write_pins
-                                       ~current:pin_out.value
-                                       ~base:i.set_base
-                                       ~count:set_count
-                                       ~value:set_value
-                               ] )
-                           ; of_int ~width:2 1, [ x <-- set_value ]
+                           [ of_int ~width:2 1, [ x <-- set_value ]
                            ; of_int ~width:2 2, [ y <-- set_value ]
                            ]
                        ] )
