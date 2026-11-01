@@ -19,12 +19,15 @@ type host =
   { sim : (Bits.t ref Top.I.t, Bits.t ref Top.O.t) Cyclesim.t
   ; half : int (* core clocks per SCK phase *)
   ; trace : (int * int) Queue.t (* (uio_out, uio_oe) every cycle *)
+  ; mutable on_cycle : unit -> unit
+      (* runs before every clock, e.g. to model devices on the protocol pins *)
   }
 
 let i h = Cyclesim.inputs h.sim
 let o h = Cyclesim.outputs h.sim
 
 let step h =
+  h.on_cycle ();
   Cyclesim.cycle h.sim;
   Queue.enqueue h.trace (Bits.to_int !((o h).uio_out), Bits.to_int !((o h).uio_oe))
 ;;
@@ -40,7 +43,9 @@ let drive h ~sck ~cs_n ~mosi =
 ;;
 
 let create ~half =
-  let h = { sim = Sim.create Top.create; half; trace = Queue.create () } in
+  let h =
+    { sim = Sim.create Top.create; half; trace = Queue.create (); on_cycle = (fun () -> ()) }
+  in
   drive h ~sck:0 ~cs_n:1 ~mosi:0;
   (i h).clear := Bits.vdd;
   step h;
