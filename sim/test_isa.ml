@@ -82,7 +82,7 @@ let%test_unit "delay field adds idle cycles after the instruction" =
 
 let wait_program =
   {|
-        set y, 5
+        set y, 7            ; Y must survive the timed wait untouched
         wait 1 pin 2 timeout
         set x, 1            ; pin went high in time
 hang1:  jmp hang1
@@ -91,20 +91,59 @@ hang2:  jmp hang2
 |}
 ;;
 
+let wait_config = { Isa.Thread_config.default with timeout_vector = 4; timeout = 5 }
+
 let%test_unit "wait with timeout: pin arrives in time" =
-  let m =
-    machine ~configs:[ { Isa.Thread_config.default with timeout_vector = 4 } ] wait_program
-  in
+  let m = machine ~configs:[ wait_config ] wait_program in
   run m ~cycles:20 ~inputs:0b100;
   [%test_result: int] (Isa.thread m 0).x ~expect:1
 ;;
 
 let%test_unit "wait with timeout: pin never arrives, jump to timeout vector" =
-  let m =
-    machine ~configs:[ { Isa.Thread_config.default with timeout_vector = 4 } ] wait_program
-  in
+  let m = machine ~configs:[ wait_config ] wait_program in
   run m ~cycles:20 ~inputs:0;
-  [%test_result: int] (Isa.thread m 0).x ~expect:2
+  [%test_result: int] (Isa.thread m 0).x ~expect:2;
+  [%test_result: int] (Isa.thread m 0).y ~expect:7
+;;
+
+let%test_unit "wait with timeout: stalls exactly TIMEOUT cycles before giving up" =
+  for timeout = 0 to 12 do
+    let m =
+      machine ~configs:[ { wait_config with timeout } ] wait_program
+    in
+    (* Cycle 1 runs SET; the wait then stalls [timeout] cycles and jumps on
+       the next, so the PC reaches the vector after 2 + timeout cycles. *)
+    run m ~cycles:(1 + timeout) ~inputs:0;
+    [%test_result: int] (Isa.thread m 0).pc ~expect:1 ~message:(sprintf "T=%d still waiting" timeout);
+    run m ~cycles:1 ~inputs:0;
+    [%test_result: int] (Isa.thread m 0).pc ~expect:4 ~message:(sprintf "T=%d jumped" timeout)
+  done
+;;
+
+let%test_unit "each timed wait gets a fresh budget" =
+  (* Two timed waits back to back: the second must not inherit the first's
+     spent budget. Pin 2 rises after 3 cycles in the first wait. *)
+  let m =
+    machine
+      ~configs:[ { Isa.Thread_config.default with timeout_vector = 5; timeout = 6 } ]
+      {|
+        wait 1 pin 2 timeout
+        wait 0 pin 2 timeout
+        set x, 1
+hang1:  jmp hang1
+        nop
+        set x, 2            ; address 5: timeout vector
+hang2:  jmp hang2
+|}
+  in
+  run m ~cycles:3 ~inputs:0;
+  run m ~cycles:1 ~inputs:0b100;
+  (* Now in the second wait with the pin high: it should time out after a
+     full budget of 6 stalled cycles, not sooner. *)
+  run m ~cycles:6 ~inputs:0b100;
+  [%test_result: int] (Isa.thread m 0).pc ~expect:1;
+  run m ~cycles:1 ~inputs:0b100;
+  [%test_result: int] (Isa.thread m 0).pc ~expect:5
 ;;
 
 let%test_unit "wait without timeout stalls forever" =

@@ -1,4 +1,4 @@
-# Protocol emulator ISA, v0 (draft)
+# Protocol emulator ISA, v1
 
 This document describes the instruction set in prose. The normative version
 is the executable model in `model/isa.ml`: where the two disagree, the model
@@ -26,7 +26,7 @@ weakest for this job:
 
 | | RP2040 PIO | This core |
 |---|---|---|
-| Waiting on a pin | blocks forever | optional timeout, jumps to a per-thread vector |
+| Waiting on a pin | blocks forever | optional timeout from a dedicated per-thread counter, then a jump to a per-thread vector |
 | I2C / open-drain | emulated by toggling pin direction | per-pin open-drain mode in hardware |
 | Bit timing | fractional clock divider per state machine | counter loops on X/Y, value supplied by the host at run time |
 | Program loading | host bus inside the RP2040 | SPI slave port, so an external host can load firmware |
@@ -34,7 +34,7 @@ weakest for this job:
 
 ## Machine state
 
-- **Program memory:** 32 words of 16 bits, shared by all threads. Resets to
+- **Program memory:** 64 words of 16 bits, shared by all threads. Resets to
   0, which decodes as `jmp 0`.
 - **Threads:** 2 in the spec and model (1 in the first hardware build). Each
   has its own PC, configuration, registers and FIFOs.
@@ -72,6 +72,7 @@ That is exactly I2C's wired-AND bus.
 | `in_base` | first pin for `in pins` |
 | `threshold` | bits per word (1 to 16): when the OSR counts as empty and the ISR as full |
 | `timeout_vector` | jump target when a `wait ... timeout` expires |
+| `timeout` | cycles (0 to 65535) a `wait ... timeout` may stall before it expires |
 
 Pin ranges wrap modulo 8.
 
@@ -103,7 +104,7 @@ completes.
 
 | op | Mnemonic | Operand bits |
 |---|---|---|
-| 000 | `jmp cond, addr` | `[8:6]` cond, `[4:0]` addr |
+| 000 | `jmp cond, addr` | `[8:6]` cond, `[5:0]` addr |
 | 001 | `wait pol pin n [timeout]` | `[8]` pol, `[7:5]` pin, `[4]` timeout |
 | 010 | `in src, count` | `[8:7]` src, `[3:0]` count (0 means 16) |
 | 011 | `out dst, count` | `[8:7]` dst, `[3:0]` count (0 means 16) |
@@ -139,10 +140,12 @@ A loop `l: jmp x-- l` entered with X = n takes exactly n + 1 cycles.
 **`wait pol pin n [timeout]`** stalls until pin `n` reads `pol`.
 
 - Without `timeout`, it can stall forever.
-- With `timeout`, Y is the budget: each cycle the pin is wrong, the core
-  checks Y.
-  - If Y = 0, it jumps to `timeout_vector`.
-  - Otherwise it decrements Y and keeps waiting.
+- With `timeout`, a hidden per-thread counter is the budget. It loads from
+  the `timeout` register when the wait starts stalling and counts down each
+  stalled cycle; when it is already 0 and the pin is still wrong, the thread
+  jumps to `timeout_vector`. A wait with `timeout = T` therefore stalls at
+  most T cycles. X and Y are untouched, so firmware can keep using them for
+  bit timing, and every timed wait starts with a fresh budget.
 
 **`in src, count`** shifts `count` bits right into the ISR. `src` is one of:
 
@@ -203,10 +206,18 @@ The test suite checks this cycle for cycle against an ideal waveform, and
 with an independent mid-bit-sampling receiver, over random bytes and baud
 rates.
 
+## Revision history
+
+- **v1.** Program memory grew from 32 to 64 words, and the jump address
+  field from 5 to 6 bits (bit 5 was unused in v0, so every v0 program
+  encodes identically). The wait timeout moved from Y to a dedicated counter
+  loaded from a new `timeout` register. Both changes came from writing the
+  I2C controller: it did not fit in 32 words, and with the budget in Y it
+  could never be longer than one half bit-period, far shorter than the
+  milliseconds real I2C devices may stretch the clock.
+
 ## Open questions for review
 
-- **Program memory size.** 32 words matches PIO. With 2 threads sharing it,
-  64 may be needed; that is mostly an area question for synthesis.
 - **Autopush / autopull.** PIO has them. They save one instruction per word
   but complicate timing. Left out of v0.
 - **Side-set.** PIO can drive a clock pin in the same cycle as another

@@ -114,13 +114,14 @@ let%test_unit "configuration registers read back what was written" =
   let registers =
     Top.Addr.
       [ ctrl, 0x1
-      ; start, 0x1F
+      ; start, 0x3F
       ; out_cfg, 0xFF
       ; set_cfg, 0xFF
       ; in_base, 0x7
       ; threshold, 0x1F
-      ; timeout_vector, 0x1F
+      ; timeout_vector, 0x3F
       ; pin_modes, 0xFFFF
+      ; timeout, 0xFFFF
       ]
   in
   Quickcheck.test

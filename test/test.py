@@ -16,7 +16,7 @@ from cocotb.triggers import ClockCycles, RisingEdge
 
 HALF = 6  # core clocks per SCK phase (must be >= 4)
 
-CTRL, PIN_MODES, TX_FIFO, RX_FIFO, STATUS = 0x20, 0x27, 0x28, 0x29, 0x2A
+CTRL, PIN_MODES, TX_FIFO, RX_FIFO, STATUS = 0x40, 0x47, 0x48, 0x49, 0x4A
 FIFO_DEPTH = 4
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -108,8 +108,8 @@ def uart_decode(samples, divisor):
 @cocotb.test()
 async def test_registers(dut):
     await reset(dut)
-    assert await read(dut, 0x22) == 0x10  # OUT config reset value
-    assert await read(dut, 0x25) == 8  # THRESHOLD reset value
+    assert await read(dut, 0x42) == 0x10  # OUT config reset value
+    assert await read(dut, 0x45) == 8  # THRESHOLD reset value
     await write(dut, PIN_MODES, 0xA5C3)
     assert await read(dut, PIN_MODES) == 0xA5C3
 

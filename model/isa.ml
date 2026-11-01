@@ -11,7 +11,7 @@
 
 open! Core
 
-let program_size = 32
+let program_size = 64
 let num_pins = 8
 let fifo_depth = 4
 let word_bits = 16
@@ -211,7 +211,7 @@ module Instruction = struct
     let count () = if bits 3 0 = 0 then 16 else bits 3 0 in
     let op =
       match bits 15 13 with
-      | 0 -> Jmp { cond = Cond.of_int (bits 8 6); addr = bits 4 0 }
+      | 0 -> Jmp { cond = Cond.of_int (bits 8 6); addr = bits 5 0 }
       | 1 -> Wait { polarity = bits 8 8 = 1; pin = bits 7 5; timeout = bits 4 4 = 1 }
       | 2 -> In { src = In_src.of_int (bits 8 7); count = count () }
       | 3 -> Out { dst = Out_dst.of_int (bits 8 7); count = count () }
@@ -274,6 +274,7 @@ module Thread_config = struct
     ; in_base : int
     ; threshold : int (* bits per OSR/ISR word, 1..16 *)
     ; timeout_vector : int
+    ; timeout : int (* max cycles a [wait ... timeout] stalls, 0..65535 *)
     }
   [@@deriving sexp_of]
 
@@ -286,6 +287,7 @@ module Thread_config = struct
     ; in_base = 0
     ; threshold = 8
     ; timeout_vector = 0
+    ; timeout = 0
     }
   ;;
 end
@@ -301,6 +303,8 @@ module Thread = struct
     ; mutable osr : int
     ; mutable osr_count : int (* bits shifted out since the last refill *)
     ; mutable delay_left : int
+    ; mutable waiting : bool (* stalled in a [wait ... timeout] *)
+    ; mutable wait_count : int (* cycles of that wait's budget left *)
     ; tx_fifo : int Queue.t (* host -> thread *)
     ; rx_fifo : int Queue.t (* thread -> host *)
     }
@@ -315,6 +319,8 @@ module Thread = struct
     ; osr = 0
     ; osr_count = config.threshold (* OSR starts empty *)
     ; delay_left = 0
+    ; waiting = false
+    ; wait_count = 0
     ; tx_fifo = Queue.create ()
     ; rx_fifo = Queue.create ()
     }
@@ -418,11 +424,17 @@ let exec t (th : Thread.t) ~lines_now ~pin_out =
         then `Next
         else if not timeout
         then `Stall
-        else if th.y = 0
-        then `Goto cfg.timeout_vector
         else (
-          th.y <- th.y - 1;
-          `Stall)
+          (* The budget is loaded from the thread's TIMEOUT register when the
+             wait starts, and counts down while it stalls. X and Y are left
+             alone, so firmware can keep using them for bit timing. *)
+          let budget = if th.waiting then th.wait_count else cfg.timeout in
+          if budget = 0
+          then `Goto cfg.timeout_vector
+          else (
+            th.waiting <- true;
+            th.wait_count <- budget - 1;
+            `Stall))
       | In { src; count } ->
         let v =
           match src with
@@ -495,9 +507,11 @@ let exec t (th : Thread.t) ~lines_now ~pin_out =
     match result with
     | `Stall -> ()
     | `Next ->
+      th.waiting <- false;
       th.pc <- (th.pc + 1) % program_size;
       th.delay_left <- instr.delay
     | `Goto addr ->
+      th.waiting <- false;
       th.pc <- addr;
       th.delay_left <- instr.delay)
 ;;

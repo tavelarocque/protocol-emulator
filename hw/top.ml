@@ -21,19 +21,20 @@
    phase must last at least 4 core clocks.
 
    Register map
-     0x00-0x1F  program memory word (write)
-     0x20       CTRL: bit 0 = thread enable
-     0x21       START address [4:0]
-     0x22       OUT config: base [2:0], count [7:4]
-     0x23       SET config: base [2:0], count [7:4]
-     0x24       IN base [2:0]
-     0x25       THRESHOLD [4:0] (1..16)
-     0x26       TIMEOUT_VECTOR [4:0]
-     0x27       PIN_MODES, 2 bits per pin: 0 input, 1 push-pull, 2 open-drain
-     0x28       TX FIFO (write pushes; dropped if full)
-     0x29       RX FIFO (read pops; reads 0 if empty)
-     0x2A       STATUS (read): [12:8] pc, [7] enable, [6:4] rx level, [2:0] tx level
-   Configuration registers 0x20-0x27 read back what was written. *)
+     0x00-0x3F  program memory word (write)
+     0x40       CTRL: bit 0 = thread enable
+     0x41       START address [5:0]
+     0x42       OUT config: base [2:0], count [7:4]
+     0x43       SET config: base [2:0], count [7:4]
+     0x44       IN base [2:0]
+     0x45       THRESHOLD [4:0] (1..16)
+     0x46       TIMEOUT_VECTOR [5:0]
+     0x47       PIN_MODES, 2 bits per pin: 0 input, 1 push-pull, 2 open-drain
+     0x48       TX FIFO (write pushes; dropped if full)
+     0x49       RX FIFO (read pops; reads 0 if empty)
+     0x4A       STATUS (read): [13:8] pc, [7] enable, [6:4] rx level, [2:0] tx level
+     0x4B       TIMEOUT [15:0]: max cycles a [wait ... timeout] stalls
+   Configuration registers read back what was written. *)
 
 open! Core
 open! Hardcaml
@@ -59,17 +60,19 @@ module O = struct
 end
 
 module Addr = struct
-  let ctrl = 0x20
-  let start = 0x21
-  let out_cfg = 0x22
-  let set_cfg = 0x23
-  let in_base = 0x24
-  let threshold = 0x25
-  let timeout_vector = 0x26
-  let pin_modes = 0x27
-  let tx_fifo = 0x28
-  let rx_fifo = 0x29
-  let status = 0x2A
+  let program_words = 0x40
+  let ctrl = 0x40
+  let start = 0x41
+  let out_cfg = 0x42
+  let set_cfg = 0x43
+  let in_base = 0x44
+  let threshold = 0x45
+  let timeout_vector = 0x46
+  let pin_modes = 0x47
+  let tx_fifo = 0x48
+  let rx_fifo = 0x49
+  let status = 0x4A
+  let timeout = 0x4B
 end
 
 let bit s i = select s i i
@@ -102,12 +105,13 @@ let create (i : _ I.t) : _ O.t =
   (* --- Configuration registers. --- *)
   let config ?(init = 0) width = Variable.reg (spec_to (of_int ~width init)) ~width in
   let enable = config 1 in
-  let start = config 5 in
+  let start = config 6 in
   let out_cfg = config ~init:0x10 8 in
   let set_cfg = config ~init:0x10 8 in
   let in_base = config 3 in
   let threshold = config ~init:8 5 in
-  let timeout_vector = config 5 in
+  let timeout_vector = config 6 in
+  let timeout = config 16 in
   let pin_modes = config 16 in
   (* --- The core. Host-side strobes are wires assigned below. --- *)
   let rx_pop = wire 1 in
@@ -116,8 +120,8 @@ let create (i : _ I.t) : _ O.t =
       { Pe_core.I.clock = i.clock
       ; clear = i.clear
       ; enable = enable.value
-      ; prog_we = data_done &: is_write &: (addr <:. 0x20)
-      ; prog_addr = select addr 4 0
+      ; prog_we = data_done &: is_write &: (addr <:. Addr.program_words)
+      ; prog_addr = select addr 5 0
       ; prog_data = data_now
       ; start = start.value
       ; out_base = select out_cfg.value 2 0
@@ -127,6 +131,7 @@ let create (i : _ I.t) : _ O.t =
       ; in_base = in_base.value
       ; threshold = threshold.value
       ; timeout_vector = timeout_vector.value
+      ; timeout = timeout.value
       ; pin_modes = pin_modes.value
       ; pins_in = i.uio_in
       ; tx_push = write_to Addr.tx_fifo
@@ -136,7 +141,7 @@ let create (i : _ I.t) : _ O.t =
   in
   let status =
     concat_msb
-      [ zero 3
+      [ zero 2
       ; core.pc
       ; enable.value
       ; core.rx_level
@@ -147,7 +152,7 @@ let create (i : _ I.t) : _ O.t =
   (* Read data, selected by the address in the command byte as it completes. *)
   let read_addr = select cmd_now 6 0 in
   let read_value =
-    let table = Array.create ~len:(Addr.status + 2) (zero 16) in
+    let table = Array.create ~len:(Addr.timeout + 2) (zero 16) in
     table.(Addr.ctrl) <- uresize enable.value 16;
     table.(Addr.start) <- uresize start.value 16;
     table.(Addr.out_cfg) <- uresize out_cfg.value 16;
@@ -158,6 +163,7 @@ let create (i : _ I.t) : _ O.t =
     table.(Addr.pin_modes) <- pin_modes.value;
     table.(Addr.rx_fifo) <- core.rx_data;
     table.(Addr.status) <- status;
+    table.(Addr.timeout) <- timeout.value;
     (* The last entry is zero, and mux repeats it for higher addresses. *)
     mux read_addr (Array.to_list table)
   in
@@ -182,12 +188,13 @@ let create (i : _ I.t) : _ O.t =
             [ miso_shift <-- sll miso_shift.value 1 ]
         ]
     ; when_ (write_to Addr.ctrl) [ enable <-- select data_now 0 0 ]
-    ; when_ (write_to Addr.start) [ start <-- select data_now 4 0 ]
+    ; when_ (write_to Addr.start) [ start <-- select data_now 5 0 ]
     ; when_ (write_to Addr.out_cfg) [ out_cfg <-- select data_now 7 0 ]
     ; when_ (write_to Addr.set_cfg) [ set_cfg <-- select data_now 7 0 ]
     ; when_ (write_to Addr.in_base) [ in_base <-- select data_now 2 0 ]
     ; when_ (write_to Addr.threshold) [ threshold <-- select data_now 4 0 ]
-    ; when_ (write_to Addr.timeout_vector) [ timeout_vector <-- select data_now 4 0 ]
+    ; when_ (write_to Addr.timeout_vector) [ timeout_vector <-- select data_now 5 0 ]
+    ; when_ (write_to Addr.timeout) [ timeout <-- data_now ]
     ; when_ (write_to Addr.pin_modes) [ pin_modes <-- data_now ]
     ];
   { O.uo_out =

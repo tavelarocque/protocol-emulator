@@ -19,16 +19,17 @@ module I = struct
     ; clear : 'a
     ; enable : 'a (* low: thread held at its initial state *)
     ; prog_we : 'a
-    ; prog_addr : 'a [@bits 5]
+    ; prog_addr : 'a [@bits 6]
     ; prog_data : 'a [@bits 16]
-    ; start : 'a [@bits 5]
+    ; start : 'a [@bits 6]
     ; out_base : 'a [@bits 3]
     ; out_count : 'a [@bits 4]
     ; set_base : 'a [@bits 3]
     ; set_count : 'a [@bits 4]
     ; in_base : 'a [@bits 3]
     ; threshold : 'a [@bits 5]
-    ; timeout_vector : 'a [@bits 5]
+    ; timeout_vector : 'a [@bits 6]
+    ; timeout : 'a [@bits 16] (* max cycles a [wait ... timeout] stalls *)
     ; pin_modes : 'a [@bits 16] (* 2 bits per pin: 0 input, 1 push-pull, 2 open-drain *)
     ; pins_in : 'a [@bits 8]
     ; tx_push : 'a
@@ -47,7 +48,7 @@ module O = struct
     ; tx_level : 'a [@bits 3]
     ; rx_level : 'a [@bits 3]
     ; (* Architectural state, exposed for differential testing. *)
-      pc : 'a [@bits 5]
+      pc : 'a [@bits 6]
     ; x : 'a [@bits 16]
     ; y : 'a [@bits 16]
     ; isr : 'a [@bits 16]
@@ -55,6 +56,8 @@ module O = struct
     ; osr : 'a [@bits 16]
     ; osr_count : 'a [@bits 5]
     ; delay_left : 'a [@bits 4]
+    ; waiting : 'a
+    ; wait_count : 'a [@bits 16]
     }
   [@@deriving hardcaml]
 end
@@ -71,7 +74,7 @@ module Mutation = struct
   [@@deriving sexp_of, enumerate, equal]
 end
 
-let program_size = 32
+let program_size = 64
 let num_pins = 8
 
 let bit s i = select s i i
@@ -118,7 +121,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
       reg spec ~enable:(i.prog_we &: (i.prog_addr ==:. a)) i.prog_data)
   in
   (* --- Thread state. --- *)
-  let pc = Variable.reg spec ~width:5 in
+  let pc = Variable.reg spec ~width:6 in
   let x = Variable.reg spec ~width:16 in
   let y = Variable.reg spec ~width:16 in
   let isr = Variable.reg spec ~width:16 in
@@ -126,6 +129,10 @@ let create ?mutation (i : _ I.t) : _ O.t =
   let osr = Variable.reg spec ~width:16 in
   let osr_count = Variable.reg spec ~width:5 in
   let delay_left = Variable.reg spec ~width:4 in
+  (* Wait-timeout budget: loaded from [i.timeout] when a timed wait starts
+     stalling, counted down while it stalls. Independent of X and Y. *)
+  let waiting = Variable.reg spec ~width:1 in
+  let wait_count = Variable.reg spec ~width:16 in
   (* Pins reset to all ones: idle-high for UART, released for open-drain. *)
   let pin_out =
     Variable.reg (Reg_spec.override spec ~clear_to:(ones num_pins)) ~width:num_pins
@@ -176,8 +183,10 @@ let create ?mutation (i : _ I.t) : _ O.t =
   let wait_level = mux (select instr 7 5) (bits_lsb lines) in
   let wait_ok = wait_level ==: bit instr 8 in
   let wait_timeout = bit instr 4 in
+  let budget = mux2 waiting.value wait_count.value i.timeout in
+  let budget_zero = budget ==:. 0 in
   let wait_expired =
-    if is Wait_timeout_ignores_budget then wait_timeout else wait_timeout &: ~:y_nz
+    if is Wait_timeout_ignores_budget then wait_timeout else wait_timeout &: budget_zero
   in
   (* PUSH / PULL *)
   let is_pull = bit instr 8 in
@@ -194,7 +203,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
     |: (is_op 4 &: ~:is_pull &: rx.full)
   in
   let goto_ = (is_op 0 &: cond_true) |: (is_op 1 &: ~:wait_ok &: wait_expired) in
-  let target = mux2 (is_op 0) (select instr 4 0) i.timeout_vector in
+  let target = mux2 (is_op 0) (select instr 5 0) i.timeout_vector in
   let next_pc = mux2 goto_ target (pc.value +:. 1) in
   let advance = executing &: ~:stall in
   thread_pull <== (executing &: is_op 4 &: is_pull &: ~:(tx.empty));
@@ -228,18 +237,21 @@ let create ?mutation (i : _ I.t) : _ O.t =
         ; osr <--. 0
         ; osr_count <-- i.threshold
         ; delay_left <--. 0
+        ; waiting <--. 0
+        ; wait_count <--. 0
         ]
       @@ elif
            (delay_left.value <>:. 0)
            [ delay_left <-- delay_left.value -:. 1 ]
-           [ (* Executing. WAIT with a timeout spends its budget while it
-                stalls; every other effect happens only when not stalled. *)
+           [ (* Executing. A timed WAIT spends its budget while it stalls;
+                every other effect happens only when not stalled. *)
              when_
-               (is_op 1 &: ~:wait_ok &: wait_timeout &: y_nz)
-               [ y <-- y.value -:. 1 ]
+               (is_op 1 &: ~:wait_ok &: wait_timeout &: ~:budget_zero)
+               [ waiting <--. 1; wait_count <-- budget -:. 1 ]
            ; when_
                advance
                [ pc <-- next_pc
+               ; waiting <--. 0
                ; (delay_left <-- if is Delay_field_ignored then zero 4 else delay)
                ; switch
                    op
@@ -342,5 +354,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
   ; osr = osr.value
   ; osr_count = osr_count.value
   ; delay_left = delay_left.value
+  ; waiting = waiting.value
+  ; wait_count = wait_count.value
   }
 ;;
