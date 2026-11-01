@@ -72,6 +72,7 @@ independent protocol oracles.
 | Two threads | demo images on the model and the chip | SPI and UART running together, each judged by its own oracle; isolation: the SPI waveform is identical, cycle for cycle, whether or not the UART thread runs; the bridge: an I2C read (checked by the I2C oracles) comes out as one SPI transfer (checked by the SPI oracles), with the host never touching the data |
 | Whole chip | `hw/top.ml` through its pins only | bit-banged SPI host: register read-back, echo firmware through both FIFOs, UART firmware decoded on the pin |
 | Protocols | UART, I2C, SPI firmware | independent protocol oracles on the pins: UART waveform + receiver; I2C bus checker + target device that ACKs and stretches SCL; SPI mode-0 checker + slave with scripted responses |
+| Coverage closure | 16 cross bins random testing reaches rarely | AI-written directed scenarios, each judged by the same lockstep comparison and required to hit its own targets; they close every cross bin and catch every planted bug ([`docs/coverage-closure.md`](docs/coverage-closure.md)) |
 | Silicon netlist | post-layout gates | the same chip-level tests in cocotb, with separate Python protocol models, on RTL and gate-level netlist |
 | **Formal** | core RTL against an independent spec | **SAT equivalence proof** (Hardcaml_verify + Z3): one clock of the two-thread RTL equals one step of [`sim/spec_step.ml`](sim/spec_step.ml) in each thread, for every state, instruction word, input and configuration; the spec itself matches the reference model on all 65,536 instruction words. The code joining the threads is shared by both sides of the proof, so it is covered by the differential test instead |
 
@@ -125,11 +126,12 @@ works.
 ```
 hw/      Hardcaml RTL: pe_core (two threads), tiny_fifo, top (SPI port + registers)
 model/   reference model, assembler, firmware, UART oracles (no dependency on hw/)
-sim/     OCaml tests: ISA, differential core test, formal proof, firmware, chip-level tests
+sim/     OCaml tests: ISA, lockstep harness, random and directed differential tests,
+         formal proof, firmware, chip-level tests
 bin/     Verilog generator, firmware hex generator
 src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v
 test/    cocotb testbench (RTL and gate-level) + generated firmware .hex
-docs/    isa.md (instruction set), info.md (datasheet)
+docs/    isa.md (instruction set), info.md (datasheet), coverage-closure.md
 ```
 
 ## Running
@@ -152,11 +154,11 @@ then `cd test && make`.
 
 ## Metrics
 
-From the GDS build reports. Timing is checked at 50 MHz (20 ns); the chip is
-specified for 10 MHz. +6.3 ns of setup slack puts the critical path near 14 ns,
-about 73 MHz.
+From the GDS build reports. Timing is checked at 50 MHz (20 ns), the worst
+(slow, hot) corner; the chip is specified for 10 MHz.
 
 | Design | Std cells | Utilisation (6x4) | Setup slack | Hold slack |
 |--------|-----------|-------------------|-------------|------------|
 | UART bring-up | 328 | 0.5% | +12.4 ns | +0.17 ns |
-| Full chip (SPI + 1-thread core) | 8,002 | 12.5% | +6.3 ns | +0.14 ns |
+| Full chip v0 (SPI + 1-thread core, 32 words) | 8,002 | 12.5% | +6.3 ns | +0.14 ns |
+| Full chip v1.1 (1 thread, 64 words, side-set) | 11,838 | 19.1% | +3.87 ns | +0.13 ns |
