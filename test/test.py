@@ -271,3 +271,117 @@ async def test_i2c(dut):
     assert monitor.events == expected, f"bus: {monitor.events}"
     assert target.received == data, f"target got {target.received}"
     assert reports == [0] * (len(data) + 1), f"ACK reports {reports}"
+
+
+# --- SPI --------------------------------------------------------------------
+#
+# A Python SPI mode-0 slave and monitor, separate from model/spi_model.ml.
+# P0 SCK, P1 MOSI, P3 CS_N are driven by the chip; P2 MISO by the slave.
+# Undriven pins read as the board pulls them: SCK low, CS_N high.
+
+OUT_CFG, IN_BASE = 0x42, 0x44
+
+
+def rev8(b):
+    return int(f"{b:08b}"[::-1], 2)
+
+
+class SpiSlave:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.received = []
+        self.selected, self.shift, self.bits = False, 0, 0
+        self.out, self.fresh, self.miso, self.prev_sck = 0xFF, False, 1, 0
+
+    def _load(self):
+        self.out = self.responses.pop(0) if self.responses else 0xFF
+        self.fresh, self.miso = True, (self.out >> 7) & 1
+
+    def step(self, sck, mosi, cs_n):
+        rise, fall = (not self.prev_sck and sck), (self.prev_sck and not sck)
+        if cs_n:
+            self.selected, self.miso = False, 1
+        elif not self.selected:
+            self.selected, self.shift, self.bits = True, 0, 0
+            if self.fresh:
+                self.miso = (self.out >> 7) & 1
+            else:
+                self._load()
+        elif rise:
+            self.shift = ((self.shift << 1) | mosi) & 0xFF
+            self.bits += 1
+            self.fresh = False
+        elif fall:
+            if self.bits == 8:
+                self.received.append(self.shift)
+                self.shift, self.bits = 0, 0
+                self._load()
+            else:
+                self.miso = (self.out >> (7 - self.bits)) & 1
+        self.prev_sck = sck
+
+
+class SpiMonitor:
+    def __init__(self):
+        self.prev = (0, 0, 1)
+        self.mosi_bits, self.miso_bits = [], []
+        self.events, self.errors = [], []
+
+    def step(self, sck, mosi, miso, cs_n):
+        psck, pmosi, pcs = self.prev
+        if cs_n != pcs:
+            if sck or psck:
+                self.errors.append("CS_N changed while SCK high")
+            if cs_n and self.mosi_bits:
+                self.errors.append(f"deselected after {len(self.mosi_bits)} bits")
+            self.events.append("DESELECT" if cs_n else "SELECT")
+            self.mosi_bits, self.miso_bits = [], []
+        elif not cs_n:
+            if psck and sck and mosi != pmosi:
+                self.errors.append("MOSI changed while SCK high")
+            if not psck and sck:
+                self.mosi_bits.append(mosi)
+                self.miso_bits.append(miso)
+                if len(self.mosi_bits) == 8:
+                    to = lambda bits: int("".join(map(str, bits)), 2)
+                    self.events.append((to(self.mosi_bits), to(self.miso_bits)))
+                    self.mosi_bits, self.miso_bits = [], []
+        self.prev = (sck, mosi, cs_n)
+
+
+async def spi_bus(dut, slave, monitor):
+    while True:
+        await FallingEdge(dut.clk)
+        out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+        sck = (out & 1) if oe & 1 else 0
+        mosi = ((out >> 1) & 1) if oe & 2 else 0
+        cs_n = ((out >> 3) & 1) if oe & 8 else 1
+        miso = slave.miso
+        dut.uio_in.value = miso << 2
+        monitor.step(sck, mosi, miso, cs_n)
+        slave.step(sck, mosi, cs_n)
+
+
+@cocotb.test()
+async def test_spi(dut):
+    """SPI controller firmware loaded over SPI, full duplex with a slave."""
+    await reset(dut)
+    sent, responses = [0x9F, 0x00, 0xA5], [0x11, 0xEF, 0x5A]
+    slave, monitor = SpiSlave(responses), SpiMonitor()
+    await load(dut, firmware("spi_controller"))
+    await write(dut, SET_CFG, 0x10)  # SET drives SCK: base 0, count 1
+    await write(dut, OUT_CFG, 0x31)  # OUT/MOV: base 1 (MOSI), count 3 (.., CS_N)
+    await write(dut, IN_BASE, 2)  # MISO
+    await write(dut, PIN_MODES, 0b01_00_01_01)  # P0, P1, P3 push-pull; P2 input
+    bus = cocotb.start_soon(spi_bus(dut, slave, monitor))
+    await write(dut, CTRL, 1)
+    words = [1] + [rev8(b) | ((i == len(sent) - 1) << 8) for i, b in enumerate(sent)]
+    for w in words:
+        await push(dut, w)
+    got = [rev8((await pop(dut)) & 0xFF) for _ in sent]
+    await ClockCycles(dut.clk, 200)
+    bus.cancel()
+    assert monitor.errors == [], monitor.errors
+    assert monitor.events == ["SELECT"] + list(zip(sent, responses)) + ["DESELECT"], monitor.events
+    assert slave.received == sent, f"slave got {slave.received}"
+    assert got == responses, f"host got {got}"
