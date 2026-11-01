@@ -16,3 +16,11 @@
   (with-stdout-to
    echo.hex
    (run %{dep:../bin/firmware_hex.exe} echo))))
+
+(rule
+ (targets i2c_controller.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i2c_controller.hex
+   (run %{dep:../bin/firmware_hex.exe} i2c_controller))))

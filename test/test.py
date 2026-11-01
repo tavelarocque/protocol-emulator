@@ -12,7 +12,7 @@ import os
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, RisingEdge
+from cocotb.triggers import ClockCycles, FallingEdge, RisingEdge
 
 HALF = 6  # core clocks per SCK phase (must be >= 4)
 
@@ -154,3 +154,120 @@ async def test_uart_tx(dut):
     recorder.cancel()
     got = uart_decode(samples, divisor)
     assert got == data, f"sent {data}, decoded {got}"
+
+
+# --- I2C --------------------------------------------------------------------
+#
+# A Python I2C target and bus monitor, written separately from the OCaml
+# ones in model/i2c_model.ml so the two cannot share a misreading of the
+# spec. The open-drain bus is resolved every clock: a line is low if the
+# chip drives it (uio_oe set on an open-drain pin) or the target pulls it.
+
+SET_CFG, TIMEOUT_VECTOR, TIMEOUT = 0x43, 0x46, 0x4B
+I2C_TIMEOUT_VECTOR = 42  # Firmware.i2c_timeout_vector; checked by the OCaml tests
+
+
+def i2c_words(address, data):
+    """Host words for one write transaction (see model/firmware.ml)."""
+    raw = [address << 1] + list(data)
+    out = []
+    for i, b in enumerate(raw):
+        rev = int(f"{b:08b}"[::-1], 2)
+        out.append(rev | (1 << 8) | ((i == len(raw) - 1) << 9))
+    return out
+
+
+class I2cTarget:
+    def __init__(self, address, stretch):
+        self.address, self.stretch = address, stretch
+        self.state, self.bits, self.shift = "idle", 0, 0
+        self.first = True
+        self.stretch_left = 0
+        self.prev = (1, 1)
+        self.received = []
+
+    def drive(self):
+        """(pull SDA low, pull SCL low) for this cycle."""
+        return self.state == "ack", self.stretch_left > 0
+
+    def step(self, sda, scl):
+        psda, pscl = self.prev
+        if self.stretch_left:
+            self.stretch_left -= 1
+        if pscl and scl and sda != psda:
+            if sda == 0:
+                self.state, self.bits, self.shift, self.first = "rx", 0, 0, True
+            else:
+                self.state = "idle"
+        elif self.state == "rx" and not pscl and scl:
+            self.shift = ((self.shift << 1) | sda) & 0xFF
+            self.bits += 1
+        elif self.state == "rx" and self.bits == 8 and pscl and not scl:
+            if self.first:
+                ok = (self.shift >> 1) == self.address and not (self.shift & 1)
+                self.state = "ack" if ok else "ignore"
+            else:
+                self.received.append(self.shift)
+                self.state = "ack"
+        elif self.state == "ack" and pscl and not scl:
+            self.state, self.bits, self.shift, self.first = "rx", 0, 0, False
+            self.stretch_left = self.stretch
+        self.prev = (sda, scl)
+
+
+class I2cMonitor:
+    def __init__(self):
+        self.events, self.errors = [], []
+        self.prev, self.bits, self.active = (1, 1), [], False
+
+    def step(self, sda, scl):
+        psda, pscl = self.prev
+        if pscl and scl and sda != psda:
+            if 2 <= len(self.bits) <= 8:
+                self.errors.append(f"START/STOP after {len(self.bits)} bits")
+            self.events.append("START" if sda == 0 else "STOP")
+            self.active, self.bits = sda == 0, []
+        elif self.active and not pscl and scl:
+            self.bits.append(sda)
+            if len(self.bits) == 9:
+                value = int("".join(map(str, self.bits[:8])), 2)
+                self.events.append((value, "ACK" if self.bits[8] == 0 else "NACK"))
+                self.bits = []
+        self.prev = (sda, scl)
+
+
+async def i2c_bus(dut, target, monitor):
+    while True:
+        await FallingEdge(dut.clk)  # mid-cycle: chip outputs have settled
+        oe = int(dut.uio_oe.value)
+        t_sda, t_scl = target.drive()
+        sda = 0 if (oe & 1 or t_sda) else 1
+        scl = 0 if (oe & 2 or t_scl) else 1
+        dut.uio_in.value = 0xFC | sda | (scl << 1)
+        target.step(sda, scl)
+        monitor.step(sda, scl)
+
+
+@cocotb.test()
+async def test_i2c(dut):
+    """I2C firmware loaded over SPI writes to a target that stretches SCL."""
+    await reset(dut)
+    address, data = 0x3C, [0xAE, 0x5A, 0x00]
+    target, monitor = I2cTarget(address, stretch=40), I2cMonitor()
+    await load(dut, firmware("i2c_controller"))
+    await write(dut, SET_CFG, 0x11)  # SET drives SCL: base 1, count 1
+    await write(dut, TIMEOUT_VECTOR, I2C_TIMEOUT_VECTOR)
+    await write(dut, TIMEOUT, 10000)
+    await write(dut, PIN_MODES, 0b1010)  # P0 SDA, P1 SCL open-drain
+    bus = cocotb.start_soon(i2c_bus(dut, target, monitor))
+    await write(dut, CTRL, 1)
+    for w in [4] + i2c_words(address, data):
+        await push(dut, w)
+    reports = [await pop(dut) for _ in range(len(data) + 1)]
+    await ClockCycles(dut.clk, 400)
+    bus.cancel()
+    assert monitor.errors == [], monitor.errors
+    expected = ["START", (address << 1, "ACK")] + [(b, "ACK") for b in data] + ["STOP"]
+    assert monitor.events == expected, f"bus: {monitor.events}"
+    assert target.received == data, f"target got {target.received}"
+    assert reports == [0] * (len(data) + 1), f"ACK reports {reports}"
