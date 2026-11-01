@@ -23,7 +23,7 @@ module Decode_error = struct
     | Bad_start_bit of { cycle : int }
     | Bad_stop_bit of { cycle : int }
     | Truncated_frame of { cycle : int }
-  [@@deriving sexp_of, equal]
+  [@@deriving sexp_of, compare, equal]
 end
 
 let decode ~divisor (samples : bool list) : (int list, Decode_error.t) Result.t =
