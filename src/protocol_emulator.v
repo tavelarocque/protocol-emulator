@@ -117,17 +117,17 @@ module protocol_emulator (
     wire [1:0] _334;
     wire _335;
     wire _336;
-    reg [15:0] _337;
+    reg [15:0] rx_mem_3;
     wire _329;
     wire _330;
-    reg [15:0] _331;
+    reg [15:0] rx_mem_2;
     wire _323;
     wire _324;
-    reg [15:0] _325;
+    reg [15:0] rx_mem_1;
     wire [1:0] _178;
     wire [1:0] _179;
     wire [1:0] _3;
-    reg [1:0] _176;
+    reg [1:0] rx_wr;
     wire _317;
     wire _318;
     wire [15:0] _212;
@@ -157,11 +157,11 @@ module protocol_emulator (
     wire [31:0] _214;
     wire [15:0] _215;
     wire [15:0] _4;
-    reg [15:0] _319;
+    reg [15:0] rx_mem_0;
     wire [1:0] _224;
     wire [1:0] _225;
     wire [1:0] _5;
-    reg [1:0] _222;
+    reg [1:0] rx_rd;
     reg [15:0] _338;
     wire [9:0] _309;
     wire [15:0] _313;
@@ -233,7 +233,7 @@ module protocol_emulator (
     wire [2:0] _786;
     wire [2:0] _789;
     wire [2:0] _9;
-    reg [2:0] _169;
+    reg [2:0] rx_level;
     wire _171;
     wire _903;
     wire _902;
@@ -249,255 +249,255 @@ module protocol_emulator (
     wire [5:0] _770;
     wire _771;
     wire _772;
-    reg [15:0] _773;
+    reg [15:0] prog_63;
     wire [5:0] _764;
     wire _765;
     wire _766;
-    reg [15:0] _767;
+    reg [15:0] prog_62;
     wire [5:0] _758;
     wire _759;
     wire _760;
-    reg [15:0] _761;
+    reg [15:0] prog_61;
     wire [5:0] _752;
     wire _753;
     wire _754;
-    reg [15:0] _755;
+    reg [15:0] prog_60;
     wire [5:0] _746;
     wire _747;
     wire _748;
-    reg [15:0] _749;
+    reg [15:0] prog_59;
     wire [5:0] _740;
     wire _741;
     wire _742;
-    reg [15:0] _743;
+    reg [15:0] prog_58;
     wire [5:0] _734;
     wire _735;
     wire _736;
-    reg [15:0] _737;
+    reg [15:0] prog_57;
     wire [5:0] _728;
     wire _729;
     wire _730;
-    reg [15:0] _731;
+    reg [15:0] prog_56;
     wire [5:0] _722;
     wire _723;
     wire _724;
-    reg [15:0] _725;
+    reg [15:0] prog_55;
     wire [5:0] _716;
     wire _717;
     wire _718;
-    reg [15:0] _719;
+    reg [15:0] prog_54;
     wire [5:0] _710;
     wire _711;
     wire _712;
-    reg [15:0] _713;
+    reg [15:0] prog_53;
     wire [5:0] _704;
     wire _705;
     wire _706;
-    reg [15:0] _707;
+    reg [15:0] prog_52;
     wire [5:0] _698;
     wire _699;
     wire _700;
-    reg [15:0] _701;
+    reg [15:0] prog_51;
     wire [5:0] _692;
     wire _693;
     wire _694;
-    reg [15:0] _695;
+    reg [15:0] prog_50;
     wire [5:0] _686;
     wire _687;
     wire _688;
-    reg [15:0] _689;
+    reg [15:0] prog_49;
     wire [5:0] _680;
     wire _681;
     wire _682;
-    reg [15:0] _683;
+    reg [15:0] prog_48;
     wire [5:0] _674;
     wire _675;
     wire _676;
-    reg [15:0] _677;
+    reg [15:0] prog_47;
     wire [5:0] _668;
     wire _669;
     wire _670;
-    reg [15:0] _671;
+    reg [15:0] prog_46;
     wire [5:0] _662;
     wire _663;
     wire _664;
-    reg [15:0] _665;
+    reg [15:0] prog_45;
     wire [5:0] _656;
     wire _657;
     wire _658;
-    reg [15:0] _659;
+    reg [15:0] prog_44;
     wire [5:0] _650;
     wire _651;
     wire _652;
-    reg [15:0] _653;
+    reg [15:0] prog_43;
     wire [5:0] _644;
     wire _645;
     wire _646;
-    reg [15:0] _647;
+    reg [15:0] prog_42;
     wire [5:0] _638;
     wire _639;
     wire _640;
-    reg [15:0] _641;
+    reg [15:0] prog_41;
     wire [5:0] _632;
     wire _633;
     wire _634;
-    reg [15:0] _635;
+    reg [15:0] prog_40;
     wire [5:0] _626;
     wire _627;
     wire _628;
-    reg [15:0] _629;
+    reg [15:0] prog_39;
     wire [5:0] _620;
     wire _621;
     wire _622;
-    reg [15:0] _623;
+    reg [15:0] prog_38;
     wire [5:0] _614;
     wire _615;
     wire _616;
-    reg [15:0] _617;
+    reg [15:0] prog_37;
     wire [5:0] _608;
     wire _609;
     wire _610;
-    reg [15:0] _611;
+    reg [15:0] prog_36;
     wire [5:0] _602;
     wire _603;
     wire _604;
-    reg [15:0] _605;
+    reg [15:0] prog_35;
     wire [5:0] _596;
     wire _597;
     wire _598;
-    reg [15:0] _599;
+    reg [15:0] prog_34;
     wire [5:0] _590;
     wire _591;
     wire _592;
-    reg [15:0] _593;
+    reg [15:0] prog_33;
     wire [5:0] _584;
     wire _585;
     wire _586;
-    reg [15:0] _587;
+    reg [15:0] prog_32;
     wire [5:0] _578;
     wire _579;
     wire _580;
-    reg [15:0] _581;
+    reg [15:0] prog_31;
     wire [5:0] _572;
     wire _573;
     wire _574;
-    reg [15:0] _575;
+    reg [15:0] prog_30;
     wire [5:0] _566;
     wire _567;
     wire _568;
-    reg [15:0] _569;
+    reg [15:0] prog_29;
     wire [5:0] _560;
     wire _561;
     wire _562;
-    reg [15:0] _563;
+    reg [15:0] prog_28;
     wire [5:0] _554;
     wire _555;
     wire _556;
-    reg [15:0] _557;
+    reg [15:0] prog_27;
     wire [5:0] _548;
     wire _549;
     wire _550;
-    reg [15:0] _551;
+    reg [15:0] prog_26;
     wire [5:0] _542;
     wire _543;
     wire _544;
-    reg [15:0] _545;
+    reg [15:0] prog_25;
     wire [5:0] _536;
     wire _537;
     wire _538;
-    reg [15:0] _539;
+    reg [15:0] prog_24;
     wire [5:0] _530;
     wire _531;
     wire _532;
-    reg [15:0] _533;
+    reg [15:0] prog_23;
     wire [5:0] _524;
     wire _525;
     wire _526;
-    reg [15:0] _527;
+    reg [15:0] prog_22;
     wire [5:0] _518;
     wire _519;
     wire _520;
-    reg [15:0] _521;
+    reg [15:0] prog_21;
     wire [5:0] _512;
     wire _513;
     wire _514;
-    reg [15:0] _515;
+    reg [15:0] prog_20;
     wire [5:0] _506;
     wire _507;
     wire _508;
-    reg [15:0] _509;
+    reg [15:0] prog_19;
     wire [5:0] _500;
     wire _501;
     wire _502;
-    reg [15:0] _503;
+    reg [15:0] prog_18;
     wire [5:0] _494;
     wire _495;
     wire _496;
-    reg [15:0] _497;
+    reg [15:0] prog_17;
     wire [5:0] _488;
     wire _489;
     wire _490;
-    reg [15:0] _491;
+    reg [15:0] prog_16;
     wire [5:0] _482;
     wire _483;
     wire _484;
-    reg [15:0] _485;
+    reg [15:0] prog_15;
     wire [5:0] _476;
     wire _477;
     wire _478;
-    reg [15:0] _479;
+    reg [15:0] prog_14;
     wire [5:0] _470;
     wire _471;
     wire _472;
-    reg [15:0] _473;
+    reg [15:0] prog_13;
     wire [5:0] _464;
     wire _465;
     wire _466;
-    reg [15:0] _467;
+    reg [15:0] prog_12;
     wire [5:0] _458;
     wire _459;
     wire _460;
-    reg [15:0] _461;
+    reg [15:0] prog_11;
     wire [5:0] _452;
     wire _453;
     wire _454;
-    reg [15:0] _455;
+    reg [15:0] prog_10;
     wire [5:0] _446;
     wire _447;
     wire _448;
-    reg [15:0] _449;
+    reg [15:0] prog_9;
     wire [5:0] _440;
     wire _441;
     wire _442;
-    reg [15:0] _443;
+    reg [15:0] prog_8;
     wire [5:0] _434;
     wire _435;
     wire _436;
-    reg [15:0] _437;
+    reg [15:0] prog_7;
     wire [5:0] _428;
     wire _429;
     wire _430;
-    reg [15:0] _431;
+    reg [15:0] prog_6;
     wire [5:0] _422;
     wire _423;
     wire _424;
-    reg [15:0] _425;
+    reg [15:0] prog_5;
     wire [5:0] _416;
     wire _417;
     wire _418;
-    reg [15:0] _419;
+    reg [15:0] prog_4;
     wire [5:0] _410;
     wire _411;
     wire _412;
-    reg [15:0] _413;
+    reg [15:0] prog_3;
     wire [5:0] _404;
     wire _405;
     wire _406;
-    reg [15:0] _407;
+    reg [15:0] prog_2;
     wire [5:0] _398;
     wire _399;
     wire _400;
-    reg [15:0] _401;
+    reg [15:0] prog_1;
     wire [5:0] _392;
     wire [5:0] _391;
     wire _393;
@@ -506,7 +506,7 @@ module protocol_emulator (
     wire _386;
     wire _390;
     wire _394;
-    reg [15:0] _395;
+    reg [15:0] prog_0;
     wire [5:0] _794;
     wire [6:0] _791;
     wire _792;
@@ -533,7 +533,7 @@ module protocol_emulator (
     wire [15:0] _879;
     wire [15:0] _881;
     wire [15:0] _12;
-    reg [15:0] _870;
+    reg [15:0] wait_count;
     wire [6:0] _883;
     wire _884;
     wire _882;
@@ -553,7 +553,7 @@ module protocol_emulator (
     wire _913;
     wire _915;
     wire _14;
-    reg _867;
+    reg waiting;
     wire [15:0] _871;
     wire _873;
     wire _863;
@@ -595,7 +595,7 @@ module protocol_emulator (
     wire [4:0] _954;
     wire [4:0] _956;
     wire [4:0] _15;
-    reg [4:0] _183;
+    reg [4:0] isr_count;
     wire _1770;
     wire [4:0] _306;
     wire [4:0] _961;
@@ -626,7 +626,7 @@ module protocol_emulator (
     wire [4:0] _989;
     wire [4:0] _990;
     wire [4:0] _17;
-    reg [4:0] _965;
+    reg [4:0] osr_count;
     wire _1769;
     wire _1767;
     wire _1768;
@@ -792,7 +792,7 @@ module protocol_emulator (
     wire [15:0] _1165;
     wire [15:0] _1167;
     wire [15:0] _19;
-    reg [15:0] _193;
+    reg [15:0] isr;
     wire _847;
     wire _846;
     wire _845;
@@ -1207,7 +1207,7 @@ module protocol_emulator (
     wire [7:0] _1605;
     wire [7:0] _1606;
     wire [7:0] _22;
-    reg [7:0] _57;
+    reg [7:0] pin_out;
     wire _811;
     wire [7:0] _24;
     wire _810;
@@ -1275,24 +1275,24 @@ module protocol_emulator (
     wire [15:0] _1695;
     wire _1662;
     wire _1663;
-    reg [15:0] _1664;
+    reg [15:0] tx_mem_3;
     wire _1656;
     wire _1657;
-    reg [15:0] _1658;
+    reg [15:0] tx_mem_2;
     wire _1650;
     wire _1651;
-    reg [15:0] _1652;
+    reg [15:0] tx_mem_1;
     wire [1:0] _1624;
     wire [1:0] _1625;
     wire [1:0] _26;
-    reg [1:0] _1622;
+    reg [1:0] tx_wr;
     wire _1644;
     wire _1645;
-    reg [15:0] _1646;
+    reg [15:0] tx_mem_0;
     wire [1:0] _1632;
     wire [1:0] _1633;
     wire [1:0] _27;
-    reg [1:0] _1630;
+    reg [1:0] tx_rd;
     reg [15:0] _1665;
     wire _779;
     wire [15:0] _1666;
@@ -1309,7 +1309,7 @@ module protocol_emulator (
     wire [15:0] _1698;
     wire [15:0] _1700;
     wire [15:0] _28;
-    reg [15:0] _1011;
+    reg [15:0] osr;
     wire [15:0] _1478;
     wire [1:0] _1443;
     wire _1716;
@@ -1331,7 +1331,7 @@ module protocol_emulator (
     wire [15:0] _1727;
     wire [15:0] _1729;
     wire [15:0] _29;
-    reg [15:0] _1006;
+    reg [15:0] y;
     reg [15:0] _1013;
     wire _1739;
     wire [15:0] _1740;
@@ -1358,7 +1358,7 @@ module protocol_emulator (
     wire [15:0] _1754;
     wire [15:0] _1756;
     wire [15:0] _30;
-    reg [15:0] _1003;
+    reg [15:0] x;
     wire _1760;
     wire _1761;
     wire _1762;
@@ -1372,7 +1372,7 @@ module protocol_emulator (
     wire [5:0] _1787;
     wire [5:0] _1788;
     wire [5:0] _31;
-    reg [5:0] _342;
+    reg [5:0] pc;
     reg [15:0] _774;
     wire [2:0] _775;
     wire _888;
@@ -1389,7 +1389,7 @@ module protocol_emulator (
     wire _802;
     wire [3:0] _1795;
     wire [3:0] _32;
-    reg [3:0] _372;
+    reg [3:0] delay_left;
     wire _374;
     wire [15:0] _376;
     wire _1800;
@@ -1463,10 +1463,10 @@ module protocol_emulator (
     wire [2:0] _1824;
     wire [2:0] _1827;
     wire [2:0] _44;
-    reg [2:0] _345;
+    reg [2:0] tx_level;
     wire _1830;
     wire [7:0] _1832;
-    assign _121 = _57[0:0];
+    assign _121 = pin_out[0:0];
     assign _122 = ~ _121;
     assign _119 = 2'b10;
     assign _120 = _116 == _119;
@@ -1475,49 +1475,49 @@ module protocol_emulator (
     assign _116 = _49[1:0];
     assign _118 = _116 == _117;
     assign _124 = _118 | _123;
-    assign _112 = _57[1:1];
+    assign _112 = pin_out[1:1];
     assign _113 = ~ _112;
     assign _111 = _107 == _119;
     assign _114 = _111 & _113;
     assign _107 = _49[3:2];
     assign _109 = _107 == _117;
     assign _115 = _109 | _114;
-    assign _103 = _57[2:2];
+    assign _103 = pin_out[2:2];
     assign _104 = ~ _103;
     assign _102 = _98 == _119;
     assign _105 = _102 & _104;
     assign _98 = _49[5:4];
     assign _100 = _98 == _117;
     assign _106 = _100 | _105;
-    assign _94 = _57[3:3];
+    assign _94 = pin_out[3:3];
     assign _95 = ~ _94;
     assign _93 = _89 == _119;
     assign _96 = _93 & _95;
     assign _89 = _49[7:6];
     assign _91 = _89 == _117;
     assign _97 = _91 | _96;
-    assign _85 = _57[4:4];
+    assign _85 = pin_out[4:4];
     assign _86 = ~ _85;
     assign _84 = _80 == _119;
     assign _87 = _84 & _86;
     assign _80 = _49[9:8];
     assign _82 = _80 == _117;
     assign _88 = _82 | _87;
-    assign _76 = _57[5:5];
+    assign _76 = pin_out[5:5];
     assign _77 = ~ _76;
     assign _75 = _71 == _119;
     assign _78 = _75 & _77;
     assign _71 = _49[11:10];
     assign _73 = _71 == _117;
     assign _79 = _73 | _78;
-    assign _67 = _57[6:6];
+    assign _67 = pin_out[6:6];
     assign _68 = ~ _67;
     assign _66 = _62 == _119;
     assign _69 = _66 & _68;
     assign _62 = _49[13:12];
     assign _64 = _62 == _117;
     assign _70 = _64 | _69;
-    assign _58 = _57[7:7];
+    assign _58 = pin_out[7:7];
     assign _59 = ~ _58;
     assign _54 = _50 == _119;
     assign _60 = _54 & _59;
@@ -1532,35 +1532,35 @@ module protocol_emulator (
                     _106,
                     _115,
                     _124 };
-    assign _164 = _57[0:0];
+    assign _164 = pin_out[0:0];
     assign _161 = _49[1:0];
     assign _163 = _161 == _117;
     assign _165 = _163 & _164;
-    assign _159 = _57[1:1];
+    assign _159 = pin_out[1:1];
     assign _156 = _49[3:2];
     assign _158 = _156 == _117;
     assign _160 = _158 & _159;
-    assign _154 = _57[2:2];
+    assign _154 = pin_out[2:2];
     assign _151 = _49[5:4];
     assign _153 = _151 == _117;
     assign _155 = _153 & _154;
-    assign _149 = _57[3:3];
+    assign _149 = pin_out[3:3];
     assign _146 = _49[7:6];
     assign _148 = _146 == _117;
     assign _150 = _148 & _149;
-    assign _144 = _57[4:4];
+    assign _144 = pin_out[4:4];
     assign _141 = _49[9:8];
     assign _143 = _141 == _117;
     assign _145 = _143 & _144;
-    assign _139 = _57[5:5];
+    assign _139 = pin_out[5:5];
     assign _136 = _49[11:10];
     assign _138 = _136 == _117;
     assign _140 = _138 & _139;
-    assign _134 = _57[6:6];
+    assign _134 = pin_out[6:6];
     assign _131 = _49[13:12];
     assign _133 = _131 == _117;
     assign _135 = _133 & _134;
-    assign _129 = _57[7:7];
+    assign _129 = pin_out[7:7];
     assign _126 = _49[15:14];
     assign _128 = _126 == _117;
     assign _130 = _128 & _129;
@@ -1579,49 +1579,49 @@ module protocol_emulator (
                     _356 };
     assign _339 = 2'b00;
     assign _346 = { _339,
-                    _342,
+                    pc,
                     _282,
-                    _169,
+                    rx_level,
                     gnd,
-                    _345 };
+                    tx_level };
     assign _334 = 2'b11;
-    assign _335 = _176 == _334;
+    assign _335 = rx_wr == _334;
     assign _336 = _173 & _335;
     always @(posedge _41) begin
         if (_39)
-            _337 <= _256;
+            rx_mem_3 <= _256;
         else
             if (_336)
-                _337 <= _4;
+                rx_mem_3 <= _4;
     end
-    assign _329 = _176 == _119;
+    assign _329 = rx_wr == _119;
     assign _330 = _173 & _329;
     always @(posedge _41) begin
         if (_39)
-            _331 <= _256;
+            rx_mem_2 <= _256;
         else
             if (_330)
-                _331 <= _4;
+                rx_mem_2 <= _4;
     end
-    assign _323 = _176 == _117;
+    assign _323 = rx_wr == _117;
     assign _324 = _173 & _323;
     always @(posedge _41) begin
         if (_39)
-            _325 <= _256;
+            rx_mem_1 <= _256;
         else
             if (_324)
-                _325 <= _4;
+                rx_mem_1 <= _4;
     end
-    assign _178 = _176 + _117;
-    assign _179 = _173 ? _178 : _176;
+    assign _178 = rx_wr + _117;
+    assign _179 = _173 ? _178 : rx_wr;
     assign _3 = _179;
     always @(posedge _41) begin
         if (_39)
-            _176 <= _339;
+            rx_wr <= _339;
         else
-            _176 <= _3;
+            rx_wr <= _3;
     end
-    assign _317 = _176 == _339;
+    assign _317 = rx_wr == _339;
     assign _318 = _173 & _317;
     assign _212 = _210[31:16];
     assign _213 = { _256,
@@ -1641,7 +1641,7 @@ module protocol_emulator (
     assign _197 = { _356,
                     _196 };
     assign _194 = { _256,
-                    _193 };
+                    isr };
     assign _189 = _184[0:0];
     assign _198 = _189 ? _197 : _194;
     assign _188 = _184[1:1];
@@ -1651,37 +1651,37 @@ module protocol_emulator (
     assign _186 = _184[3:3];
     assign _210 = _186 ? _209 : _206;
     assign _180 = 5'b10000;
-    assign _184 = _180 - _183;
+    assign _184 = _180 - isr_count;
     assign _185 = _184[4:4];
     assign _214 = _185 ? _213 : _210;
     assign _215 = _214[15:0];
     assign _4 = _215;
     always @(posedge _41) begin
         if (_39)
-            _319 <= _256;
+            rx_mem_0 <= _256;
         else
             if (_318)
-                _319 <= _4;
+                rx_mem_0 <= _4;
     end
-    assign _224 = _222 + _117;
-    assign _225 = _219 ? _224 : _222;
+    assign _224 = rx_rd + _117;
+    assign _225 = _219 ? _224 : rx_rd;
     assign _5 = _225;
     always @(posedge _41) begin
         if (_39)
-            _222 <= _339;
+            rx_rd <= _339;
         else
-            _222 <= _5;
+            rx_rd <= _5;
     end
     always @* begin
-        case (_222)
+        case (rx_rd)
         0:
-            _338 <= _319;
+            _338 <= rx_mem_0;
         1:
-            _338 <= _325;
+            _338 <= rx_mem_1;
         2:
-            _338 <= _331;
+            _338 <= rx_mem_2;
         default:
-            _338 <= _337;
+            _338 <= rx_mem_3;
         endcase
     end
     assign _309 = 10'b0000000000;
@@ -1891,11 +1891,11 @@ module protocol_emulator (
     assign _1806 = ~ _898;
     assign _1803 = _775 == _1829;
     assign _1791 = 4'b0001;
-    assign _1792 = _372 - _1791;
+    assign _1792 = delay_left - _1791;
     assign _1789 = _774[12:9];
-    assign _217 = _169 == _344;
+    assign _217 = rx_level == _344;
     assign _218 = ~ _217;
-    assign _274 = _169 == _344;
+    assign _274 = rx_level == _344;
     assign _275 = ~ _274;
     assign _270 = _269[6:0];
     assign _367 = _270 == _271;
@@ -1922,21 +1922,21 @@ module protocol_emulator (
     assign _173 = _8 & _172;
     assign _785 = { _339,
                     _173 };
-    assign _786 = _169 + _785;
+    assign _786 = rx_level + _785;
     assign _789 = _786 - _788;
     assign _9 = _789;
     always @(posedge _41) begin
         if (_39)
-            _169 <= _344;
+            rx_level <= _344;
         else
-            _169 <= _9;
+            rx_level <= _9;
     end
-    assign _171 = _169 == _1829;
+    assign _171 = rx_level == _1829;
     assign _903 = ~ _779;
     assign _902 = _775 == _1829;
     assign _904 = _902 & _903;
     assign _905 = _904 & _171;
-    assign _898 = _345 == _344;
+    assign _898 = tx_level == _344;
     assign _895 = _775 == _1829;
     assign _896 = _895 & _779;
     assign _899 = _896 & _898;
@@ -1948,630 +1948,630 @@ module protocol_emulator (
     assign _772 = _390 & _771;
     always @(posedge _41) begin
         if (_39)
-            _773 <= _256;
+            prog_63 <= _256;
         else
             if (_772)
-                _773 <= _376;
+                prog_63 <= _376;
     end
     assign _764 = 6'b111110;
     assign _765 = _391 == _764;
     assign _766 = _390 & _765;
     always @(posedge _41) begin
         if (_39)
-            _767 <= _256;
+            prog_62 <= _256;
         else
             if (_766)
-                _767 <= _376;
+                prog_62 <= _376;
     end
     assign _758 = 6'b111101;
     assign _759 = _391 == _758;
     assign _760 = _390 & _759;
     always @(posedge _41) begin
         if (_39)
-            _761 <= _256;
+            prog_61 <= _256;
         else
             if (_760)
-                _761 <= _376;
+                prog_61 <= _376;
     end
     assign _752 = 6'b111100;
     assign _753 = _391 == _752;
     assign _754 = _390 & _753;
     always @(posedge _41) begin
         if (_39)
-            _755 <= _256;
+            prog_60 <= _256;
         else
             if (_754)
-                _755 <= _376;
+                prog_60 <= _376;
     end
     assign _746 = 6'b111011;
     assign _747 = _391 == _746;
     assign _748 = _390 & _747;
     always @(posedge _41) begin
         if (_39)
-            _749 <= _256;
+            prog_59 <= _256;
         else
             if (_748)
-                _749 <= _376;
+                prog_59 <= _376;
     end
     assign _740 = 6'b111010;
     assign _741 = _391 == _740;
     assign _742 = _390 & _741;
     always @(posedge _41) begin
         if (_39)
-            _743 <= _256;
+            prog_58 <= _256;
         else
             if (_742)
-                _743 <= _376;
+                prog_58 <= _376;
     end
     assign _734 = 6'b111001;
     assign _735 = _391 == _734;
     assign _736 = _390 & _735;
     always @(posedge _41) begin
         if (_39)
-            _737 <= _256;
+            prog_57 <= _256;
         else
             if (_736)
-                _737 <= _376;
+                prog_57 <= _376;
     end
     assign _728 = 6'b111000;
     assign _729 = _391 == _728;
     assign _730 = _390 & _729;
     always @(posedge _41) begin
         if (_39)
-            _731 <= _256;
+            prog_56 <= _256;
         else
             if (_730)
-                _731 <= _376;
+                prog_56 <= _376;
     end
     assign _722 = 6'b110111;
     assign _723 = _391 == _722;
     assign _724 = _390 & _723;
     always @(posedge _41) begin
         if (_39)
-            _725 <= _256;
+            prog_55 <= _256;
         else
             if (_724)
-                _725 <= _376;
+                prog_55 <= _376;
     end
     assign _716 = 6'b110110;
     assign _717 = _391 == _716;
     assign _718 = _390 & _717;
     always @(posedge _41) begin
         if (_39)
-            _719 <= _256;
+            prog_54 <= _256;
         else
             if (_718)
-                _719 <= _376;
+                prog_54 <= _376;
     end
     assign _710 = 6'b110101;
     assign _711 = _391 == _710;
     assign _712 = _390 & _711;
     always @(posedge _41) begin
         if (_39)
-            _713 <= _256;
+            prog_53 <= _256;
         else
             if (_712)
-                _713 <= _376;
+                prog_53 <= _376;
     end
     assign _704 = 6'b110100;
     assign _705 = _391 == _704;
     assign _706 = _390 & _705;
     always @(posedge _41) begin
         if (_39)
-            _707 <= _256;
+            prog_52 <= _256;
         else
             if (_706)
-                _707 <= _376;
+                prog_52 <= _376;
     end
     assign _698 = 6'b110011;
     assign _699 = _391 == _698;
     assign _700 = _390 & _699;
     always @(posedge _41) begin
         if (_39)
-            _701 <= _256;
+            prog_51 <= _256;
         else
             if (_700)
-                _701 <= _376;
+                prog_51 <= _376;
     end
     assign _692 = 6'b110010;
     assign _693 = _391 == _692;
     assign _694 = _390 & _693;
     always @(posedge _41) begin
         if (_39)
-            _695 <= _256;
+            prog_50 <= _256;
         else
             if (_694)
-                _695 <= _376;
+                prog_50 <= _376;
     end
     assign _686 = 6'b110001;
     assign _687 = _391 == _686;
     assign _688 = _390 & _687;
     always @(posedge _41) begin
         if (_39)
-            _689 <= _256;
+            prog_49 <= _256;
         else
             if (_688)
-                _689 <= _376;
+                prog_49 <= _376;
     end
     assign _680 = 6'b110000;
     assign _681 = _391 == _680;
     assign _682 = _390 & _681;
     always @(posedge _41) begin
         if (_39)
-            _683 <= _256;
+            prog_48 <= _256;
         else
             if (_682)
-                _683 <= _376;
+                prog_48 <= _376;
     end
     assign _674 = 6'b101111;
     assign _675 = _391 == _674;
     assign _676 = _390 & _675;
     always @(posedge _41) begin
         if (_39)
-            _677 <= _256;
+            prog_47 <= _256;
         else
             if (_676)
-                _677 <= _376;
+                prog_47 <= _376;
     end
     assign _668 = 6'b101110;
     assign _669 = _391 == _668;
     assign _670 = _390 & _669;
     always @(posedge _41) begin
         if (_39)
-            _671 <= _256;
+            prog_46 <= _256;
         else
             if (_670)
-                _671 <= _376;
+                prog_46 <= _376;
     end
     assign _662 = 6'b101101;
     assign _663 = _391 == _662;
     assign _664 = _390 & _663;
     always @(posedge _41) begin
         if (_39)
-            _665 <= _256;
+            prog_45 <= _256;
         else
             if (_664)
-                _665 <= _376;
+                prog_45 <= _376;
     end
     assign _656 = 6'b101100;
     assign _657 = _391 == _656;
     assign _658 = _390 & _657;
     always @(posedge _41) begin
         if (_39)
-            _659 <= _256;
+            prog_44 <= _256;
         else
             if (_658)
-                _659 <= _376;
+                prog_44 <= _376;
     end
     assign _650 = 6'b101011;
     assign _651 = _391 == _650;
     assign _652 = _390 & _651;
     always @(posedge _41) begin
         if (_39)
-            _653 <= _256;
+            prog_43 <= _256;
         else
             if (_652)
-                _653 <= _376;
+                prog_43 <= _376;
     end
     assign _644 = 6'b101010;
     assign _645 = _391 == _644;
     assign _646 = _390 & _645;
     always @(posedge _41) begin
         if (_39)
-            _647 <= _256;
+            prog_42 <= _256;
         else
             if (_646)
-                _647 <= _376;
+                prog_42 <= _376;
     end
     assign _638 = 6'b101001;
     assign _639 = _391 == _638;
     assign _640 = _390 & _639;
     always @(posedge _41) begin
         if (_39)
-            _641 <= _256;
+            prog_41 <= _256;
         else
             if (_640)
-                _641 <= _376;
+                prog_41 <= _376;
     end
     assign _632 = 6'b101000;
     assign _633 = _391 == _632;
     assign _634 = _390 & _633;
     always @(posedge _41) begin
         if (_39)
-            _635 <= _256;
+            prog_40 <= _256;
         else
             if (_634)
-                _635 <= _376;
+                prog_40 <= _376;
     end
     assign _626 = 6'b100111;
     assign _627 = _391 == _626;
     assign _628 = _390 & _627;
     always @(posedge _41) begin
         if (_39)
-            _629 <= _256;
+            prog_39 <= _256;
         else
             if (_628)
-                _629 <= _376;
+                prog_39 <= _376;
     end
     assign _620 = 6'b100110;
     assign _621 = _391 == _620;
     assign _622 = _390 & _621;
     always @(posedge _41) begin
         if (_39)
-            _623 <= _256;
+            prog_38 <= _256;
         else
             if (_622)
-                _623 <= _376;
+                prog_38 <= _376;
     end
     assign _614 = 6'b100101;
     assign _615 = _391 == _614;
     assign _616 = _390 & _615;
     always @(posedge _41) begin
         if (_39)
-            _617 <= _256;
+            prog_37 <= _256;
         else
             if (_616)
-                _617 <= _376;
+                prog_37 <= _376;
     end
     assign _608 = 6'b100100;
     assign _609 = _391 == _608;
     assign _610 = _390 & _609;
     always @(posedge _41) begin
         if (_39)
-            _611 <= _256;
+            prog_36 <= _256;
         else
             if (_610)
-                _611 <= _376;
+                prog_36 <= _376;
     end
     assign _602 = 6'b100011;
     assign _603 = _391 == _602;
     assign _604 = _390 & _603;
     always @(posedge _41) begin
         if (_39)
-            _605 <= _256;
+            prog_35 <= _256;
         else
             if (_604)
-                _605 <= _376;
+                prog_35 <= _376;
     end
     assign _596 = 6'b100010;
     assign _597 = _391 == _596;
     assign _598 = _390 & _597;
     always @(posedge _41) begin
         if (_39)
-            _599 <= _256;
+            prog_34 <= _256;
         else
             if (_598)
-                _599 <= _376;
+                prog_34 <= _376;
     end
     assign _590 = 6'b100001;
     assign _591 = _391 == _590;
     assign _592 = _390 & _591;
     always @(posedge _41) begin
         if (_39)
-            _593 <= _256;
+            prog_33 <= _256;
         else
             if (_592)
-                _593 <= _376;
+                prog_33 <= _376;
     end
     assign _584 = 6'b100000;
     assign _585 = _391 == _584;
     assign _586 = _390 & _585;
     always @(posedge _41) begin
         if (_39)
-            _587 <= _256;
+            prog_32 <= _256;
         else
             if (_586)
-                _587 <= _376;
+                prog_32 <= _376;
     end
     assign _578 = 6'b011111;
     assign _579 = _391 == _578;
     assign _580 = _390 & _579;
     always @(posedge _41) begin
         if (_39)
-            _581 <= _256;
+            prog_31 <= _256;
         else
             if (_580)
-                _581 <= _376;
+                prog_31 <= _376;
     end
     assign _572 = 6'b011110;
     assign _573 = _391 == _572;
     assign _574 = _390 & _573;
     always @(posedge _41) begin
         if (_39)
-            _575 <= _256;
+            prog_30 <= _256;
         else
             if (_574)
-                _575 <= _376;
+                prog_30 <= _376;
     end
     assign _566 = 6'b011101;
     assign _567 = _391 == _566;
     assign _568 = _390 & _567;
     always @(posedge _41) begin
         if (_39)
-            _569 <= _256;
+            prog_29 <= _256;
         else
             if (_568)
-                _569 <= _376;
+                prog_29 <= _376;
     end
     assign _560 = 6'b011100;
     assign _561 = _391 == _560;
     assign _562 = _390 & _561;
     always @(posedge _41) begin
         if (_39)
-            _563 <= _256;
+            prog_28 <= _256;
         else
             if (_562)
-                _563 <= _376;
+                prog_28 <= _376;
     end
     assign _554 = 6'b011011;
     assign _555 = _391 == _554;
     assign _556 = _390 & _555;
     always @(posedge _41) begin
         if (_39)
-            _557 <= _256;
+            prog_27 <= _256;
         else
             if (_556)
-                _557 <= _376;
+                prog_27 <= _376;
     end
     assign _548 = 6'b011010;
     assign _549 = _391 == _548;
     assign _550 = _390 & _549;
     always @(posedge _41) begin
         if (_39)
-            _551 <= _256;
+            prog_26 <= _256;
         else
             if (_550)
-                _551 <= _376;
+                prog_26 <= _376;
     end
     assign _542 = 6'b011001;
     assign _543 = _391 == _542;
     assign _544 = _390 & _543;
     always @(posedge _41) begin
         if (_39)
-            _545 <= _256;
+            prog_25 <= _256;
         else
             if (_544)
-                _545 <= _376;
+                prog_25 <= _376;
     end
     assign _536 = 6'b011000;
     assign _537 = _391 == _536;
     assign _538 = _390 & _537;
     always @(posedge _41) begin
         if (_39)
-            _539 <= _256;
+            prog_24 <= _256;
         else
             if (_538)
-                _539 <= _376;
+                prog_24 <= _376;
     end
     assign _530 = 6'b010111;
     assign _531 = _391 == _530;
     assign _532 = _390 & _531;
     always @(posedge _41) begin
         if (_39)
-            _533 <= _256;
+            prog_23 <= _256;
         else
             if (_532)
-                _533 <= _376;
+                prog_23 <= _376;
     end
     assign _524 = 6'b010110;
     assign _525 = _391 == _524;
     assign _526 = _390 & _525;
     always @(posedge _41) begin
         if (_39)
-            _527 <= _256;
+            prog_22 <= _256;
         else
             if (_526)
-                _527 <= _376;
+                prog_22 <= _376;
     end
     assign _518 = 6'b010101;
     assign _519 = _391 == _518;
     assign _520 = _390 & _519;
     always @(posedge _41) begin
         if (_39)
-            _521 <= _256;
+            prog_21 <= _256;
         else
             if (_520)
-                _521 <= _376;
+                prog_21 <= _376;
     end
     assign _512 = 6'b010100;
     assign _513 = _391 == _512;
     assign _514 = _390 & _513;
     always @(posedge _41) begin
         if (_39)
-            _515 <= _256;
+            prog_20 <= _256;
         else
             if (_514)
-                _515 <= _376;
+                prog_20 <= _376;
     end
     assign _506 = 6'b010011;
     assign _507 = _391 == _506;
     assign _508 = _390 & _507;
     always @(posedge _41) begin
         if (_39)
-            _509 <= _256;
+            prog_19 <= _256;
         else
             if (_508)
-                _509 <= _376;
+                prog_19 <= _376;
     end
     assign _500 = 6'b010010;
     assign _501 = _391 == _500;
     assign _502 = _390 & _501;
     always @(posedge _41) begin
         if (_39)
-            _503 <= _256;
+            prog_18 <= _256;
         else
             if (_502)
-                _503 <= _376;
+                prog_18 <= _376;
     end
     assign _494 = 6'b010001;
     assign _495 = _391 == _494;
     assign _496 = _390 & _495;
     always @(posedge _41) begin
         if (_39)
-            _497 <= _256;
+            prog_17 <= _256;
         else
             if (_496)
-                _497 <= _376;
+                prog_17 <= _376;
     end
     assign _488 = 6'b010000;
     assign _489 = _391 == _488;
     assign _490 = _390 & _489;
     always @(posedge _41) begin
         if (_39)
-            _491 <= _256;
+            prog_16 <= _256;
         else
             if (_490)
-                _491 <= _376;
+                prog_16 <= _376;
     end
     assign _482 = 6'b001111;
     assign _483 = _391 == _482;
     assign _484 = _390 & _483;
     always @(posedge _41) begin
         if (_39)
-            _485 <= _256;
+            prog_15 <= _256;
         else
             if (_484)
-                _485 <= _376;
+                prog_15 <= _376;
     end
     assign _476 = 6'b001110;
     assign _477 = _391 == _476;
     assign _478 = _390 & _477;
     always @(posedge _41) begin
         if (_39)
-            _479 <= _256;
+            prog_14 <= _256;
         else
             if (_478)
-                _479 <= _376;
+                prog_14 <= _376;
     end
     assign _470 = 6'b001101;
     assign _471 = _391 == _470;
     assign _472 = _390 & _471;
     always @(posedge _41) begin
         if (_39)
-            _473 <= _256;
+            prog_13 <= _256;
         else
             if (_472)
-                _473 <= _376;
+                prog_13 <= _376;
     end
     assign _464 = 6'b001100;
     assign _465 = _391 == _464;
     assign _466 = _390 & _465;
     always @(posedge _41) begin
         if (_39)
-            _467 <= _256;
+            prog_12 <= _256;
         else
             if (_466)
-                _467 <= _376;
+                prog_12 <= _376;
     end
     assign _458 = 6'b001011;
     assign _459 = _391 == _458;
     assign _460 = _390 & _459;
     always @(posedge _41) begin
         if (_39)
-            _461 <= _256;
+            prog_11 <= _256;
         else
             if (_460)
-                _461 <= _376;
+                prog_11 <= _376;
     end
     assign _452 = 6'b001010;
     assign _453 = _391 == _452;
     assign _454 = _390 & _453;
     always @(posedge _41) begin
         if (_39)
-            _455 <= _256;
+            prog_10 <= _256;
         else
             if (_454)
-                _455 <= _376;
+                prog_10 <= _376;
     end
     assign _446 = 6'b001001;
     assign _447 = _391 == _446;
     assign _448 = _390 & _447;
     always @(posedge _41) begin
         if (_39)
-            _449 <= _256;
+            prog_9 <= _256;
         else
             if (_448)
-                _449 <= _376;
+                prog_9 <= _376;
     end
     assign _440 = 6'b001000;
     assign _441 = _391 == _440;
     assign _442 = _390 & _441;
     always @(posedge _41) begin
         if (_39)
-            _443 <= _256;
+            prog_8 <= _256;
         else
             if (_442)
-                _443 <= _376;
+                prog_8 <= _376;
     end
     assign _434 = 6'b000111;
     assign _435 = _391 == _434;
     assign _436 = _390 & _435;
     always @(posedge _41) begin
         if (_39)
-            _437 <= _256;
+            prog_7 <= _256;
         else
             if (_436)
-                _437 <= _376;
+                prog_7 <= _376;
     end
     assign _428 = 6'b000110;
     assign _429 = _391 == _428;
     assign _430 = _390 & _429;
     always @(posedge _41) begin
         if (_39)
-            _431 <= _256;
+            prog_6 <= _256;
         else
             if (_430)
-                _431 <= _376;
+                prog_6 <= _376;
     end
     assign _422 = 6'b000101;
     assign _423 = _391 == _422;
     assign _424 = _390 & _423;
     always @(posedge _41) begin
         if (_39)
-            _425 <= _256;
+            prog_5 <= _256;
         else
             if (_424)
-                _425 <= _376;
+                prog_5 <= _376;
     end
     assign _416 = 6'b000100;
     assign _417 = _391 == _416;
     assign _418 = _390 & _417;
     always @(posedge _41) begin
         if (_39)
-            _419 <= _256;
+            prog_4 <= _256;
         else
             if (_418)
-                _419 <= _376;
+                prog_4 <= _376;
     end
     assign _410 = 6'b000011;
     assign _411 = _391 == _410;
     assign _412 = _390 & _411;
     always @(posedge _41) begin
         if (_39)
-            _413 <= _256;
+            prog_3 <= _256;
         else
             if (_412)
-                _413 <= _376;
+                prog_3 <= _376;
     end
     assign _404 = 6'b000010;
     assign _405 = _391 == _404;
     assign _406 = _390 & _405;
     always @(posedge _41) begin
         if (_39)
-            _407 <= _256;
+            prog_2 <= _256;
         else
             if (_406)
-                _407 <= _376;
+                prog_2 <= _376;
     end
     assign _398 = 6'b000001;
     assign _399 = _391 == _398;
     assign _400 = _390 & _399;
     always @(posedge _41) begin
         if (_39)
-            _401 <= _256;
+            prog_1 <= _256;
         else
             if (_400)
-                _401 <= _376;
+                prog_1 <= _376;
     end
     assign _392 = 6'b000000;
     assign _391 = _387[5:0];
@@ -2583,10 +2583,10 @@ module protocol_emulator (
     assign _394 = _390 & _393;
     always @(posedge _41) begin
         if (_39)
-            _395 <= _256;
+            prog_0 <= _256;
         else
             if (_394)
-                _395 <= _376;
+                prog_0 <= _376;
     end
     assign _794 = _376[5:0];
     assign _791 = 7'b1000001;
@@ -2617,18 +2617,18 @@ module protocol_emulator (
     end
     assign _1782 = _775 == _344;
     assign _1784 = _1782 ? _1783 : _312;
-    assign _1780 = _342 + _398;
+    assign _1780 = pc + _398;
     assign _876 = 16'b0000000000000001;
     assign _877 = _871 - _876;
-    assign _878 = _875 ? _877 : _870;
-    assign _879 = _805 ? _870 : _878;
+    assign _878 = _875 ? _877 : wait_count;
+    assign _879 = _805 ? wait_count : _878;
     assign _881 = _802 ? _256 : _879;
     assign _12 = _881;
     always @(posedge _41) begin
         if (_39)
-            _870 <= _256;
+            wait_count <= _256;
         else
-            _870 <= _12;
+            wait_count <= _12;
     end
     assign _883 = 7'b1001011;
     assign _884 = _387 == _883;
@@ -2649,18 +2649,18 @@ module protocol_emulator (
     assign _862 = _807 & _861;
     assign _864 = _862 & _863;
     assign _875 = _864 & _874;
-    assign _910 = _875 ? _909 : _867;
+    assign _910 = _875 ? _909 : waiting;
     assign _912 = _908 ? _356 : _910;
-    assign _913 = _805 ? _867 : _912;
+    assign _913 = _805 ? waiting : _912;
     assign _915 = _802 ? _356 : _913;
     assign _14 = _915;
     always @(posedge _41) begin
         if (_39)
-            _867 <= _356;
+            waiting <= _356;
         else
-            _867 <= _14;
+            waiting <= _14;
     end
-    assign _871 = _867 ? _870 : _349;
+    assign _871 = waiting ? wait_count : _349;
     assign _873 = _871 == _256;
     assign _863 = _774[4:4];
     assign _891 = _863 & _873;
@@ -2704,31 +2704,31 @@ module protocol_emulator (
     assign _946 = { gnd,
                     _945 };
     assign _939 = { gnd,
-                    _183 };
+                    isr_count };
     assign _947 = _939 + _946;
     assign _948 = _488 < _947;
     assign _951 = _948 ? _180 : _949;
-    assign _936 = _779 ? _183 : _182;
+    assign _936 = _779 ? isr_count : _182;
     assign _930 = _922 == _1083;
-    assign _932 = _930 ? _182 : _183;
-    assign _933 = _928 ? _932 : _183;
+    assign _932 = _930 ? _182 : isr_count;
+    assign _933 = _928 ? _932 : isr_count;
     assign _921 = _775 == _1055;
-    assign _934 = _921 ? _933 : _183;
+    assign _934 = _921 ? _933 : isr_count;
     assign _919 = _775 == _1829;
     assign _937 = _919 ? _936 : _934;
     assign _917 = _775 == _1747;
     assign _952 = _917 ? _951 : _937;
-    assign _953 = _908 ? _952 : _183;
-    assign _954 = _805 ? _183 : _953;
+    assign _953 = _908 ? _952 : isr_count;
+    assign _954 = _805 ? isr_count : _953;
     assign _956 = _802 ? _182 : _954;
     assign _15 = _956;
     always @(posedge _41) begin
         if (_39)
-            _183 <= _182;
+            isr_count <= _182;
         else
-            _183 <= _15;
+            isr_count <= _15;
     end
-    assign _1770 = _183 < _307;
+    assign _1770 = isr_count < _307;
     assign _306 = 5'b01000;
     assign _961 = _376[4:0];
     assign _958 = 7'b1000101;
@@ -2747,42 +2747,42 @@ module protocol_emulator (
     assign _981 = { gnd,
                     _945 };
     assign _980 = { gnd,
-                    _965 };
+                    osr_count };
     assign _982 = _980 + _981;
     assign _983 = _488 < _982;
     assign _986 = _983 ? _180 : _984;
-    assign _977 = _779 ? _182 : _965;
+    assign _977 = _779 ? _182 : osr_count;
     assign _971 = _922 == _1829;
-    assign _973 = _971 ? _182 : _965;
-    assign _974 = _928 ? _973 : _965;
+    assign _973 = _971 ? _182 : osr_count;
+    assign _974 = _928 ? _973 : osr_count;
     assign _969 = _775 == _1055;
-    assign _975 = _969 ? _974 : _965;
+    assign _975 = _969 ? _974 : osr_count;
     assign _968 = _775 == _1829;
     assign _978 = _968 ? _977 : _975;
     assign _967 = _775 == _1083;
     assign _987 = _967 ? _986 : _978;
-    assign _988 = _908 ? _987 : _965;
-    assign _989 = _805 ? _965 : _988;
+    assign _988 = _908 ? _987 : osr_count;
+    assign _989 = _805 ? osr_count : _988;
     assign _990 = _802 ? _307 : _989;
     assign _17 = _990;
     always @(posedge _41) begin
         if (_39)
-            _965 <= _182;
+            osr_count <= _182;
         else
-            _965 <= _17;
+            osr_count <= _17;
     end
-    assign _1769 = _965 < _307;
-    assign _1767 = _1003 == _1006;
+    assign _1769 = osr_count < _307;
+    assign _1767 = x == y;
     assign _1768 = ~ _1767;
-    assign _1764 = _1006 == _256;
+    assign _1764 = y == _256;
     assign _1765 = ~ _1764;
     assign _1766 = ~ _1765;
-    assign _1750 = _1003 - _876;
+    assign _1750 = x - _876;
     assign _1747 = 3'b010;
     assign _1748 = _1719 == _1747;
-    assign _1751 = _1748 ? _1750 : _1003;
+    assign _1751 = _1748 ? _1750 : x;
     assign _1744 = _1443 == _117;
-    assign _1745 = _1744 ? _1478 : _1003;
+    assign _1745 = _1744 ? _1478 : x;
     assign _1159 = _1157[31:16];
     assign _1160 = { _256,
                      _1159 };
@@ -3084,15 +3084,15 @@ module protocol_emulator (
         0:
             _1140 <= _1138;
         1:
-            _1140 <= _1003;
+            _1140 <= x;
         2:
-            _1140 <= _1006;
+            _1140 <= y;
         default:
             _1140 <= _256;
         endcase
     end
     assign _1141 = { _1140,
-                     _193 };
+                     isr };
     assign _1024 = _945[0:0];
     assign _1145 = _1024 ? _1144 : _1141;
     assign _1023 = _945[1:1];
@@ -3104,28 +3104,28 @@ module protocol_emulator (
     assign _1020 = _945[4:4];
     assign _1161 = _1020 ? _1160 : _1157;
     assign _1162 = _1161[15:0];
-    assign _1018 = _779 ? _193 : _256;
+    assign _1018 = _779 ? isr : _256;
     assign _1000 = _922 == _1083;
-    assign _1014 = _1000 ? _1013 : _193;
-    assign _1015 = _928 ? _1014 : _193;
+    assign _1014 = _1000 ? _1013 : isr;
+    assign _1015 = _928 ? _1014 : isr;
     assign _999 = _775 == _1055;
-    assign _1016 = _999 ? _1015 : _193;
+    assign _1016 = _999 ? _1015 : isr;
     assign _998 = _775 == _1829;
     assign _1019 = _998 ? _1018 : _1016;
     assign _997 = _775 == _1747;
     assign _1163 = _997 ? _1162 : _1019;
-    assign _1164 = _908 ? _1163 : _193;
-    assign _1165 = _805 ? _193 : _1164;
+    assign _1164 = _908 ? _1163 : isr;
+    assign _1165 = _805 ? isr : _1164;
     assign _1167 = _802 ? _256 : _1165;
     assign _19 = _1167;
     always @(posedge _41) begin
         if (_39)
-            _193 <= _256;
+            isr <= _256;
         else
-            _193 <= _19;
+            isr <= _19;
     end
     assign _847 = _846 & _845;
-    assign _846 = _57[0:0];
+    assign _846 = pin_out[0:0];
     assign _845 = _24[0:0];
     assign _844 = _49[1:0];
     always @* begin
@@ -3141,7 +3141,7 @@ module protocol_emulator (
         endcase
     end
     assign _842 = _841 & _840;
-    assign _841 = _57[1:1];
+    assign _841 = pin_out[1:1];
     assign _840 = _24[1:1];
     assign _839 = _49[3:2];
     always @* begin
@@ -3157,7 +3157,7 @@ module protocol_emulator (
         endcase
     end
     assign _837 = _836 & _835;
-    assign _836 = _57[2:2];
+    assign _836 = pin_out[2:2];
     assign _835 = _24[2:2];
     assign _834 = _49[5:4];
     always @* begin
@@ -3173,7 +3173,7 @@ module protocol_emulator (
         endcase
     end
     assign _832 = _831 & _830;
-    assign _831 = _57[3:3];
+    assign _831 = pin_out[3:3];
     assign _830 = _24[3:3];
     assign _829 = _49[7:6];
     always @* begin
@@ -3189,7 +3189,7 @@ module protocol_emulator (
         endcase
     end
     assign _827 = _826 & _825;
-    assign _826 = _57[4:4];
+    assign _826 = pin_out[4:4];
     assign _825 = _24[4:4];
     assign _824 = _49[9:8];
     always @* begin
@@ -3205,7 +3205,7 @@ module protocol_emulator (
         endcase
     end
     assign _822 = _821 & _820;
-    assign _821 = _57[5:5];
+    assign _821 = pin_out[5:5];
     assign _820 = _24[5:5];
     assign _819 = _49[11:10];
     always @* begin
@@ -3221,7 +3221,7 @@ module protocol_emulator (
         endcase
     end
     assign _817 = _816 & _815;
-    assign _816 = _57[6:6];
+    assign _816 = pin_out[6:6];
     assign _815 = _24[6:6];
     assign _814 = _49[13:12];
     always @* begin
@@ -3266,7 +3266,7 @@ module protocol_emulator (
             _1599 <= _1598;
         endcase
     end
-    assign _1590 = _57[0:0];
+    assign _1590 = pin_out[0:0];
     assign _1587 = _344 - _1318;
     assign _1588 = { _339,
                      _1587 };
@@ -3300,7 +3300,7 @@ module protocol_emulator (
             _1583 <= _1582;
         endcase
     end
-    assign _1574 = _57[1:1];
+    assign _1574 = pin_out[1:1];
     assign _1571 = _887 - _1318;
     assign _1572 = { _339,
                      _1571 };
@@ -3334,7 +3334,7 @@ module protocol_emulator (
             _1567 <= _1566;
         endcase
     end
-    assign _1558 = _57[2:2];
+    assign _1558 = pin_out[2:2];
     assign _1555 = _1747 - _1318;
     assign _1556 = { _339,
                      _1555 };
@@ -3368,7 +3368,7 @@ module protocol_emulator (
             _1551 <= _1550;
         endcase
     end
-    assign _1542 = _57[3:3];
+    assign _1542 = pin_out[3:3];
     assign _1539 = _1083 - _1318;
     assign _1540 = { _339,
                      _1539 };
@@ -3402,7 +3402,7 @@ module protocol_emulator (
             _1535 <= _1534;
         endcase
     end
-    assign _1526 = _57[4:4];
+    assign _1526 = pin_out[4:4];
     assign _1523 = _1829 - _1318;
     assign _1524 = { _339,
                      _1523 };
@@ -3436,7 +3436,7 @@ module protocol_emulator (
             _1519 <= _1518;
         endcase
     end
-    assign _1510 = _57[5:5];
+    assign _1510 = pin_out[5:5];
     assign _1507 = _1055 - _1318;
     assign _1508 = { _339,
                      _1507 };
@@ -3470,7 +3470,7 @@ module protocol_emulator (
             _1503 <= _1502;
         endcase
     end
-    assign _1494 = _57[6:6];
+    assign _1494 = pin_out[6:6];
     assign _1491 = _1041 - _1318;
     assign _1492 = { _339,
                      _1491 };
@@ -3504,7 +3504,7 @@ module protocol_emulator (
             _1487 <= _1486;
         endcase
     end
-    assign _1451 = _57[7:7];
+    assign _1451 = pin_out[7:7];
     assign _1448 = _1027 - _1318;
     assign _1449 = { _339,
                      _1448 };
@@ -3519,7 +3519,7 @@ module protocol_emulator (
                      _1584,
                      _1600 };
     assign _1445 = _1443 == _339;
-    assign _1602 = _1445 ? _1601 : _57;
+    assign _1602 = _1445 ? _1601 : pin_out;
     assign _1436 = _1013[7:7];
     assign _1435 = _1013[6:6];
     assign _1434 = _1013[5:5];
@@ -3548,7 +3548,7 @@ module protocol_emulator (
             _1437 <= _1436;
         endcase
     end
-    assign _1428 = _57[0:0];
+    assign _1428 = pin_out[0:0];
     assign _1425 = _344 - _1318;
     assign _1426 = { gnd,
                      _1425 };
@@ -3582,7 +3582,7 @@ module protocol_emulator (
             _1422 <= _1421;
         endcase
     end
-    assign _1413 = _57[1:1];
+    assign _1413 = pin_out[1:1];
     assign _1410 = _887 - _1318;
     assign _1411 = { gnd,
                      _1410 };
@@ -3616,7 +3616,7 @@ module protocol_emulator (
             _1407 <= _1406;
         endcase
     end
-    assign _1398 = _57[2:2];
+    assign _1398 = pin_out[2:2];
     assign _1395 = _1747 - _1318;
     assign _1396 = { gnd,
                      _1395 };
@@ -3650,7 +3650,7 @@ module protocol_emulator (
             _1392 <= _1391;
         endcase
     end
-    assign _1383 = _57[3:3];
+    assign _1383 = pin_out[3:3];
     assign _1380 = _1083 - _1318;
     assign _1381 = { gnd,
                      _1380 };
@@ -3684,7 +3684,7 @@ module protocol_emulator (
             _1377 <= _1376;
         endcase
     end
-    assign _1368 = _57[4:4];
+    assign _1368 = pin_out[4:4];
     assign _1365 = _1829 - _1318;
     assign _1366 = { gnd,
                      _1365 };
@@ -3718,7 +3718,7 @@ module protocol_emulator (
             _1362 <= _1361;
         endcase
     end
-    assign _1353 = _57[5:5];
+    assign _1353 = pin_out[5:5];
     assign _1350 = _1055 - _1318;
     assign _1351 = { gnd,
                      _1350 };
@@ -3752,7 +3752,7 @@ module protocol_emulator (
             _1347 <= _1346;
         endcase
     end
-    assign _1338 = _57[6:6];
+    assign _1338 = pin_out[6:6];
     assign _1335 = _1041 - _1318;
     assign _1336 = { gnd,
                      _1335 };
@@ -3786,7 +3786,7 @@ module protocol_emulator (
             _1332 <= _1331;
         endcase
     end
-    assign _1323 = _57[7:7];
+    assign _1323 = pin_out[7:7];
     assign _1321 = _292[7:4];
     assign _291 = 8'b00010000;
     assign _1172 = _376[7:0];
@@ -3817,8 +3817,8 @@ module protocol_emulator (
                      _1423,
                      _1438 };
     assign _1316 = _922 == _1747;
-    assign _1440 = _1316 ? _1439 : _57;
-    assign _1441 = _928 ? _1440 : _57;
+    assign _1440 = _1316 ? _1439 : pin_out;
+    assign _1441 = _928 ? _1440 : pin_out;
     assign _1309 = _1196[7:7];
     assign _1308 = _1196[6:6];
     assign _1307 = _1196[5:5];
@@ -3847,7 +3847,7 @@ module protocol_emulator (
             _1310 <= _1309;
         endcase
     end
-    assign _1301 = _57[0:0];
+    assign _1301 = pin_out[0:0];
     assign _1298 = _344 - _1188;
     assign _1299 = { gnd,
                      _1298 };
@@ -3881,7 +3881,7 @@ module protocol_emulator (
             _1295 <= _1294;
         endcase
     end
-    assign _1286 = _57[1:1];
+    assign _1286 = pin_out[1:1];
     assign _1283 = _887 - _1188;
     assign _1284 = { gnd,
                      _1283 };
@@ -3915,7 +3915,7 @@ module protocol_emulator (
             _1280 <= _1279;
         endcase
     end
-    assign _1271 = _57[2:2];
+    assign _1271 = pin_out[2:2];
     assign _1268 = _1747 - _1188;
     assign _1269 = { gnd,
                      _1268 };
@@ -3949,7 +3949,7 @@ module protocol_emulator (
             _1265 <= _1264;
         endcase
     end
-    assign _1256 = _57[3:3];
+    assign _1256 = pin_out[3:3];
     assign _1253 = _1083 - _1188;
     assign _1254 = { gnd,
                      _1253 };
@@ -3983,7 +3983,7 @@ module protocol_emulator (
             _1250 <= _1249;
         endcase
     end
-    assign _1241 = _57[4:4];
+    assign _1241 = pin_out[4:4];
     assign _1238 = _1829 - _1188;
     assign _1239 = { gnd,
                      _1238 };
@@ -4017,7 +4017,7 @@ module protocol_emulator (
             _1235 <= _1234;
         endcase
     end
-    assign _1226 = _57[5:5];
+    assign _1226 = pin_out[5:5];
     assign _1223 = _1055 - _1188;
     assign _1224 = { gnd,
                      _1223 };
@@ -4051,7 +4051,7 @@ module protocol_emulator (
             _1220 <= _1219;
         endcase
     end
-    assign _1211 = _57[6:6];
+    assign _1211 = pin_out[6:6];
     assign _1208 = _1041 - _1188;
     assign _1209 = { gnd,
                      _1208 };
@@ -4085,7 +4085,7 @@ module protocol_emulator (
             _1205 <= _1204;
         endcase
     end
-    assign _1193 = _57[7:7];
+    assign _1193 = pin_out[7:7];
     assign _1191 = _297[7:4];
     assign _1178 = _376[7:0];
     assign _1175 = 7'b1000011;
@@ -4115,24 +4115,24 @@ module protocol_emulator (
                      _1296,
                      _1311 };
     assign _1186 = _1184 == _339;
-    assign _1313 = _1186 ? _1312 : _57;
+    assign _1313 = _1186 ? _1312 : pin_out;
     assign _1183 = _775 == _1041;
-    assign _1314 = _1183 ? _1313 : _57;
+    assign _1314 = _1183 ? _1313 : pin_out;
     assign _1181 = _775 == _1055;
     assign _1442 = _1181 ? _1441 : _1314;
     assign _1180 = _775 == _1083;
     assign _1603 = _1180 ? _1602 : _1442;
-    assign _1604 = _908 ? _1603 : _57;
-    assign _1605 = _805 ? _57 : _1604;
-    assign _1606 = _802 ? _57 : _1605;
+    assign _1604 = _908 ? _1603 : pin_out;
+    assign _1605 = _805 ? pin_out : _1604;
+    assign _1606 = _802 ? pin_out : _1605;
     assign _22 = _1606;
     always @(posedge _41) begin
         if (_39)
-            _57 <= _56;
+            pin_out <= _56;
         else
-            _57 <= _22;
+            pin_out <= _22;
     end
-    assign _811 = _57[7:7];
+    assign _811 = pin_out[7:7];
     assign _24 = uio_in;
     assign _810 = _24[7:7];
     assign _1608 = 7'b1000111;
@@ -4170,9 +4170,9 @@ module protocol_emulator (
                     _848 };
     assign _1008 = { _207,
                      _849 };
-    assign _1723 = _1006 - _876;
+    assign _1723 = y - _876;
     assign _1721 = _1719 == _1829;
-    assign _1724 = _1721 ? _1723 : _1006;
+    assign _1724 = _1721 ? _1723 : y;
     assign _1472 = _1471[15:0];
     assign _1474 = { _1472,
                      _256 };
@@ -4215,7 +4215,7 @@ module protocol_emulator (
     assign _1677 = { _356,
                      _1676 };
     assign _1674 = { _256,
-                     _1011 };
+                     osr };
     assign _1672 = _945[0:0];
     assign _1678 = _1672 ? _1677 : _1674;
     assign _1671 = _945[1:1];
@@ -4232,169 +4232,169 @@ module protocol_emulator (
     assign _1668 = _945[4:4];
     assign _1694 = _1668 ? _1693 : _1690;
     assign _1695 = _1694[15:0];
-    assign _1662 = _1622 == _334;
+    assign _1662 = tx_wr == _334;
     assign _1663 = _1619 & _1662;
     always @(posedge _41) begin
         if (_39)
-            _1664 <= _256;
+            tx_mem_3 <= _256;
         else
             if (_1663)
-                _1664 <= _376;
+                tx_mem_3 <= _376;
     end
-    assign _1656 = _1622 == _119;
+    assign _1656 = tx_wr == _119;
     assign _1657 = _1619 & _1656;
     always @(posedge _41) begin
         if (_39)
-            _1658 <= _256;
+            tx_mem_2 <= _256;
         else
             if (_1657)
-                _1658 <= _376;
+                tx_mem_2 <= _376;
     end
-    assign _1650 = _1622 == _117;
+    assign _1650 = tx_wr == _117;
     assign _1651 = _1619 & _1650;
     always @(posedge _41) begin
         if (_39)
-            _1652 <= _256;
+            tx_mem_1 <= _256;
         else
             if (_1651)
-                _1652 <= _376;
+                tx_mem_1 <= _376;
     end
-    assign _1624 = _1622 + _117;
-    assign _1625 = _1619 ? _1624 : _1622;
+    assign _1624 = tx_wr + _117;
+    assign _1625 = _1619 ? _1624 : tx_wr;
     assign _26 = _1625;
     always @(posedge _41) begin
         if (_39)
-            _1622 <= _339;
+            tx_wr <= _339;
         else
-            _1622 <= _26;
+            tx_wr <= _26;
     end
-    assign _1644 = _1622 == _339;
+    assign _1644 = tx_wr == _339;
     assign _1645 = _1619 & _1644;
     always @(posedge _41) begin
         if (_39)
-            _1646 <= _256;
+            tx_mem_0 <= _256;
         else
             if (_1645)
-                _1646 <= _376;
+                tx_mem_0 <= _376;
     end
-    assign _1632 = _1630 + _117;
-    assign _1633 = _1627 ? _1632 : _1630;
+    assign _1632 = tx_rd + _117;
+    assign _1633 = _1627 ? _1632 : tx_rd;
     assign _27 = _1633;
     always @(posedge _41) begin
         if (_39)
-            _1630 <= _339;
+            tx_rd <= _339;
         else
-            _1630 <= _27;
+            tx_rd <= _27;
     end
     always @* begin
-        case (_1630)
+        case (tx_rd)
         0:
-            _1665 <= _1646;
+            _1665 <= tx_mem_0;
         1:
-            _1665 <= _1652;
+            _1665 <= tx_mem_1;
         2:
-            _1665 <= _1658;
+            _1665 <= tx_mem_2;
         default:
-            _1665 <= _1664;
+            _1665 <= tx_mem_3;
         endcase
     end
     assign _779 = _774[8:8];
-    assign _1666 = _779 ? _1665 : _1011;
+    assign _1666 = _779 ? _1665 : osr;
     assign _1637 = _922 == _1829;
-    assign _1638 = _1637 ? _1013 : _1011;
-    assign _1639 = _928 ? _1638 : _1011;
+    assign _1638 = _1637 ? _1013 : osr;
+    assign _1639 = _928 ? _1638 : osr;
     assign _1636 = _775 == _1055;
-    assign _1640 = _1636 ? _1639 : _1011;
+    assign _1640 = _1636 ? _1639 : osr;
     assign _1635 = _775 == _1829;
     assign _1667 = _1635 ? _1666 : _1640;
     assign _1634 = _775 == _1083;
     assign _1696 = _1634 ? _1695 : _1667;
-    assign _1697 = _908 ? _1696 : _1011;
-    assign _1698 = _805 ? _1011 : _1697;
+    assign _1697 = _908 ? _1696 : osr;
+    assign _1698 = _805 ? osr : _1697;
     assign _1700 = _802 ? _256 : _1698;
     assign _28 = _1700;
     always @(posedge _41) begin
         if (_39)
-            _1011 <= _256;
+            osr <= _256;
         else
-            _1011 <= _28;
+            osr <= _28;
     end
-    assign _1478 = _1011 & _1477;
+    assign _1478 = osr & _1477;
     assign _1443 = _774[8:7];
     assign _1716 = _1443 == _119;
-    assign _1717 = _1716 ? _1478 : _1006;
+    assign _1717 = _1716 ? _1478 : y;
     assign _1711 = _922 == _887;
-    assign _1712 = _1711 ? _1013 : _1006;
-    assign _1713 = _928 ? _1712 : _1006;
+    assign _1712 = _1711 ? _1013 : y;
+    assign _1713 = _928 ? _1712 : y;
     assign _1707 = _1184 == _119;
-    assign _1708 = _1707 ? _1196 : _1006;
+    assign _1708 = _1707 ? _1196 : y;
     assign _1705 = _775 == _1041;
-    assign _1709 = _1705 ? _1708 : _1006;
+    assign _1709 = _1705 ? _1708 : y;
     assign _1704 = _775 == _1055;
     assign _1714 = _1704 ? _1713 : _1709;
     assign _1703 = _775 == _1083;
     assign _1718 = _1703 ? _1717 : _1714;
     assign _1702 = _775 == _344;
     assign _1725 = _1702 ? _1724 : _1718;
-    assign _1726 = _908 ? _1725 : _1006;
-    assign _1727 = _805 ? _1006 : _1726;
+    assign _1726 = _908 ? _1725 : y;
+    assign _1727 = _805 ? y : _1726;
     assign _1729 = _802 ? _256 : _1727;
     assign _29 = _1729;
     always @(posedge _41) begin
         if (_39)
-            _1006 <= _256;
+            y <= _256;
         else
-            _1006 <= _29;
+            y <= _29;
     end
     always @* begin
         case (_925)
         0:
-            _1013 <= _1003;
+            _1013 <= x;
         1:
-            _1013 <= _1006;
+            _1013 <= y;
         2:
             _1013 <= _1008;
         3:
-            _1013 <= _193;
+            _1013 <= isr;
         4:
-            _1013 <= _1011;
+            _1013 <= osr;
         default:
             _1013 <= _256;
         endcase
     end
     assign _1739 = _922 == _344;
-    assign _1740 = _1739 ? _1013 : _1003;
+    assign _1740 = _1739 ? _1013 : x;
     assign _925 = _774[5:3];
     assign _927 = _925 < _1041;
     assign _922 = _774[8:6];
     assign _924 = _922 < _1041;
     assign _928 = _924 & _927;
-    assign _1741 = _928 ? _1740 : _1003;
+    assign _1741 = _928 ? _1740 : x;
     assign _1195 = _774[4:0];
     assign _1196 = { _304,
                      _1195 };
     assign _1184 = _774[8:7];
     assign _1735 = _1184 == _117;
-    assign _1736 = _1735 ? _1196 : _1003;
+    assign _1736 = _1735 ? _1196 : x;
     assign _1733 = _775 == _1041;
-    assign _1737 = _1733 ? _1736 : _1003;
+    assign _1737 = _1733 ? _1736 : x;
     assign _1732 = _775 == _1055;
     assign _1742 = _1732 ? _1741 : _1737;
     assign _1731 = _775 == _1083;
     assign _1746 = _1731 ? _1745 : _1742;
     assign _1730 = _775 == _344;
     assign _1752 = _1730 ? _1751 : _1746;
-    assign _1753 = _908 ? _1752 : _1003;
-    assign _1754 = _805 ? _1003 : _1753;
+    assign _1753 = _908 ? _1752 : x;
+    assign _1754 = _805 ? x : _1753;
     assign _1756 = _802 ? _256 : _1754;
     assign _30 = _1756;
     always @(posedge _41) begin
         if (_39)
-            _1003 <= _256;
+            x <= _256;
         else
-            _1003 <= _30;
+            x <= _30;
     end
-    assign _1760 = _1003 == _256;
+    assign _1760 = x == _256;
     assign _1761 = ~ _1760;
     assign _1762 = ~ _1761;
     assign _1719 = _774[8:6];
@@ -4422,146 +4422,146 @@ module protocol_emulator (
     assign _1772 = _1758 & _1771;
     assign _1778 = _1772 | _1777;
     assign _1785 = _1778 ? _1784 : _1780;
-    assign _1786 = _908 ? _1785 : _342;
-    assign _1787 = _805 ? _342 : _1786;
+    assign _1786 = _908 ? _1785 : pc;
+    assign _1787 = _805 ? pc : _1786;
     assign _1788 = _802 ? _287 : _1787;
     assign _31 = _1788;
     always @(posedge _41) begin
         if (_39)
-            _342 <= _392;
+            pc <= _392;
         else
-            _342 <= _31;
+            pc <= _31;
     end
     always @* begin
-        case (_342)
+        case (pc)
         0:
-            _774 <= _395;
+            _774 <= prog_0;
         1:
-            _774 <= _401;
+            _774 <= prog_1;
         2:
-            _774 <= _407;
+            _774 <= prog_2;
         3:
-            _774 <= _413;
+            _774 <= prog_3;
         4:
-            _774 <= _419;
+            _774 <= prog_4;
         5:
-            _774 <= _425;
+            _774 <= prog_5;
         6:
-            _774 <= _431;
+            _774 <= prog_6;
         7:
-            _774 <= _437;
+            _774 <= prog_7;
         8:
-            _774 <= _443;
+            _774 <= prog_8;
         9:
-            _774 <= _449;
+            _774 <= prog_9;
         10:
-            _774 <= _455;
+            _774 <= prog_10;
         11:
-            _774 <= _461;
+            _774 <= prog_11;
         12:
-            _774 <= _467;
+            _774 <= prog_12;
         13:
-            _774 <= _473;
+            _774 <= prog_13;
         14:
-            _774 <= _479;
+            _774 <= prog_14;
         15:
-            _774 <= _485;
+            _774 <= prog_15;
         16:
-            _774 <= _491;
+            _774 <= prog_16;
         17:
-            _774 <= _497;
+            _774 <= prog_17;
         18:
-            _774 <= _503;
+            _774 <= prog_18;
         19:
-            _774 <= _509;
+            _774 <= prog_19;
         20:
-            _774 <= _515;
+            _774 <= prog_20;
         21:
-            _774 <= _521;
+            _774 <= prog_21;
         22:
-            _774 <= _527;
+            _774 <= prog_22;
         23:
-            _774 <= _533;
+            _774 <= prog_23;
         24:
-            _774 <= _539;
+            _774 <= prog_24;
         25:
-            _774 <= _545;
+            _774 <= prog_25;
         26:
-            _774 <= _551;
+            _774 <= prog_26;
         27:
-            _774 <= _557;
+            _774 <= prog_27;
         28:
-            _774 <= _563;
+            _774 <= prog_28;
         29:
-            _774 <= _569;
+            _774 <= prog_29;
         30:
-            _774 <= _575;
+            _774 <= prog_30;
         31:
-            _774 <= _581;
+            _774 <= prog_31;
         32:
-            _774 <= _587;
+            _774 <= prog_32;
         33:
-            _774 <= _593;
+            _774 <= prog_33;
         34:
-            _774 <= _599;
+            _774 <= prog_34;
         35:
-            _774 <= _605;
+            _774 <= prog_35;
         36:
-            _774 <= _611;
+            _774 <= prog_36;
         37:
-            _774 <= _617;
+            _774 <= prog_37;
         38:
-            _774 <= _623;
+            _774 <= prog_38;
         39:
-            _774 <= _629;
+            _774 <= prog_39;
         40:
-            _774 <= _635;
+            _774 <= prog_40;
         41:
-            _774 <= _641;
+            _774 <= prog_41;
         42:
-            _774 <= _647;
+            _774 <= prog_42;
         43:
-            _774 <= _653;
+            _774 <= prog_43;
         44:
-            _774 <= _659;
+            _774 <= prog_44;
         45:
-            _774 <= _665;
+            _774 <= prog_45;
         46:
-            _774 <= _671;
+            _774 <= prog_46;
         47:
-            _774 <= _677;
+            _774 <= prog_47;
         48:
-            _774 <= _683;
+            _774 <= prog_48;
         49:
-            _774 <= _689;
+            _774 <= prog_49;
         50:
-            _774 <= _695;
+            _774 <= prog_50;
         51:
-            _774 <= _701;
+            _774 <= prog_51;
         52:
-            _774 <= _707;
+            _774 <= prog_52;
         53:
-            _774 <= _713;
+            _774 <= prog_53;
         54:
-            _774 <= _719;
+            _774 <= prog_54;
         55:
-            _774 <= _725;
+            _774 <= prog_55;
         56:
-            _774 <= _731;
+            _774 <= prog_56;
         57:
-            _774 <= _737;
+            _774 <= prog_57;
         58:
-            _774 <= _743;
+            _774 <= prog_58;
         59:
-            _774 <= _749;
+            _774 <= prog_59;
         60:
-            _774 <= _755;
+            _774 <= prog_60;
         61:
-            _774 <= _761;
+            _774 <= prog_61;
         62:
-            _774 <= _767;
+            _774 <= prog_62;
         default:
-            _774 <= _773;
+            _774 <= prog_63;
         endcase
     end
     assign _775 = _774[15:13];
@@ -4572,8 +4572,8 @@ module protocol_emulator (
     assign _906 = _900 | _905;
     assign _907 = ~ _906;
     assign _908 = _375 & _907;
-    assign _1790 = _908 ? _1789 : _372;
-    assign _804 = _372 == _203;
+    assign _1790 = _908 ? _1789 : delay_left;
+    assign _804 = delay_left == _203;
     assign _805 = ~ _804;
     assign _1793 = _805 ? _1792 : _1790;
     assign _802 = ~ _282;
@@ -4581,11 +4581,11 @@ module protocol_emulator (
     assign _32 = _1795;
     always @(posedge _41) begin
         if (_39)
-            _372 <= _203;
+            delay_left <= _203;
         else
-            _372 <= _32;
+            delay_left <= _32;
     end
-    assign _374 = _372 == _203;
+    assign _374 = delay_left == _203;
     assign _376 = _268[15:0];
     assign _1800 = _376[0:0];
     assign _1798 = _387 == _388;
@@ -4607,7 +4607,7 @@ module protocol_emulator (
     assign _1627 = _34 & _1626;
     assign _1826 = { _339,
                      _1627 };
-    assign _1617 = _345 == _1829;
+    assign _1617 = tx_level == _1829;
     assign _1618 = ~ _1617;
     assign _1613 = 7'b1001000;
     assign _387 = _384[6:0];
@@ -4713,16 +4713,16 @@ module protocol_emulator (
     assign _1619 = _1615 & _1618;
     assign _1823 = { _339,
                      _1619 };
-    assign _1824 = _345 + _1823;
+    assign _1824 = tx_level + _1823;
     assign _1827 = _1824 - _1826;
     assign _44 = _1827;
     always @(posedge _41) begin
         if (_39)
-            _345 <= _344;
+            tx_level <= _344;
         else
-            _345 <= _44;
+            tx_level <= _44;
     end
-    assign _1830 = _345 == _1829;
+    assign _1830 = tx_level == _1829;
     assign _1832 = { _203,
                      _1830,
                      _275,

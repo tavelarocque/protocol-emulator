@@ -69,7 +69,7 @@ module Mutation = struct
     | Xdec_never_decrements
     | Wait_timeout_ignores_budget
     | Delay_field_ignored
-    | Set_pins_ignores_count
+    | Set_pins_count_off_by_one
     | Push_not_right_justified
   [@@deriving sexp_of, enumerate, equal]
 end
@@ -111,14 +111,70 @@ let read_pins ~lines ~base ~count =
     16
 ;;
 
-let create ?mutation (i : _ I.t) : _ O.t =
+(* The thread's architectural state and one step of its next-state
+   function, as an interface. [create] normally builds the datapath below;
+   passing [~datapath] substitutes another implementation of the same step
+   with everything else (program memory, FIFOs, pins) unchanged. The formal
+   equivalence proof in sim/test_formal.ml uses this to compare this RTL
+   against an independently written combinational spec. *)
+module Thread_state = struct
+  type 'a t =
+    { pc : 'a [@bits 6]
+    ; x : 'a [@bits 16]
+    ; y : 'a [@bits 16]
+    ; isr : 'a [@bits 16]
+    ; isr_count : 'a [@bits 5]
+    ; osr : 'a [@bits 16]
+    ; osr_count : 'a [@bits 5]
+    ; delay_left : 'a [@bits 4]
+    ; waiting : 'a
+    ; wait_count : 'a [@bits 16]
+    ; pin_out : 'a [@bits 8]
+    }
+  [@@deriving hardcaml]
+end
+
+module Step_in = struct
+  type 'a t =
+    { enable : 'a
+    ; instr : 'a [@bits 16]
+    ; lines : 'a [@bits 8]
+    ; tx_empty : 'a
+    ; tx_head : 'a [@bits 16]
+    ; rx_full : 'a
+    ; start : 'a [@bits 6]
+    ; out_base : 'a [@bits 3]
+    ; out_count : 'a [@bits 4]
+    ; set_base : 'a [@bits 3]
+    ; set_count : 'a [@bits 4]
+    ; in_base : 'a [@bits 3]
+    ; threshold : 'a [@bits 5]
+    ; timeout_vector : 'a [@bits 6]
+    ; timeout : 'a [@bits 16]
+    }
+  [@@deriving hardcaml]
+end
+
+module Step_out = struct
+  type 'a t =
+    { next : 'a Thread_state.t
+    ; pull : 'a
+    ; push : 'a
+    ; push_value : 'a
+    }
+end
+
+type datapath = Signal.t Thread_state.t -> Signal.t Step_in.t -> Signal.t Step_out.t
+
+let create ?mutation ?datapath (i : _ I.t) : _ O.t =
   let is m = Option.value_map mutation ~default:false ~f:(Mutation.equal m) in
   let spec = Reg_spec.create ~clock:i.clock ~clear:i.clear () in
   let open Always in
   (* --- Program memory: 32 x 16 flops, written by the host. --- *)
   let program =
     List.init program_size ~f:(fun a ->
-      reg spec ~enable:(i.prog_we &: (i.prog_addr ==:. a)) i.prog_data)
+      reg spec ~enable:(i.prog_we &: (i.prog_addr ==:. a)) i.prog_data
+      -- sprintf "prog_%d" a)
   in
   (* --- Thread state. --- *)
   let pc = Variable.reg spec ~width:6 in
@@ -137,6 +193,14 @@ let create ?mutation (i : _ I.t) : _ O.t =
   let pin_out =
     Variable.reg (Reg_spec.override spec ~clear_to:(ones num_pins)) ~width:num_pins
   in
+  (* Stable register names: used in waveforms, and by the equivalence
+     checker to pair up state between two circuits. *)
+  List.iter
+    [ pc, "pc"; x, "x"; y, "y"; isr, "isr"; isr_count, "isr_count"; osr, "osr"
+    ; osr_count, "osr_count"; delay_left, "delay_left"; waiting, "waiting"
+    ; wait_count, "wait_count"; pin_out, "pin_out"
+    ]
+    ~f:(fun ((v : Variable.t), n) -> ignore (v.value -- n : Signal.t));
   (* --- Pin levels seen by the thread this cycle. --- *)
   let lines =
     concat_lsb
@@ -150,10 +214,64 @@ let create ?mutation (i : _ I.t) : _ O.t =
   let thread_pull = wire 1 in
   let thread_push = wire 1 in
   let push_value = wire 16 in
-  let tx = Tiny_fifo.create spec ~push:i.tx_push ~data:i.tx_data ~pop:thread_pull in
-  let rx = Tiny_fifo.create spec ~push:thread_push ~data:push_value ~pop:i.rx_pop in
-  (* --- Decode. --- *)
+  let tx = Tiny_fifo.create ~name:"tx" spec ~push:i.tx_push ~data:i.tx_data ~pop:thread_pull in
+  let rx = Tiny_fifo.create ~name:"rx" spec ~push:thread_push ~data:push_value ~pop:i.rx_pop in
   let instr = mux pc.value program in
+  (match datapath with
+   | Some step ->
+     let current =
+       { Thread_state.pc = pc.value
+       ; x = x.value
+       ; y = y.value
+       ; isr = isr.value
+       ; isr_count = isr_count.value
+       ; osr = osr.value
+       ; osr_count = osr_count.value
+       ; delay_left = delay_left.value
+       ; waiting = waiting.value
+       ; wait_count = wait_count.value
+       ; pin_out = pin_out.value
+       }
+     in
+     let (out : _ Step_out.t) =
+       step
+         current
+         { Step_in.enable = i.enable
+         ; instr
+         ; lines
+         ; tx_empty = tx.empty
+         ; tx_head = tx.head
+         ; rx_full = rx.full
+         ; start = i.start
+         ; out_base = i.out_base
+         ; out_count = i.out_count
+         ; set_base = i.set_base
+         ; set_count = i.set_count
+         ; in_base = i.in_base
+         ; threshold = i.threshold
+         ; timeout_vector = i.timeout_vector
+         ; timeout = i.timeout
+         }
+     in
+     thread_pull <== out.pull;
+     thread_push <== out.push;
+     push_value <== out.push_value;
+     let (n : _ Thread_state.t) = out.next in
+     compile
+       [ pc <-- n.pc
+       ; x <-- n.x
+       ; y <-- n.y
+       ; isr <-- n.isr
+       ; isr_count <-- n.isr_count
+       ; osr <-- n.osr
+       ; osr_count <-- n.osr_count
+       ; delay_left <-- n.delay_left
+       ; waiting <-- n.waiting
+       ; wait_count <-- n.wait_count
+       ; pin_out <-- n.pin_out
+       ]
+   | None ->
+  (* --- Decode. --- *)
   let op = select instr 15 13 in
   let delay = select instr 12 9 in
   let is_op n = op ==:. n in
@@ -224,7 +342,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
     mux mov_src [ x.value; y.value; uresize lines 16; isr.value; osr.value; zero 16 ]
   in
   let set_value = uresize (select instr 4 0) 16 in
-  let set_count = if is Set_pins_ignores_count then of_int ~width:4 8 else i.set_count in
+  let set_count = if is Set_pins_count_off_by_one then i.set_count +:. 1 else i.set_count in
   compile
     [ if_
         ~:(i.enable)
@@ -326,7 +444,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
                    ]
                ]
            ]
-    ];
+    ]);
   (* Pads: push-pull drives the bit; open-drain drives low only for a 0. *)
   let pads_oe =
     concat_lsb

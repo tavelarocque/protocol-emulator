@@ -339,7 +339,7 @@ let%expect_test "every planted bug in the core is caught" =
     Xdec_never_decrements        caught by program #7
     Wait_timeout_ignores_budget  caught by program #4
     Delay_field_ignored          caught by program #1
-    Set_pins_ignores_count       caught by program #4
+    Set_pins_count_off_by_one    caught by program #4
     Push_not_right_justified     caught by program #15
     |}]
 ;;
