@@ -1,0 +1,12 @@
+; Generates the Verilog the Tiny Tapeout flow consumes, from the Hardcaml
+; source. (mode promote) writes it into this folder so it can be committed,
+; and every `dune build` regenerates it, so the OCaml and the Verilog can
+; never drift apart.
+
+(rule
+ (targets uart_tx.v)
+ (mode promote)
+ (action
+  (with-stdout-to
+   uart_tx.v
+   (run %{dep:../bin/generate.exe}))))

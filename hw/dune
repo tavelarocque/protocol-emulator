@@ -1,0 +1,5 @@
+(library
+ (name pe_hw)
+ (libraries core hardcaml)
+ (preprocess
+  (pps ppx_jane ppx_hardcaml)))

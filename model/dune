@@ -1,0 +1,5 @@
+(library
+ (name pe_model)
+ (libraries core)
+ (preprocess
+  (pps ppx_jane)))

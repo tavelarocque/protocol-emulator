@@ -1,0 +1,6 @@
+(library
+ (name pe_test)
+ (libraries core hardcaml hardcaml_waveterm pe_hw pe_model)
+ (inline_tests)
+ (preprocess
+  (pps ppx_jane)))
