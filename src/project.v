@@ -2,12 +2,8 @@
  * Copyright (c) 2026 Tave La Rocque
  * SPDX-License-Identifier: Apache-2.0
  *
- * Tiny Tapeout top module.
- *
- * Week-1 bring-up: this wraps the fixed-function UART transmitter
- * (generated from hw/uart_tx.ml into src/uart_tx.v) so the full
- * RTL -> GDS flow is proven before the programmable core exists.
- * The core replaces this wiring later.
+ * Tiny Tapeout top module. All logic is generated from Hardcaml
+ * (hw/top.ml -> src/protocol_emulator.v); this file only maps pins.
  */
 
 `default_nettype none
@@ -23,27 +19,16 @@ module tt_um_tavelarocque_protocol_emulator (
     input  wire       rst_n     // reset_n - low to reset
 );
 
-  // 10 MHz / 87 = 114,943 baud, within 0.3% of 115200.
-  localparam [15:0] DIVISOR = 16'd87;
-
-  wire tx;
-  wire busy;
-
-  uart_tx u_uart_tx (
+  protocol_emulator u_protocol_emulator (
       .clock  (clk),
       .clear  (~rst_n),
-      .divisor(DIVISOR),
-      .data   (ui_in),
-      .start  (uio_in[0]),
-      .tx     (tx),
-      .busy   (busy)
+      .ui_in  (ui_in),
+      .uio_in (uio_in),
+      .uo_out (uo_out),
+      .uio_out(uio_out),
+      .uio_oe (uio_oe)
   );
 
-  assign uo_out  = {6'b0, busy, tx};
-  assign uio_out = 8'b0;
-  assign uio_oe  = 8'b0;  // all bidirectional pins are inputs
-
-  // List all unused inputs to prevent warnings
-  wire _unused = &{ena, uio_in[7:1], 1'b0};
+  wire _unused = &{ena, 1'b0};
 
 endmodule

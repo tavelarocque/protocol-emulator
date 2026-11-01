@@ -1,22 +1,46 @@
 ## How it works
 
-The goal is a protocol emulator: a small CPU whose instructions read pins,
-write pins and count cycles, so UART, SPI and I2C are implemented in firmware
-instead of fixed logic. The hardware is written in Hardcaml (OCaml) and
-compiled to Verilog.
+A protocol emulator: a small CPU whose instructions read pins, write pins
+and count cycles, so hardware protocols (UART, SPI, I2C and others) are
+implemented in firmware loaded after fabrication, instead of in fixed logic.
+The instruction set is PIO-style (one instruction per clock, a delay field
+on every instruction, shift registers feeding host FIFOs) with wait
+timeouts and native open-drain pins added. The full specification is in
+`docs/isa.md` in the repository. The hardware is written in Hardcaml (OCaml)
+and verified cycle by cycle against an executable reference model.
 
-The current build is a bring-up design: a fixed-function 8N1 UART
-transmitter at 115200 baud (10 MHz clock, divisor 87). It exists to prove
-the toolchain end to end, and will be replaced by the programmable core.
+The host talks to the chip over SPI (mode 0, MSB first, SCK at most 1/8 of
+the core clock). Each transaction is 24 bits: a read/write bit, a 7-bit
+register address, and 16 data bits. Through it the host loads the 32-word
+program memory, configures the thread and the 8 protocol pins (each input,
+push-pull or open-drain), enables the thread, and moves data through 4-deep
+TX and RX FIFOs.
+
+| Address | Register |
+|---|---|
+| 0x00-0x1F | program memory (write) |
+| 0x20 | CTRL: bit 0 enables the thread |
+| 0x21 | START address |
+| 0x22 | OUT pins: base [2:0], count [7:4] |
+| 0x23 | SET pins: base [2:0], count [7:4] |
+| 0x24 | IN base [2:0] |
+| 0x25 | THRESHOLD (bits per FIFO word, 1-16) |
+| 0x26 | TIMEOUT_VECTOR |
+| 0x27 | PIN_MODES, 2 bits per pin: 0 input, 1 push-pull, 2 open-drain |
+| 0x28 | TX FIFO (write) |
+| 0x29 | RX FIFO (read) |
+| 0x2A | STATUS: pc [12:8], enable [7], RX level [6:4], TX level [2:0] |
 
 ## How to test
 
-Run at 10 MHz. Set the byte to send on `ui_in[7:0]`, then pulse `uio_in[0]`
-(START) high for one clock. The byte appears on `uo_out[0]` (TX) as one start
-bit, eight data bits LSB first, and one stop bit. `uo_out[1]` (BUSY) is high
-while a frame is being sent, and START is ignored while busy. Connect TX to
-any USB-serial adapter at 115200 8N1 to read it.
+With the demo board's RP2040 as SPI host: load a firmware image (for
+example the 15-instruction UART transmitter in `test/uart_tx.hex`) into
+addresses 0x00 upwards, set PIN_MODES to 0x0001 (P0 push-pull), write 1 to
+CTRL, then write `divisor - 4` and then bytes to the TX FIFO. P0 outputs
+8N1 UART at `clock / divisor` baud. `test/echo.hex` instead returns every TX
+FIFO word on the RX FIFO.
 
 ## External hardware
 
-A USB-serial adapter (or the demo board's RP2040) to receive the UART output.
+None required. A logic analyser or USB-serial adapter on the protocol pins
+shows what the firmware is doing.

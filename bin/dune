@@ -1,5 +1,5 @@
-(executable
- (name generate)
- (libraries core hardcaml pe_hw)
+(executables
+ (names generate firmware_hex)
+ (libraries core hardcaml pe_hw pe_model)
  (preprocess
   (pps ppx_jane)))

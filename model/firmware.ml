@@ -30,3 +30,18 @@ stop:   jmp x-- stop
         jmp next
 |}
 ;;
+
+(* Echo: every 16-bit word the host pushes to the TX FIFO comes back on the
+   RX FIFO unchanged. Exercises the whole host data path (SPI, both FIFOs,
+   OSR, ISR) with no pins involved. *)
+let echo =
+  {|
+loop:   pull
+        out x, 16
+        in x, 16
+        push
+        jmp loop
+|}
+;;
+
+let all = [ "uart_tx", uart_tx; "echo", echo ]

@@ -4,9 +4,9 @@
 ; never drift apart.
 
 (rule
- (targets uart_tx.v)
+ (targets protocol_emulator.v)
  (mode promote)
  (action
   (with-stdout-to
-   uart_tx.v
+   protocol_emulator.v
    (run %{dep:../bin/generate.exe}))))

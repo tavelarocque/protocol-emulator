@@ -1,0 +1,18 @@
+; Firmware images for the cocotb testbench, assembled from model/firmware.ml.
+; Promoted into this folder so CI's Python tests can load them without OCaml.
+
+(rule
+ (targets uart_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   uart_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} uart_tx))))
+
+(rule
+ (targets echo.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   echo.hex
+   (run %{dep:../bin/firmware_hex.exe} echo))))

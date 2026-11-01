@@ -1,14 +1,13 @@
-(* Emits the production (unmutated) UART transmitter as Verilog on stdout.
-   `make verilog` writes it to src/uart_tx.v, which the Tiny Tapeout flow
-   consumes. CI will regenerate it and fail if it differs from the committed
-   file, so the OCaml source and the Verilog can never drift apart. *)
+(* Emits the chip's Verilog on stdout. The rule in src/dune runs this on
+   every `dune build` and writes src/protocol_emulator.v, which the Tiny
+   Tapeout flow consumes; CI fails if the committed copy is out of date. *)
 
 open! Core
 open! Hardcaml
-module Uart_tx = Pe_hw.Uart_tx
-module C = Circuit.With_interface (Uart_tx.I) (Uart_tx.O)
+module Top = Pe_hw.Top
+module C = Circuit.With_interface (Top.I) (Top.O)
 
 let () =
-  let circuit = C.create_exn ~name:"uart_tx" (fun i -> Uart_tx.create i) in
+  let circuit = C.create_exn ~name:"protocol_emulator" Top.create in
   Rtl.print Verilog circuit
 ;;
