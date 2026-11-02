@@ -5,25 +5,30 @@
       words, each from a random state with random inputs and configuration.
       This anchors the spec to the model everything else is tested against.
 
-   2. The equivalence proof. The two-thread core is built twice: once with
-      its real datapath in both threads, once with the spec substituted in
-      both, everything else identical. Hardcaml's sequential equivalence
-      checker cuts both circuits at their registers, so every register
-      becomes a free variable, and asks a SAT solver whether any state and
-      any inputs make the next-state or outputs differ. UNSAT is a proof: one
-      clock of the RTL equals one step of the spec in each thread, for every
-      state of both threads, instruction word, pin input, FIFO state and
-      configuration, including thread 1 starting from whatever pin value
-      thread 0 just produced.
+   2. The equivalence proof. Hardcaml's sequential equivalence checker
+      cuts two circuits at their registers, so every register becomes a free
+      variable, pairs the registers by name, and asks a SAT solver whether
+      any state and any inputs make a next state or an output differ. UNSAT
+      is a proof that one clock of one equals one clock of the other, from
+      every state, including states no run could reach.
 
-      What the proof does not cover: the code that composes the threads
-      (shared memory read ports, pin priority, per-thread FIFOs) is the same
-      in both builds. That part is checked by the differential test in
-      test_core.ml against the reference model, which composes threads its
-      own way.
+      Two proofs:
+      - Datapath: the core built with its real datapath in both threads
+        against the same core with the spec datapath substituted.
+      - Whole core: the RTL core against [Spec_core], an independent
+        description of everything around the datapaths too (program memory,
+        synchronisers, pin levels, clock dividers, FIFOs, CHAIN, pin
+        priority, pads), written from the documentation and the reference
+        model with the spec datapath inside. This covers the composition of
+        the two threads, which the first proof shares between both sides.
+        What the two sides do share: register names, widths and the FIFO's
+        state encoding, which the checker needs to pair them.
 
    3. Test the proof: every planted RTL bug must make it SAT, with a
-      counterexample. A proof that cannot fail proves nothing. *)
+      counterexample. A proof that cannot fail proves nothing. Against the
+      whole-core spec, the composition bugs (pin priority, fetch port,
+      CHAIN, synchroniser bypass) are now caught by logic written
+      separately, not by the absence of the bug on the other side. *)
 
 open! Core
 open! Hardcaml
@@ -228,6 +233,28 @@ let%expect_test "RTL core is equivalent to the spec (SAT proof)" =
   [%expect {| UNSAT: equivalent |}]
 ;;
 
+let spec_core ?planted_chain_bug () =
+  Core_circuit.create_exn ~name:"core" (Spec_core.create ?planted_chain_bug)
+;;
+
+let%expect_test "the whole RTL core is equivalent to the independent spec core" =
+  print_endline (prove (rtl ()) (spec_core ()));
+  [%expect {| UNSAT: equivalent |}]
+;;
+
+(* The proof compares the RTL with the spec core's own composition logic: a
+   bug planted on the spec's side breaks it, and the RTL with the same bug
+   planted matches the bugged spec. *)
+let%expect_test "a bug planted in the spec core breaks the whole-core proof" =
+  print_endline (prove (rtl ()) (spec_core ~planted_chain_bug:true ()));
+  print_endline
+    (prove (rtl ~mutation:Chain_ignores_full ()) (spec_core ~planted_chain_bug:true ()));
+  [%expect {|
+    SAT: counterexample found
+    UNSAT: equivalent
+    |}]
+;;
+
 (* --- 3. The proof can fail ------------------------------------------------- *)
 
 let%expect_test "every planted RTL bug is refuted with a counterexample" =
@@ -237,6 +264,27 @@ let%expect_test "every planted RTL bug is refuted with a counterexample" =
       (Sexp.to_string (P.Mutation.sexp_of_t mutation))
       (prove (rtl ~mutation ()) (spec ())));
   [%expect {|
+    Xdec_never_decrements        SAT: counterexample found
+    Wait_timeout_ignores_budget  SAT: counterexample found
+    Delay_field_ignored          SAT: counterexample found
+    Set_pins_count_off_by_one    SAT: counterexample found
+    Push_not_right_justified     SAT: counterexample found
+    Pin_priority_inverted        SAT: counterexample found
+    Fetch_port_crossed           SAT: counterexample found
+    Chain_ignores_full           SAT: counterexample found
+    Push_ignores_in_direction    SAT: counterexample found
+    Sync_bypass_inverted         SAT: counterexample found
+    |}]
+;;
+
+let%expect_test "every planted RTL bug is refuted by the whole-core spec" =
+  List.iter P.Mutation.all ~f:(fun mutation ->
+    printf
+      "%-28s %s\n"
+      (Sexp.to_string (P.Mutation.sexp_of_t mutation))
+      (prove (rtl ~mutation ()) (spec_core ())));
+  [%expect
+    {|
     Xdec_never_decrements        SAT: counterexample found
     Wait_timeout_ignores_budget  SAT: counterexample found
     Delay_field_ignored          SAT: counterexample found
