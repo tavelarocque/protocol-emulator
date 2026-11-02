@@ -284,6 +284,40 @@ module Reference_controller = struct
     start ~half @ address_byte @ List.concat (List.init count ~f:data) @ stop ~half
   ;;
 
+  (* A register read in one transaction: write [bytes] (typically a register
+     pointer), then a repeated START instead of STOP, then read [count]
+     bytes. For the repeated START, SDA is released while SCL is low, SCL
+     rises, and SDA falls while SCL is high. *)
+  let write_then_read ~address ~bytes ~count ~half =
+    let bit b =
+      [ Drive { sda = b; scl = false }
+      ; Hold half
+      ; Drive { sda = b; scl = true }
+      ; Wait_scl_high
+      ; Hold half
+      ; Drive { sda = b; scl = false }
+      ]
+    in
+    let byte v = List.concat_map (List.init 8 ~f:(fun i -> (v lsr (7 - i)) land 1 = 1)) ~f:bit in
+    let repeated_start =
+      [ Drive { sda = true; scl = false }
+      ; Hold half
+      ; Drive { sda = true; scl = true }
+      ; Wait_scl_high
+      ; Hold half
+      ; Drive { sda = false; scl = true }
+      ; Hold half
+      ]
+    in
+    start ~half
+    @ List.concat_map ((address lsl 1) :: bytes) ~f:(fun v -> byte v @ bit true)
+    @ repeated_start
+    @ byte ((address lsl 1) lor 1)
+    @ bit true
+    @ List.concat (List.init count ~f:(fun i -> List.concat (List.init 8 ~f:(fun _ -> bit true)) @ bit (i = count - 1)))
+    @ stop ~half
+  ;;
+
   (* Run the controller against [target], returning the resolved bus levels
      on every cycle. *)
   let run ~steps ~(target : Target.t) =

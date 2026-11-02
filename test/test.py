@@ -690,7 +690,7 @@ async def test_uart_duplex(dut):
 # (Alex Forencich, MIT). The chip's firmware has to speak the real protocol
 # well enough for someone else's device to understand it.
 
-from cocotbext.i2c import I2cMemory
+from cocotbext.i2c import I2cMaster, I2cMemory
 from cocotbext.uart import UartSink, UartSource
 
 
@@ -793,3 +793,82 @@ async def test_thirdparty_uart(dut):
     assert all(w & 0x100 for w in words), "stop bits"
     got = bytes(w & 0xFF for w in words)
     assert got == incoming, f"chip received {got!r}"
+
+
+# --- Device mode: the chip as an I2C device, driven by an outside controller -
+
+I2C_TARGET_REST = 57  # Firmware.i2c_target_rest; checked by the OCaml tests
+THRESHOLD = 0x45
+
+
+def marker(address, read):
+    """The RX word Firmware.i2c_target pushes for a START addressed to it."""
+    return ((address << 1) | int(read)) << 8
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_thirdparty_i2c_controller(dut):
+    """The roles reversed: cocotbext-i2c's I2cMaster is the controller and the
+    chip is the device, at 400 kHz. A probe of its address and of another
+    one, a write that fills the RX FIFO (the chip stretches the clock until
+    the host drains it), and a register read with a repeated START."""
+    await reset(dut)
+    dut.dev_mode.value = 1
+    master = I2cMaster(
+        sda=dut.i2c_sda, sda_o=dut.i2c_sda_dev, scl=dut.i2c_scl, scl_o=dut.i2c_scl_dev,
+        speed=400e3)
+    address = 0x3C
+    await load(dut, firmware("i2c_target"))
+    await write(dut, OUT_CFG, 0x10)  # OUT: SDA (P0), 1 pin
+    await write(dut, SET_CFG, 0x10)  # SET: SDA (P0), 1 pin
+    await write(dut, IN_BASE, 0)
+    await write(dut, SIDESET, 0x11)  # side-set: SCL (P1), 1 bit, for stretching
+    await write(dut, THRESHOLD, 8)
+    await write(dut, TIMEOUT, 0)  # timed waits become branches on a pin
+    await write(dut, TIMEOUT_VECTOR, I2C_TARGET_REST)
+    await write(dut, SHIFT, 0b10)  # IN MSB first: bytes arrive as they are
+    await write(dut, PIN_MODES, 0b1010)  # P0 SDA, P1 SCL open-drain
+    await write(dut, CTRL, 1)
+    await push(dut, address)  # the device's 7-bit address
+
+    # Probe, as i2cdetect does: START, address + W, STOP.
+    async def probe(a):
+        await master.send_start()
+        nack = await master.send_byte(a << 1)
+        await master.send_stop()
+        return nack
+
+    assert not await probe(address), "the chip's address was NACKed"
+    assert await probe(address + 1), "another address was ACKed"
+    assert await pop(dut) == marker(address, False)
+
+    # A write of five RX words (marker, register, three bytes) into a 4-deep
+    # FIFO nobody is draining: the chip must hold SCL low after the last
+    # byte's ACK, so the STOP waits, rather than lose a byte.
+    register, data = 0x10, [0xDE, 0xAD, 0xBE]
+    async def write_and_stop():
+        await master.write(address, [register] + data)
+        await master.send_stop()
+
+    writer = cocotb.start_soon(write_and_stop())
+    await ClockCycles(dut.clk, 3000)  # 300 us: the write itself takes ~120
+    assert not writer.done(), "the controller finished while the RX FIFO was full"
+    got = [await pop(dut) for _ in range(5)]
+    await writer
+    assert got == [marker(address, False), register] + data, f"RX {[hex(w) for w in got]}"
+
+    # Register read: write the pointer, then a repeated START and three reads.
+    # The host queues the reply first: cocotbext's I2cMaster samples SDA just
+    # before it raises SCL, so it would not see a bit the chip drives after
+    # a stretch at the start of a byte (a controller that samples on the
+    # rising edge, as the I2C spec has it, would).
+    reply = [0x5A, 0x00, 0xC3]
+    for b in reply:
+        await push(dut, rev8(b))
+    await master.write(address, [register])
+    back = await master.read(address, len(reply))
+    await master.send_stop()
+    assert list(back) == reply, f"controller read {list(back)}"
+    got = [await pop(dut) for _ in range(3)]
+    assert got == [marker(address, False), register, marker(address, True)], \
+        f"RX {[hex(w) for w in got]}"

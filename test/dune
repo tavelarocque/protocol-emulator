@@ -80,3 +80,11 @@
   (with-stdout-to
    uart_duplex.hex
    (run %{dep:../bin/firmware_hex.exe} uart_duplex))))
+
+(rule
+ (targets i2c_target.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i2c_target.hex
+   (run %{dep:../bin/firmware_hex.exe} i2c_target))))
