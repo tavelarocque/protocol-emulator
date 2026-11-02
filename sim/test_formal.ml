@@ -12,7 +12,7 @@
       is a proof that one clock of one equals one clock of the other, from
       every state, including states no run could reach.
 
-      Two proofs:
+      Three proofs:
       - Datapath: the core built with its real datapath in both threads
         against the same core with the spec datapath substituted.
       - Whole core: the RTL core against [Spec_core], an independent
@@ -23,6 +23,10 @@
         the two threads, which the first proof shares between both sides.
         What the two sides do share: register names, widths and the FIFO's
         state encoding, which the checker needs to pair them.
+      - Whole chip: the top level (SPI host port, register file and the
+        core) against [Spec_top], which wraps [Spec_core] in an independent
+        description of the host port and register map. With this, the proof
+        reaches from the Tiny Tapeout input pins to the output pins.
 
    3. Test the proof: every planted RTL bug must make it SAT, with a
       counterexample. A proof that cannot fail proves nothing. Against the
@@ -252,6 +256,34 @@ let%expect_test "a bug planted in the spec core breaks the whole-core proof" =
   [%expect {|
     SAT: counterexample found
     UNSAT: equivalent
+    |}]
+;;
+
+(* --- 2b. The whole chip ------------------------------------------------------ *)
+
+module Top_circuit = Circuit.With_interface (Pe_hw.Top.I) (Pe_hw.Top.O)
+
+let top () = Top_circuit.create_exn ~name:"chip" Pe_hw.Top.create
+
+let spec_top ?plant () =
+  Top_circuit.create_exn ~name:"chip" (Spec_top.create ?plant)
+;;
+
+let%expect_test "the whole chip (host port, registers, core) equals the independent spec" =
+  print_endline (prove (top ()) (spec_top ()));
+  [%expect {| UNSAT: equivalent |}]
+;;
+
+let%expect_test "bugs planted in the chip spec each break the proof" =
+  List.iter Spec_top.Plant.all ~f:(fun plant ->
+    printf
+      "%-24s %s\n"
+      (Sexp.to_string (Spec_top.Plant.sexp_of_t plant))
+      (prove (top ()) (spec_top ~plant ())));
+  [%expect
+    {|
+    Status_levels_swapped    SAT: counterexample found
+    Pop_on_write             SAT: counterexample found
     |}]
 ;;
 

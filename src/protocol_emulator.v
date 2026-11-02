@@ -241,7 +241,7 @@ module protocol_emulator (
     wire [15:0] _568;
     wire [15:0] _569;
     wire [15:0] _6;
-    reg [15:0] _357;
+    reg [15:0] host_miso_shift;
     wire _3785;
     wire _3784;
     wire _3782;
@@ -296,7 +296,7 @@ module protocol_emulator (
     wire _581;
     wire [5:0] _584;
     wire [5:0] _7;
-    reg [5:0] _380;
+    reg [5:0] cfg_t0_start;
     wire [5:0] _3689;
     wire [5:0] _589;
     wire [6:0] _586;
@@ -305,7 +305,7 @@ module protocol_emulator (
     wire _588;
     wire [5:0] _590;
     wire [5:0] _8;
-    reg [5:0] _405;
+    reg [5:0] cfg_t0_timeout_vector;
     wire _3688;
     wire [5:0] _3690;
     wire [5:0] _3685;
@@ -325,7 +325,7 @@ module protocol_emulator (
     wire _1085;
     wire [15:0] _1086;
     wire [15:0] _11;
-    reg [15:0] _461;
+    reg [15:0] cfg_t0_timeout;
     wire _1114;
     wire _1073;
     wire _1060;
@@ -371,7 +371,7 @@ module protocol_emulator (
     wire _1125;
     wire [4:0] _1127;
     wire [4:0] _14;
-    reg [4:0] _400;
+    reg [4:0] cfg_t0_threshold;
     wire [4:0] _1164;
     wire [5:0] _1161;
     wire [5:0] _1154;
@@ -806,7 +806,7 @@ module protocol_emulator (
     wire _1175;
     wire [7:0] _1177;
     wire [7:0] _17;
-    reg [7:0] _488;
+    reg [7:0] cfg_t1_out_cfg;
     wire [2:0] _3050;
     wire [2:0] _3051;
     wire [3:0] _3052;
@@ -929,7 +929,7 @@ module protocol_emulator (
     wire _1181;
     wire [7:0] _1183;
     wire [7:0] _18;
-    reg [7:0] _493;
+    reg [7:0] cfg_t1_set_cfg;
     wire [2:0] _2926;
     wire [2:0] _2927;
     wire [3:0] _2928;
@@ -1293,7 +1293,7 @@ module protocol_emulator (
     wire _1187;
     wire [7:0] _1189;
     wire [7:0] _19;
-    reg [7:0] _385;
+    reg [7:0] cfg_t0_out_cfg;
     wire [2:0] _1359;
     wire [2:0] _1360;
     wire [3:0] _1361;
@@ -1416,7 +1416,7 @@ module protocol_emulator (
     wire _1193;
     wire [7:0] _1195;
     wire [7:0] _20;
-    reg [7:0] _390;
+    reg [7:0] cfg_t0_set_cfg;
     wire [2:0] _1232;
     wire [2:0] _1233;
     wire [3:0] _1234;
@@ -1450,7 +1450,7 @@ module protocol_emulator (
     wire _1199;
     wire [5:0] _1201;
     wire [5:0] _21;
-    reg [5:0] _465;
+    reg [5:0] cfg_t0_sideset;
     wire [2:0] _1203;
     wire [2:0] _1204;
     wire [3:0] _1205;
@@ -1498,7 +1498,7 @@ module protocol_emulator (
     wire _1843;
     wire [5:0] _1845;
     wire [5:0] _23;
-    reg [5:0] _555;
+    reg [5:0] cfg_t1_sideset;
     wire [1:0] _2863;
     wire _2864;
     wire [3:0] _2872;
@@ -1807,7 +1807,7 @@ module protocol_emulator (
     wire _1891;
     wire [5:0] _1893;
     wire [5:0] _27;
-    reg [5:0] _483;
+    reg [5:0] cfg_t1_start;
     wire [5:0] _2855;
     wire [5:0] _1898;
     wire [6:0] _1895;
@@ -1816,7 +1816,7 @@ module protocol_emulator (
     wire _1897;
     wire [5:0] _1899;
     wire [5:0] _28;
-    reg [5:0] _508;
+    reg [5:0] cfg_t1_timeout_vector;
     wire _2854;
     wire [5:0] _2856;
     wire [5:0] _2852;
@@ -1834,7 +1834,7 @@ module protocol_emulator (
     wire _1944;
     wire [15:0] _1945;
     wire [15:0] _31;
-    reg [15:0] _551;
+    reg [15:0] cfg_t1_timeout;
     wire _1932;
     wire _1919;
     wire _1906;
@@ -1900,7 +1900,7 @@ module protocol_emulator (
     wire _2021;
     wire [4:0] _2023;
     wire [4:0] _36;
-    reg [4:0] _503;
+    reg [4:0] cfg_t1_threshold;
     wire [4:0] _2045;
     wire [5:0] _2042;
     wire [5:0] _2041;
@@ -2075,7 +2075,7 @@ module protocol_emulator (
     wire _2056;
     wire [2:0] _2058;
     wire [2:0] _39;
-    reg [2:0] _498;
+    reg [2:0] cfg_t1_in_base;
     wire [2:0] _2090;
     reg _2099;
     wire _2102;
@@ -2404,7 +2404,7 @@ module protocol_emulator (
     wire _2312;
     wire [2:0] _2314;
     wire [2:0] _44;
-    reg [2:0] _395;
+    reg [2:0] cfg_t0_in_base;
     wire [2:0] _2336;
     reg _2345;
     wire _2348;
@@ -2548,7 +2548,7 @@ module protocol_emulator (
     wire _2730;
     wire [1:0] _2732;
     wire [1:0] _57;
-    reg [1:0] _250;
+    reg [1:0] cfg_t1_shift;
     wire _2663;
     wire [15:0] _2786;
     wire [1:0] _2752;
@@ -2648,7 +2648,7 @@ module protocol_emulator (
     wire _2884;
     wire [15:0] _2885;
     wire [15:0] _66;
-    reg [15:0] _559;
+    reg [15:0] cfg_t1_clkdiv;
     wire _2890;
     wire [15:0] _2894;
     wire [15:0] _2888;
@@ -2678,7 +2678,7 @@ module protocol_emulator (
     wire _3458;
     wire [7:0] _3460;
     wire [7:0] _70;
-    reg [7:0] _473;
+    reg [7:0] cfg_sync_bypass;
     wire [7:0] _72;
     wire [7:0] _1000;
     wire [7:0] _1008;
@@ -2689,7 +2689,7 @@ module protocol_emulator (
     wire _3464;
     wire [15:0] _3465;
     wire [15:0] _73;
-    reg [15:0] _109;
+    reg [15:0] cfg_pin_modes;
     wire [1:0] _999;
     reg _1012;
     wire [7:0] _1048;
@@ -2858,7 +2858,7 @@ module protocol_emulator (
     wire _3600;
     wire [1:0] _3602;
     wire [1:0] _80;
-    reg [1:0] _478;
+    reg [1:0] cfg_t0_shift;
     wire _1504;
     wire [15:0] _1562;
     wire [1:0] _3618;
@@ -2957,7 +2957,7 @@ module protocol_emulator (
     wire _3716;
     wire [15:0] _3717;
     wire [15:0] _89;
-    reg [15:0] _469;
+    reg [15:0] cfg_t0_clkdiv;
     wire _3722;
     wire [15:0] _3726;
     wire [15:0] _3720;
@@ -2987,14 +2987,14 @@ module protocol_emulator (
     wire [6:0] _578;
     wire _3759;
     wire _363;
-    reg _365;
-    reg _367;
+    reg host_mosi_s1;
+    reg host_mosi_s2;
     wire [22:0] _361;
     wire [22:0] _3743;
     wire [22:0] _3744;
     wire [22:0] _3745;
     wire [22:0] _93;
-    reg [22:0] _362;
+    reg [22:0] host_shift_in;
     wire [23:0] _368;
     wire [7:0] _369;
     wire _359;
@@ -3002,7 +3002,7 @@ module protocol_emulator (
     wire [7:0] _3747;
     wire [7:0] _3748;
     wire [7:0] _94;
-    reg [7:0] _575;
+    reg [7:0] host_cmd;
     wire _576;
     wire [4:0] _570;
     wire [4:0] _3752;
@@ -3012,21 +3012,21 @@ module protocol_emulator (
     wire [4:0] _3754;
     wire [4:0] _3756;
     wire [4:0] _95;
-    reg [4:0] _346;
+    reg [4:0] host_bit_count;
     wire _571;
     wire _326;
-    reg _328;
-    reg _330;
+    reg host_cs_n_s1;
+    reg host_cs_n_s2;
     wire _353;
-    reg _340;
+    reg host_sck_prev;
     wire _351;
     wire vdd;
     wire _97;
     wire _99;
     wire [7:0] _101;
     wire _331;
-    reg _334;
-    reg _336;
+    reg host_sck_s1;
+    reg host_sck_s2;
     wire _352;
     wire _354;
     wire _572;
@@ -3034,7 +3034,7 @@ module protocol_emulator (
     wire _3760;
     wire [2:0] _3762;
     wire [2:0] _102;
-    reg [2:0] _375;
+    reg [2:0] cfg_ctrl;
     wire _2292;
     wire _3764;
     wire _3766;
@@ -3052,67 +3052,67 @@ module protocol_emulator (
     assign _189 = pin_out[0:0];
     assign _190 = ~ _189;
     assign _187 = 2'b10;
-    assign _186 = _109[1:0];
+    assign _186 = cfg_pin_modes[1:0];
     assign _188 = _186 == _187;
     assign _191 = _188 & _190;
     assign _184 = 2'b01;
-    assign _183 = _109[1:0];
+    assign _183 = cfg_pin_modes[1:0];
     assign _185 = _183 == _184;
     assign _192 = _185 | _191;
     assign _179 = pin_out[1:1];
     assign _180 = ~ _179;
-    assign _176 = _109[3:2];
+    assign _176 = cfg_pin_modes[3:2];
     assign _178 = _176 == _187;
     assign _181 = _178 & _180;
-    assign _173 = _109[3:2];
+    assign _173 = cfg_pin_modes[3:2];
     assign _175 = _173 == _184;
     assign _182 = _175 | _181;
     assign _169 = pin_out[2:2];
     assign _170 = ~ _169;
-    assign _166 = _109[5:4];
+    assign _166 = cfg_pin_modes[5:4];
     assign _168 = _166 == _187;
     assign _171 = _168 & _170;
-    assign _163 = _109[5:4];
+    assign _163 = cfg_pin_modes[5:4];
     assign _165 = _163 == _184;
     assign _172 = _165 | _171;
     assign _159 = pin_out[3:3];
     assign _160 = ~ _159;
-    assign _156 = _109[7:6];
+    assign _156 = cfg_pin_modes[7:6];
     assign _158 = _156 == _187;
     assign _161 = _158 & _160;
-    assign _153 = _109[7:6];
+    assign _153 = cfg_pin_modes[7:6];
     assign _155 = _153 == _184;
     assign _162 = _155 | _161;
     assign _149 = pin_out[4:4];
     assign _150 = ~ _149;
-    assign _146 = _109[9:8];
+    assign _146 = cfg_pin_modes[9:8];
     assign _148 = _146 == _187;
     assign _151 = _148 & _150;
-    assign _143 = _109[9:8];
+    assign _143 = cfg_pin_modes[9:8];
     assign _145 = _143 == _184;
     assign _152 = _145 | _151;
     assign _139 = pin_out[5:5];
     assign _140 = ~ _139;
-    assign _136 = _109[11:10];
+    assign _136 = cfg_pin_modes[11:10];
     assign _138 = _136 == _187;
     assign _141 = _138 & _140;
-    assign _133 = _109[11:10];
+    assign _133 = cfg_pin_modes[11:10];
     assign _135 = _133 == _184;
     assign _142 = _135 | _141;
     assign _129 = pin_out[6:6];
     assign _130 = ~ _129;
-    assign _126 = _109[13:12];
+    assign _126 = cfg_pin_modes[13:12];
     assign _128 = _126 == _187;
     assign _131 = _128 & _130;
-    assign _123 = _109[13:12];
+    assign _123 = cfg_pin_modes[13:12];
     assign _125 = _123 == _184;
     assign _132 = _125 | _131;
     assign _119 = pin_out[7:7];
     assign _120 = ~ _119;
-    assign _113 = _109[15:14];
+    assign _113 = cfg_pin_modes[15:14];
     assign _115 = _113 == _187;
     assign _121 = _115 & _120;
-    assign _110 = _109[15:14];
+    assign _110 = cfg_pin_modes[15:14];
     assign _112 = _110 == _184;
     assign _122 = _112 | _121;
     assign _193 = { _122,
@@ -3124,35 +3124,35 @@ module protocol_emulator (
                     _182,
                     _192 };
     assign _232 = pin_out[0:0];
-    assign _229 = _109[1:0];
+    assign _229 = cfg_pin_modes[1:0];
     assign _231 = _229 == _184;
     assign _233 = _231 & _232;
     assign _227 = pin_out[1:1];
-    assign _224 = _109[3:2];
+    assign _224 = cfg_pin_modes[3:2];
     assign _226 = _224 == _184;
     assign _228 = _226 & _227;
     assign _222 = pin_out[2:2];
-    assign _219 = _109[5:4];
+    assign _219 = cfg_pin_modes[5:4];
     assign _221 = _219 == _184;
     assign _223 = _221 & _222;
     assign _217 = pin_out[3:3];
-    assign _214 = _109[7:6];
+    assign _214 = cfg_pin_modes[7:6];
     assign _216 = _214 == _184;
     assign _218 = _216 & _217;
     assign _212 = pin_out[4:4];
-    assign _209 = _109[9:8];
+    assign _209 = cfg_pin_modes[9:8];
     assign _211 = _209 == _184;
     assign _213 = _211 & _212;
     assign _207 = pin_out[5:5];
-    assign _204 = _109[11:10];
+    assign _204 = cfg_pin_modes[11:10];
     assign _206 = _204 == _184;
     assign _208 = _206 & _207;
     assign _202 = pin_out[6:6];
-    assign _199 = _109[13:12];
+    assign _199 = cfg_pin_modes[13:12];
     assign _201 = _199 == _184;
     assign _203 = _201 & _202;
     assign _197 = pin_out[7:7];
-    assign _194 = _109[15:14];
+    assign _194 = cfg_pin_modes[15:14];
     assign _196 = _194 == _184;
     assign _198 = _196 & _197;
     assign _234 = { _198,
@@ -3165,16 +3165,16 @@ module protocol_emulator (
                     _233 };
     assign _356 = 16'b0000000000000000;
     assign _566 = 1'b0;
-    assign _565 = _357[14:0];
+    assign _565 = host_miso_shift[14:0];
     assign _567 = { _565,
                     _566 };
     assign _560 = 14'b00000000000000;
     assign _561 = { _560,
-                    _250 };
+                    cfg_t1_shift };
     assign _552 = 10'b0000000000;
     assign _556 = { _552,
-                    _555 };
-    assign _544 = _375[1:1];
+                    cfg_t1_sideset };
+    assign _544 = cfg_ctrl[1:1];
     assign _540 = 2'b00;
     assign _548 = { _540,
                     t1_pc,
@@ -3315,26 +3315,26 @@ module protocol_emulator (
     assign _512 = ~ _511;
     assign _539 = _512 ? _538 : _356;
     assign _509 = { _552,
-                    _508 };
+                    cfg_t1_timeout_vector };
     assign _500 = 11'b00000000000;
     assign _504 = { _500,
-                    _503 };
+                    cfg_t1_threshold };
     assign _495 = 13'b0000000000000;
     assign _499 = { _495,
-                    _498 };
+                    cfg_t1_in_base };
     assign _494 = { _305,
-                    _493 };
+                    cfg_t1_set_cfg };
     assign _489 = { _305,
-                    _488 };
+                    cfg_t1_out_cfg };
     assign _484 = { _552,
-                    _483 };
+                    cfg_t1_start };
     assign _479 = { _560,
-                    _478 };
+                    cfg_t0_shift };
     assign _474 = { _305,
-                    _473 };
+                    cfg_sync_bypass };
     assign _466 = { _552,
-                    _465 };
-    assign _454 = _375[0:0];
+                    cfg_t0_sideset };
+    assign _454 = cfg_ctrl[0:0];
     assign _458 = { _540,
                     t0_pc,
                     _454,
@@ -3345,19 +3345,19 @@ module protocol_emulator (
     assign _412 = ~ _411;
     assign _449 = _412 ? _448 : _356;
     assign _406 = { _552,
-                    _405 };
+                    cfg_t0_timeout_vector };
     assign _401 = { _500,
-                    _400 };
+                    cfg_t0_threshold };
     assign _396 = { _495,
-                    _395 };
+                    cfg_t0_in_base };
     assign _391 = { _305,
-                    _390 };
+                    cfg_t0_set_cfg };
     assign _386 = { _305,
-                    _385 };
+                    cfg_t0_out_cfg };
     assign _381 = { _552,
-                    _380 };
+                    cfg_t0_start };
     assign _376 = { _495,
-                    _375 };
+                    cfg_ctrl };
     always @* begin
         case (_370)
         0:
@@ -3503,7 +3503,7 @@ module protocol_emulator (
         70:
             _562 <= _406;
         71:
-            _562 <= _109;
+            _562 <= cfg_pin_modes;
         72:
             _562 <= _356;
         73:
@@ -3511,11 +3511,11 @@ module protocol_emulator (
         74:
             _562 <= _458;
         75:
-            _562 <= _461;
+            _562 <= cfg_t0_timeout;
         76:
             _562 <= _466;
         77:
-            _562 <= _469;
+            _562 <= cfg_t0_clkdiv;
         78:
             _562 <= _474;
         79:
@@ -3543,11 +3543,11 @@ module protocol_emulator (
         90:
             _562 <= _548;
         91:
-            _562 <= _551;
+            _562 <= cfg_t1_timeout;
         92:
             _562 <= _556;
         93:
-            _562 <= _559;
+            _562 <= cfg_t1_clkdiv;
         94:
             _562 <= _356;
         95:
@@ -3556,32 +3556,32 @@ module protocol_emulator (
             _562 <= _356;
         endcase
     end
-    assign _563 = _359 ? _562 : _357;
-    assign _564 = _354 ? _563 : _357;
+    assign _563 = _359 ? _562 : host_miso_shift;
+    assign _564 = _354 ? _563 : host_miso_shift;
     assign _347 = 5'b01001;
-    assign _348 = _346 < _347;
+    assign _348 = host_bit_count < _347;
     assign _349 = ~ _348;
-    assign _342 = ~ _330;
-    assign _337 = ~ _336;
-    assign _341 = _337 & _340;
+    assign _342 = ~ host_cs_n_s2;
+    assign _337 = ~ host_sck_s2;
+    assign _341 = _337 & host_sck_prev;
     assign _343 = _341 & _342;
     assign _350 = _343 & _349;
     assign _568 = _350 ? _567 : _564;
-    assign _569 = _330 ? _357 : _568;
+    assign _569 = host_cs_n_s2 ? host_miso_shift : _568;
     assign _6 = _569;
     always @(posedge _99) begin
         if (_97)
-            _357 <= _356;
+            host_miso_shift <= _356;
         else
-            _357 <= _6;
+            host_miso_shift <= _6;
     end
-    assign _3785 = _357[15:15];
-    assign _3784 = _375[0:0];
+    assign _3785 = host_miso_shift[15:15];
+    assign _3784 = cfg_ctrl[0:0];
     assign _3782 = t0_rx_level == _510;
     assign _3783 = ~ _3782;
     assign _3779 = 3'b100;
     assign _3780 = t0_tx_level == _3779;
-    assign _3778 = _375[1:1];
+    assign _3778 = cfg_ctrl[1:1];
     assign _3776 = t1_rx_level == _510;
     assign _3777 = ~ _3776;
     assign _3771 = { _540,
@@ -3630,13 +3630,13 @@ module protocol_emulator (
     assign _580 = _578 == _579;
     assign _577 = _572 & _576;
     assign _581 = _577 & _580;
-    assign _584 = _581 ? _583 : _380;
+    assign _584 = _581 ? _583 : cfg_t0_start;
     assign _7 = _584;
     always @(posedge _99) begin
         if (_97)
-            _380 <= _452;
+            cfg_t0_start <= _452;
         else
-            _380 <= _7;
+            cfg_t0_start <= _7;
     end
     assign _3689 = _994[5:0];
     assign _589 = _582[5:0];
@@ -3644,16 +3644,16 @@ module protocol_emulator (
     assign _587 = _578 == _586;
     assign _585 = _572 & _576;
     assign _588 = _585 & _587;
-    assign _590 = _588 ? _589 : _405;
+    assign _590 = _588 ? _589 : cfg_t0_timeout_vector;
     assign _8 = _590;
     always @(posedge _99) begin
         if (_97)
-            _405 <= _452;
+            cfg_t0_timeout_vector <= _452;
         else
-            _405 <= _8;
+            cfg_t0_timeout_vector <= _8;
     end
     assign _3688 = _995 == _510;
-    assign _3690 = _3688 ? _3689 : _405;
+    assign _3690 = _3688 ? _3689 : cfg_t0_timeout_vector;
     assign _3685 = 6'b000001;
     assign _3686 = t0_pc + _3685;
     assign _1075 = 16'b0000000000000001;
@@ -3674,13 +3674,13 @@ module protocol_emulator (
     assign _1084 = _578 == _1083;
     assign _1082 = _572 & _576;
     assign _1085 = _1082 & _1084;
-    assign _1086 = _1085 ? _582 : _461;
+    assign _1086 = _1085 ? _582 : cfg_t0_timeout;
     assign _11 = _1086;
     always @(posedge _99) begin
         if (_97)
-            _461 <= _356;
+            cfg_t0_timeout <= _356;
         else
-            _461 <= _11;
+            cfg_t0_timeout <= _11;
     end
     assign _1114 = 1'b1;
     assign _1073 = ~ _1072;
@@ -3702,7 +3702,7 @@ module protocol_emulator (
         else
             t0_waiting <= _13;
     end
-    assign _1070 = t0_waiting ? t0_wait_count : _461;
+    assign _1070 = t0_waiting ? t0_wait_count : cfg_t0_timeout;
     assign _1072 = _1070 == _356;
     assign _1062 = _994[4:4];
     assign _1095 = _1062 & _1072;
@@ -3741,7 +3741,7 @@ module protocol_emulator (
     assign _3680 = _995 == _1091;
     assign _3682 = _3680 & _3681;
     assign _3683 = _3682 & _1095;
-    assign _3676 = t0_isr_count < _400;
+    assign _3676 = t0_isr_count < cfg_t0_threshold;
     assign _1129 = 5'b00000;
     assign _399 = 5'b01000;
     assign _1126 = _582[4:0];
@@ -3749,13 +3749,13 @@ module protocol_emulator (
     assign _1124 = _578 == _1123;
     assign _1122 = _572 & _576;
     assign _1125 = _1122 & _1124;
-    assign _1127 = _1125 ? _1126 : _400;
+    assign _1127 = _1125 ? _1126 : cfg_t0_threshold;
     assign _14 = _1127;
     always @(posedge _99) begin
         if (_97)
-            _400 <= _399;
+            cfg_t0_threshold <= _399;
         else
-            _400 <= _14;
+            cfg_t0_threshold <= _14;
     end
     assign _1164 = _1162[4:0];
     assign _1161 = { gnd,
@@ -3779,7 +3779,7 @@ module protocol_emulator (
     assign _1168 = _1113 ? _1167 : t0_osr_count;
     assign _1169 = _604 ? t0_osr_count : _1168;
     assign _1170 = _598 ? t0_osr_count : _1169;
-    assign _1171 = _592 ? _400 : _1170;
+    assign _1171 = _592 ? cfg_t0_threshold : _1170;
     assign _15 = _1171;
     assign _16 = _15;
     always @(posedge _99) begin
@@ -3788,7 +3788,7 @@ module protocol_emulator (
         else
             t0_osr_count <= _16;
     end
-    assign _3675 = t0_osr_count < _400;
+    assign _3675 = t0_osr_count < cfg_t0_threshold;
     assign _3673 = t0_x == t0_y;
     assign _3674 = ~ _3673;
     assign _3670 = t0_y == _356;
@@ -3803,7 +3803,7 @@ module protocol_emulator (
     assign _1046 = _1045 & _1044;
     assign _1045 = pin_out[0:0];
     assign _1044 = _1008[0:0];
-    assign _1043 = _109[1:0];
+    assign _1043 = cfg_pin_modes[1:0];
     always @* begin
         case (_1043)
         0:
@@ -3819,7 +3819,7 @@ module protocol_emulator (
     assign _1041 = _1040 & _1039;
     assign _1040 = pin_out[1:1];
     assign _1039 = _1008[1:1];
-    assign _1038 = _109[3:2];
+    assign _1038 = cfg_pin_modes[3:2];
     always @* begin
         case (_1038)
         0:
@@ -3835,7 +3835,7 @@ module protocol_emulator (
     assign _1036 = _1035 & _1034;
     assign _1035 = pin_out[2:2];
     assign _1034 = _1008[2:2];
-    assign _1033 = _109[5:4];
+    assign _1033 = cfg_pin_modes[5:4];
     always @* begin
         case (_1033)
         0:
@@ -3851,7 +3851,7 @@ module protocol_emulator (
     assign _1031 = _1030 & _1029;
     assign _1030 = pin_out[3:3];
     assign _1029 = _1008[3:3];
-    assign _1028 = _109[7:6];
+    assign _1028 = cfg_pin_modes[7:6];
     always @* begin
         case (_1028)
         0:
@@ -3867,7 +3867,7 @@ module protocol_emulator (
     assign _1026 = _1025 & _1024;
     assign _1025 = pin_out[4:4];
     assign _1024 = _1008[4:4];
-    assign _1023 = _109[9:8];
+    assign _1023 = cfg_pin_modes[9:8];
     always @* begin
         case (_1023)
         0:
@@ -3883,7 +3883,7 @@ module protocol_emulator (
     assign _1021 = _1020 & _1019;
     assign _1020 = pin_out[5:5];
     assign _1019 = _1008[5:5];
-    assign _1018 = _109[11:10];
+    assign _1018 = cfg_pin_modes[11:10];
     always @* begin
         case (_1018)
         0:
@@ -3899,7 +3899,7 @@ module protocol_emulator (
     assign _1016 = _1015 & _1014;
     assign _1015 = pin_out[6:6];
     assign _1014 = _1008[6:6];
-    assign _1013 = _109[13:12];
+    assign _1013 = cfg_pin_modes[13:12];
     always @* begin
         case (_1013)
         0:
@@ -4762,22 +4762,22 @@ module protocol_emulator (
         endcase
     end
     assign _3055 = _22[7:7];
-    assign _3053 = _488[7:4];
+    assign _3053 = cfg_t1_out_cfg[7:4];
     assign _487 = 8'b00010000;
     assign _1176 = _582[7:0];
     assign _1173 = 7'b1010010;
     assign _1174 = _578 == _1173;
     assign _1172 = _572 & _576;
     assign _1175 = _1172 & _1174;
-    assign _1177 = _1175 ? _1176 : _488;
+    assign _1177 = _1175 ? _1176 : cfg_t1_out_cfg;
     assign _17 = _1177;
     always @(posedge _99) begin
         if (_97)
-            _488 <= _487;
+            cfg_t1_out_cfg <= _487;
         else
-            _488 <= _17;
+            cfg_t1_out_cfg <= _17;
     end
-    assign _3050 = _488[2:0];
+    assign _3050 = cfg_t1_out_cfg[2:0];
     assign _3051 = _3174 - _3050;
     assign _3052 = { gnd,
                      _3051 };
@@ -5058,21 +5058,21 @@ module protocol_emulator (
         endcase
     end
     assign _2931 = _22[7:7];
-    assign _2929 = _493[7:4];
+    assign _2929 = cfg_t1_set_cfg[7:4];
     assign _1182 = _582[7:0];
     assign _1179 = 7'b1010011;
     assign _1180 = _578 == _1179;
     assign _1178 = _572 & _576;
     assign _1181 = _1178 & _1180;
-    assign _1183 = _1181 ? _1182 : _493;
+    assign _1183 = _1181 ? _1182 : cfg_t1_set_cfg;
     assign _18 = _1183;
     always @(posedge _99) begin
         if (_97)
-            _493 <= _487;
+            cfg_t1_set_cfg <= _487;
         else
-            _493 <= _18;
+            cfg_t1_set_cfg <= _18;
     end
-    assign _2926 = _493[2:0];
+    assign _2926 = cfg_t1_set_cfg[2:0];
     assign _2927 = _3174 - _2926;
     assign _2928 = { gnd,
                      _2927 };
@@ -5931,21 +5931,21 @@ module protocol_emulator (
         endcase
     end
     assign _1364 = pin_out[7:7];
-    assign _1362 = _385[7:4];
+    assign _1362 = cfg_t0_out_cfg[7:4];
     assign _1188 = _582[7:0];
     assign _1185 = 7'b1000010;
     assign _1186 = _578 == _1185;
     assign _1184 = _572 & _576;
     assign _1187 = _1184 & _1186;
-    assign _1189 = _1187 ? _1188 : _385;
+    assign _1189 = _1187 ? _1188 : cfg_t0_out_cfg;
     assign _19 = _1189;
     always @(posedge _99) begin
         if (_97)
-            _385 <= _487;
+            cfg_t0_out_cfg <= _487;
         else
-            _385 <= _19;
+            cfg_t0_out_cfg <= _19;
     end
-    assign _1359 = _385[2:0];
+    assign _1359 = cfg_t0_out_cfg[2:0];
     assign _1360 = _3174 - _1359;
     assign _1361 = { gnd,
                      _1360 };
@@ -6226,21 +6226,21 @@ module protocol_emulator (
         endcase
     end
     assign _1237 = pin_out[7:7];
-    assign _1235 = _390[7:4];
+    assign _1235 = cfg_t0_set_cfg[7:4];
     assign _1194 = _582[7:0];
     assign _1191 = 7'b1000011;
     assign _1192 = _578 == _1191;
     assign _1190 = _572 & _576;
     assign _1193 = _1190 & _1192;
-    assign _1195 = _1193 ? _1194 : _390;
+    assign _1195 = _1193 ? _1194 : cfg_t0_set_cfg;
     assign _20 = _1195;
     always @(posedge _99) begin
         if (_97)
-            _390 <= _487;
+            cfg_t0_set_cfg <= _487;
         else
-            _390 <= _20;
+            cfg_t0_set_cfg <= _20;
     end
-    assign _1232 = _390[2:0];
+    assign _1232 = cfg_t0_set_cfg[2:0];
     assign _1233 = _3174 - _1232;
     assign _1234 = { gnd,
                      _1233 };
@@ -6272,7 +6272,7 @@ module protocol_emulator (
     assign _1216 = _1212 & _1215;
     assign _1686 = _1216 ? _1685 : _1497;
     assign _1687 = _1686[7:7];
-    assign _1207 = _465[5:4];
+    assign _1207 = cfg_t0_sideset[5:4];
     assign _1208 = { _540,
                      _1207 };
     assign _1200 = _582[5:0];
@@ -6280,15 +6280,15 @@ module protocol_emulator (
     assign _1198 = _578 == _1197;
     assign _1196 = _572 & _576;
     assign _1199 = _1196 & _1198;
-    assign _1201 = _1199 ? _1200 : _465;
+    assign _1201 = _1199 ? _1200 : cfg_t0_sideset;
     assign _21 = _1201;
     always @(posedge _99) begin
         if (_97)
-            _465 <= _452;
+            cfg_t0_sideset <= _452;
         else
-            _465 <= _21;
+            cfg_t0_sideset <= _21;
     end
-    assign _1203 = _465[2:0];
+    assign _1203 = cfg_t0_sideset[2:0];
     assign _1204 = _3174 - _1203;
     assign _1205 = { gnd,
                      _1204 };
@@ -6326,7 +6326,7 @@ module protocol_emulator (
     assign _3303 = _3302[7:7];
     assign _2903 = { _540,
                      _2863 };
-    assign _2899 = _555[2:0];
+    assign _2899 = cfg_t1_sideset[2:0];
     assign _2900 = _3174 - _2899;
     assign _2901 = { gnd,
                      _2900 };
@@ -6351,15 +6351,15 @@ module protocol_emulator (
     assign _1842 = _578 == _1841;
     assign _1840 = _572 & _576;
     assign _1843 = _1840 & _1842;
-    assign _1845 = _1843 ? _1844 : _555;
+    assign _1845 = _1843 ? _1844 : cfg_t1_sideset;
     assign _23 = _1845;
     always @(posedge _99) begin
         if (_97)
-            _555 <= _452;
+            cfg_t1_sideset <= _452;
         else
-            _555 <= _23;
+            cfg_t1_sideset <= _23;
     end
-    assign _2863 = _555[5:4];
+    assign _2863 = cfg_t1_sideset[5:4];
     assign _2864 = _2863[1:1];
     assign _2872 = _2864 ? _2871 : _2868;
     assign _2862 = _1872[12:9];
@@ -7056,13 +7056,13 @@ module protocol_emulator (
     assign _1890 = _578 == _1889;
     assign _1888 = _572 & _576;
     assign _1891 = _1888 & _1890;
-    assign _1893 = _1891 ? _1892 : _483;
+    assign _1893 = _1891 ? _1892 : cfg_t1_start;
     assign _27 = _1893;
     always @(posedge _99) begin
         if (_97)
-            _483 <= _452;
+            cfg_t1_start <= _452;
         else
-            _483 <= _27;
+            cfg_t1_start <= _27;
     end
     assign _2855 = _1872[5:0];
     assign _1898 = _582[5:0];
@@ -7070,16 +7070,16 @@ module protocol_emulator (
     assign _1896 = _578 == _1895;
     assign _1894 = _572 & _576;
     assign _1897 = _1894 & _1896;
-    assign _1899 = _1897 ? _1898 : _508;
+    assign _1899 = _1897 ? _1898 : cfg_t1_timeout_vector;
     assign _28 = _1899;
     always @(posedge _99) begin
         if (_97)
-            _508 <= _452;
+            cfg_t1_timeout_vector <= _452;
         else
-            _508 <= _28;
+            cfg_t1_timeout_vector <= _28;
     end
     assign _2854 = _1873 == _510;
-    assign _2856 = _2854 ? _2855 : _508;
+    assign _2856 = _2854 ? _2855 : cfg_t1_timeout_vector;
     assign _2852 = t1_pc + _3685;
     assign _1935 = _1929 - _1075;
     assign _1936 = _1933 ? _1935 : t1_wait_count;
@@ -7098,13 +7098,13 @@ module protocol_emulator (
     assign _1943 = _578 == _1942;
     assign _1941 = _572 & _576;
     assign _1944 = _1941 & _1943;
-    assign _1945 = _1944 ? _582 : _551;
+    assign _1945 = _1944 ? _582 : cfg_t1_timeout;
     assign _31 = _1945;
     always @(posedge _99) begin
         if (_97)
-            _551 <= _356;
+            cfg_t1_timeout <= _356;
         else
-            _551 <= _31;
+            cfg_t1_timeout <= _31;
     end
     assign _1932 = ~ _1931;
     assign _1919 = ~ _1918;
@@ -7125,7 +7125,7 @@ module protocol_emulator (
         else
             t1_waiting <= _33;
     end
-    assign _1929 = t1_waiting ? t1_wait_count : _551;
+    assign _1929 = t1_waiting ? t1_wait_count : cfg_t1_timeout;
     assign _1931 = _1929 == _356;
     assign _1921 = _1872[4:4];
     assign _1950 = _1921 & _1931;
@@ -7194,19 +7194,19 @@ module protocol_emulator (
         else
             t1_isr_count <= _35;
     end
-    assign _2842 = t1_isr_count < _503;
+    assign _2842 = t1_isr_count < cfg_t1_threshold;
     assign _2022 = _582[4:0];
     assign _2019 = 7'b1010101;
     assign _2020 = _578 == _2019;
     assign _2018 = _572 & _576;
     assign _2021 = _2018 & _2020;
-    assign _2023 = _2021 ? _2022 : _503;
+    assign _2023 = _2021 ? _2022 : cfg_t1_threshold;
     assign _36 = _2023;
     always @(posedge _99) begin
         if (_97)
-            _503 <= _399;
+            cfg_t1_threshold <= _399;
         else
-            _503 <= _36;
+            cfg_t1_threshold <= _36;
     end
     assign _2045 = _2043[4:0];
     assign _2042 = { gnd,
@@ -7229,7 +7229,7 @@ module protocol_emulator (
     assign _2049 = _1967 ? _2048 : t1_osr_count;
     assign _2050 = _1904 ? t1_osr_count : _2049;
     assign _2051 = _1901 ? t1_osr_count : _2050;
-    assign _2052 = _1900 ? _503 : _2051;
+    assign _2052 = _1900 ? cfg_t1_threshold : _2051;
     assign _37 = _2052;
     assign _38 = _37;
     always @(posedge _99) begin
@@ -7238,7 +7238,7 @@ module protocol_emulator (
         else
             t1_osr_count <= _38;
     end
-    assign _2841 = t1_osr_count < _503;
+    assign _2841 = t1_osr_count < cfg_t1_threshold;
     assign _2839 = t1_x == t1_y;
     assign _2840 = ~ _2839;
     assign _2836 = t1_y == _356;
@@ -7304,7 +7304,7 @@ module protocol_emulator (
     assign _2188 = _1048[1:1];
     assign _2187 = _1048[0:0];
     always @* begin
-        case (_498)
+        case (cfg_t1_in_base)
         0:
             _2195 <= _2187;
         1:
@@ -7334,7 +7334,7 @@ module protocol_emulator (
     assign _2177 = _1048[2:2];
     assign _2176 = _1048[1:1];
     assign _2175 = _1048[0:0];
-    assign _2174 = _498 + _1091;
+    assign _2174 = cfg_t1_in_base + _1091;
     always @* begin
         case (_2174)
         0:
@@ -7366,7 +7366,7 @@ module protocol_emulator (
     assign _2163 = _1048[2:2];
     assign _2162 = _1048[1:1];
     assign _2161 = _1048[0:0];
-    assign _2160 = _498 + _3652;
+    assign _2160 = cfg_t1_in_base + _3652;
     always @* begin
         case (_2160)
         0:
@@ -7398,7 +7398,7 @@ module protocol_emulator (
     assign _2149 = _1048[2:2];
     assign _2148 = _1048[1:1];
     assign _2147 = _1048[0:0];
-    assign _2146 = _498 + _3383;
+    assign _2146 = cfg_t1_in_base + _3383;
     always @* begin
         case (_2146)
         0:
@@ -7430,7 +7430,7 @@ module protocol_emulator (
     assign _2135 = _1048[2:2];
     assign _2134 = _1048[1:1];
     assign _2133 = _1048[0:0];
-    assign _2132 = _498 + _3779;
+    assign _2132 = cfg_t1_in_base + _3779;
     always @* begin
         case (_2132)
         0:
@@ -7462,7 +7462,7 @@ module protocol_emulator (
     assign _2121 = _1048[2:2];
     assign _2120 = _1048[1:1];
     assign _2119 = _1048[0:0];
-    assign _2118 = _498 + _3349;
+    assign _2118 = cfg_t1_in_base + _3349;
     always @* begin
         case (_2118)
         0:
@@ -7494,7 +7494,7 @@ module protocol_emulator (
     assign _2107 = _1048[2:2];
     assign _2106 = _1048[1:1];
     assign _2105 = _1048[0:0];
-    assign _2104 = _498 + _3332;
+    assign _2104 = cfg_t1_in_base + _3332;
     always @* begin
         case (_2104)
         0:
@@ -7531,15 +7531,15 @@ module protocol_emulator (
     assign _2055 = _578 == _2054;
     assign _2053 = _572 & _576;
     assign _2056 = _2053 & _2055;
-    assign _2058 = _2056 ? _2057 : _498;
+    assign _2058 = _2056 ? _2057 : cfg_t1_in_base;
     assign _39 = _2058;
     always @(posedge _99) begin
         if (_97)
-            _498 <= _510;
+            cfg_t1_in_base <= _510;
         else
-            _498 <= _39;
+            cfg_t1_in_base <= _39;
     end
-    assign _2090 = _498 + _3174;
+    assign _2090 = cfg_t1_in_base + _3174;
     always @* begin
         case (_2090)
         0:
@@ -7597,7 +7597,7 @@ module protocol_emulator (
     assign _2082 = _2005[4:4];
     assign _2223 = _2082 ? _2222 : _2219;
     assign _2224 = _2223[15:0];
-    assign _251 = _250[1:1];
+    assign _251 = cfg_t1_shift[1:1];
     assign _2281 = _251 ? _2280 : _2224;
     assign _2080 = _1877 ? t1_isr : _356;
     assign _2062 = _1982 == _3383;
@@ -7912,7 +7912,7 @@ module protocol_emulator (
     assign _2434 = _1048[1:1];
     assign _2433 = _1048[0:0];
     always @* begin
-        case (_395)
+        case (cfg_t0_in_base)
         0:
             _2441 <= _2433;
         1:
@@ -7941,7 +7941,7 @@ module protocol_emulator (
     assign _2423 = _1048[2:2];
     assign _2422 = _1048[1:1];
     assign _2421 = _1048[0:0];
-    assign _2420 = _395 + _1091;
+    assign _2420 = cfg_t0_in_base + _1091;
     always @* begin
         case (_2420)
         0:
@@ -7972,7 +7972,7 @@ module protocol_emulator (
     assign _2409 = _1048[2:2];
     assign _2408 = _1048[1:1];
     assign _2407 = _1048[0:0];
-    assign _2406 = _395 + _3652;
+    assign _2406 = cfg_t0_in_base + _3652;
     always @* begin
         case (_2406)
         0:
@@ -8003,7 +8003,7 @@ module protocol_emulator (
     assign _2395 = _1048[2:2];
     assign _2394 = _1048[1:1];
     assign _2393 = _1048[0:0];
-    assign _2392 = _395 + _3383;
+    assign _2392 = cfg_t0_in_base + _3383;
     always @* begin
         case (_2392)
         0:
@@ -8034,7 +8034,7 @@ module protocol_emulator (
     assign _2381 = _1048[2:2];
     assign _2380 = _1048[1:1];
     assign _2379 = _1048[0:0];
-    assign _2378 = _395 + _3779;
+    assign _2378 = cfg_t0_in_base + _3779;
     always @* begin
         case (_2378)
         0:
@@ -8065,7 +8065,7 @@ module protocol_emulator (
     assign _2367 = _1048[2:2];
     assign _2366 = _1048[1:1];
     assign _2365 = _1048[0:0];
-    assign _2364 = _395 + _3349;
+    assign _2364 = cfg_t0_in_base + _3349;
     always @* begin
         case (_2364)
         0:
@@ -8096,7 +8096,7 @@ module protocol_emulator (
     assign _2353 = _1048[2:2];
     assign _2352 = _1048[1:1];
     assign _2351 = _1048[0:0];
-    assign _2350 = _395 + _3332;
+    assign _2350 = cfg_t0_in_base + _3332;
     always @* begin
         case (_2350)
         0:
@@ -8132,15 +8132,15 @@ module protocol_emulator (
     assign _2311 = _578 == _2310;
     assign _2309 = _572 & _576;
     assign _2312 = _2309 & _2311;
-    assign _2314 = _2312 ? _2313 : _395;
+    assign _2314 = _2312 ? _2313 : cfg_t0_in_base;
     assign _44 = _2314;
     always @(posedge _99) begin
         if (_97)
-            _395 <= _510;
+            cfg_t0_in_base <= _510;
         else
-            _395 <= _44;
+            cfg_t0_in_base <= _44;
     end
-    assign _2336 = _395 + _3174;
+    assign _2336 = cfg_t0_in_base + _3174;
     always @* begin
         case (_2336)
         0:
@@ -8265,7 +8265,7 @@ module protocol_emulator (
     assign _2538 = _2537[4:4];
     assign _2564 = _2538 ? _2563 : _2560;
     assign _2565 = _2564[15:0];
-    assign _2327 = _478[1:1];
+    assign _2327 = cfg_t0_shift[1:1];
     assign _2593 = _2327 ? _2592 : _2565;
     assign _49 = _2593;
     always @(posedge _99) begin
@@ -8285,7 +8285,7 @@ module protocol_emulator (
     assign _2598 = _370 == _2597;
     assign _2594 = _369[7:7];
     assign _2595 = ~ _2594;
-    assign _1847 = _346 == _2100;
+    assign _1847 = host_bit_count == _2100;
     assign _1848 = _354 & _1847;
     assign _2596 = _1848 & _2595;
     assign _2599 = _2596 & _2598;
@@ -8382,15 +8382,15 @@ module protocol_emulator (
     assign _2729 = _578 == _2728;
     assign _2727 = _572 & _576;
     assign _2730 = _2727 & _2729;
-    assign _2732 = _2730 ? _2731 : _250;
+    assign _2732 = _2730 ? _2731 : cfg_t1_shift;
     assign _57 = _2732;
     always @(posedge _99) begin
         if (_97)
-            _250 <= _540;
+            cfg_t1_shift <= _540;
         else
-            _250 <= _57;
+            cfg_t1_shift <= _57;
     end
-    assign _2663 = _250[0:0];
+    assign _2663 = cfg_t1_shift[0:0];
     assign _2786 = _2663 ? _2785 : _2755;
     assign _2752 = _1872[8:7];
     assign _2754 = _2752 == _187;
@@ -8501,7 +8501,7 @@ module protocol_emulator (
     assign _2858 = _1967 ? _2857 : t1_pc;
     assign _2859 = _1904 ? t1_pc : _2858;
     assign _2860 = _1901 ? t1_pc : _2859;
-    assign _2861 = _1900 ? _483 : _2860;
+    assign _2861 = _1900 ? cfg_t1_start : _2860;
     assign _62 = _2861;
     assign _63 = _62;
     always @(posedge _99) begin
@@ -8668,20 +8668,20 @@ module protocol_emulator (
     assign _1903 = t1_delay_left == _301;
     assign _1904 = ~ _1903;
     assign _3452 = _1904 ? _22 : _3451;
-    assign _2892 = _559 - _1075;
+    assign _2892 = cfg_t1_clkdiv - _1075;
     assign _2882 = 7'b1011101;
     assign _2883 = _578 == _2882;
     assign _2881 = _572 & _576;
     assign _2884 = _2881 & _2883;
-    assign _2885 = _2884 ? _582 : _559;
+    assign _2885 = _2884 ? _582 : cfg_t1_clkdiv;
     assign _66 = _2885;
     always @(posedge _99) begin
         if (_97)
-            _559 <= _356;
+            cfg_t1_clkdiv <= _356;
         else
-            _559 <= _66;
+            cfg_t1_clkdiv <= _66;
     end
-    assign _2890 = _559 == _356;
+    assign _2890 = cfg_t1_clkdiv == _356;
     assign _2894 = _2890 ? _356 : _2892;
     assign _2888 = t1_div_count - _1075;
     assign _2895 = _1864 ? _2894 : _2888;
@@ -8697,7 +8697,7 @@ module protocol_emulator (
     assign _1864 = t1_div_count == _356;
     assign _1901 = ~ _1864;
     assign _3453 = _1901 ? _22 : _3452;
-    assign _1859 = _375[1:1];
+    assign _1859 = cfg_ctrl[1:1];
     assign _1900 = ~ _1859;
     assign _3454 = _1900 ? _22 : _3453;
     assign _68 = _3454;
@@ -8709,7 +8709,7 @@ module protocol_emulator (
             pin_out <= _69;
     end
     assign _1010 = pin_out[7:7];
-    assign _1006 = ~ _473;
+    assign _1006 = ~ cfg_sync_bypass;
     always @(posedge _99) begin
         if (_97)
             pins_sync1 <= _117;
@@ -8728,31 +8728,31 @@ module protocol_emulator (
     assign _3457 = _578 == _3456;
     assign _3455 = _572 & _576;
     assign _3458 = _3455 & _3457;
-    assign _3460 = _3458 ? _3459 : _473;
+    assign _3460 = _3458 ? _3459 : cfg_sync_bypass;
     assign _70 = _3460;
     always @(posedge _99) begin
         if (_97)
-            _473 <= _305;
+            cfg_sync_bypass <= _305;
         else
-            _473 <= _70;
+            cfg_sync_bypass <= _70;
     end
     assign _72 = uio_in;
-    assign _1000 = _72 & _473;
+    assign _1000 = _72 & cfg_sync_bypass;
     assign _1008 = _1000 | _1007;
     assign _1009 = _1008[7:7];
     assign _3462 = 7'b1000111;
     assign _3463 = _578 == _3462;
     assign _3461 = _572 & _576;
     assign _3464 = _3461 & _3463;
-    assign _3465 = _3464 ? _582 : _109;
+    assign _3465 = _3464 ? _582 : cfg_pin_modes;
     assign _73 = _3465;
     always @(posedge _99) begin
         if (_97)
-            _109 <= _356;
+            cfg_pin_modes <= _356;
         else
-            _109 <= _73;
+            cfg_pin_modes <= _73;
     end
-    assign _999 = _109[15:14];
+    assign _999 = cfg_pin_modes[15:14];
     always @* begin
         case (_999)
         0:
@@ -9017,15 +9017,15 @@ module protocol_emulator (
     assign _3599 = _578 == _3598;
     assign _3597 = _572 & _576;
     assign _3600 = _3597 & _3599;
-    assign _3602 = _3600 ? _3601 : _478;
+    assign _3602 = _3600 ? _3601 : cfg_t0_shift;
     assign _80 = _3602;
     always @(posedge _99) begin
         if (_97)
-            _478 <= _540;
+            cfg_t0_shift <= _540;
         else
-            _478 <= _80;
+            cfg_t0_shift <= _80;
     end
-    assign _1504 = _478[0:0];
+    assign _1504 = cfg_t0_shift[0:0];
     assign _1562 = _1504 ? _1561 : _1531;
     assign _3618 = _994[8:7];
     assign _3620 = _3618 == _187;
@@ -9136,7 +9136,7 @@ module protocol_emulator (
     assign _3692 = _1113 ? _3691 : t0_pc;
     assign _3693 = _604 ? t0_pc : _3692;
     assign _3694 = _598 ? t0_pc : _3693;
-    assign _3695 = _592 ? _380 : _3694;
+    assign _3695 = _592 ? cfg_t0_start : _3694;
     assign _85 = _3695;
     assign _86 = _85;
     always @(posedge _99) begin
@@ -9302,20 +9302,20 @@ module protocol_emulator (
             t0_delay_left <= _88;
     end
     assign _1089 = t0_delay_left == _301;
-    assign _3724 = _469 - _1075;
+    assign _3724 = cfg_t0_clkdiv - _1075;
     assign _3714 = 7'b1001101;
     assign _3715 = _578 == _3714;
     assign _3713 = _572 & _576;
     assign _3716 = _3713 & _3715;
-    assign _3717 = _3716 ? _582 : _469;
+    assign _3717 = _3716 ? _582 : cfg_t0_clkdiv;
     assign _89 = _3717;
     always @(posedge _99) begin
         if (_97)
-            _469 <= _356;
+            cfg_t0_clkdiv <= _356;
         else
-            _469 <= _89;
+            cfg_t0_clkdiv <= _89;
     end
-    assign _3722 = _469 == _356;
+    assign _3722 = cfg_t0_clkdiv == _356;
     assign _3726 = _3722 ? _356 : _3724;
     assign _3720 = t0_div_count - _1075;
     assign _3727 = _597 ? _3726 : _3720;
@@ -9329,7 +9329,7 @@ module protocol_emulator (
             t0_div_count <= _90;
     end
     assign _597 = t0_div_count == _356;
-    assign _591 = _375[0:0];
+    assign _591 = cfg_ctrl[0:0];
     assign _1087 = _591 & _597;
     assign _1090 = _1087 & _1089;
     assign _3732 = _1090 & _3731;
@@ -9352,83 +9352,83 @@ module protocol_emulator (
     assign _3763 = ~ _2608;
     assign _582 = _368[15:0];
     assign _3761 = _582[2:0];
-    assign _578 = _575[6:0];
+    assign _578 = host_cmd[6:0];
     assign _3759 = _578 == _608;
     assign _363 = _101[2:2];
     always @(posedge _99) begin
         if (_97)
-            _365 <= gnd;
+            host_mosi_s1 <= gnd;
         else
-            _365 <= _363;
+            host_mosi_s1 <= _363;
     end
     always @(posedge _99) begin
         if (_97)
-            _367 <= gnd;
+            host_mosi_s2 <= gnd;
         else
-            _367 <= _365;
+            host_mosi_s2 <= host_mosi_s1;
     end
     assign _361 = 23'b00000000000000000000000;
     assign _3743 = _368[22:0];
-    assign _3744 = _354 ? _3743 : _362;
-    assign _3745 = _330 ? _362 : _3744;
+    assign _3744 = _354 ? _3743 : host_shift_in;
+    assign _3745 = host_cs_n_s2 ? host_shift_in : _3744;
     assign _93 = _3745;
     always @(posedge _99) begin
         if (_97)
-            _362 <= _361;
+            host_shift_in <= _361;
         else
-            _362 <= _93;
+            host_shift_in <= _93;
     end
-    assign _368 = { _362,
-                    _367 };
+    assign _368 = { host_shift_in,
+                    host_mosi_s2 };
     assign _369 = _368[7:0];
-    assign _359 = _346 == _2100;
-    assign _3746 = _359 ? _369 : _575;
-    assign _3747 = _354 ? _3746 : _575;
-    assign _3748 = _330 ? _575 : _3747;
+    assign _359 = host_bit_count == _2100;
+    assign _3746 = _359 ? _369 : host_cmd;
+    assign _3747 = _354 ? _3746 : host_cmd;
+    assign _3748 = host_cs_n_s2 ? host_cmd : _3747;
     assign _94 = _3748;
     always @(posedge _99) begin
         if (_97)
-            _575 <= _305;
+            host_cmd <= _305;
         else
-            _575 <= _94;
+            host_cmd <= _94;
     end
-    assign _576 = _575[7:7];
+    assign _576 = host_cmd[7:7];
     assign _570 = 5'b10111;
-    assign _3752 = _346 + _2184;
+    assign _3752 = host_bit_count + _2184;
     assign _3749 = 5'b11000;
-    assign _3750 = _346 < _3749;
-    assign _3753 = _3750 ? _3752 : _346;
-    assign _3754 = _354 ? _3753 : _346;
-    assign _3756 = _330 ? _1129 : _3754;
+    assign _3750 = host_bit_count < _3749;
+    assign _3753 = _3750 ? _3752 : host_bit_count;
+    assign _3754 = _354 ? _3753 : host_bit_count;
+    assign _3756 = host_cs_n_s2 ? _1129 : _3754;
     assign _95 = _3756;
     always @(posedge _99) begin
         if (_97)
-            _346 <= _1129;
+            host_bit_count <= _1129;
         else
-            _346 <= _95;
+            host_bit_count <= _95;
     end
-    assign _571 = _346 == _570;
+    assign _571 = host_bit_count == _570;
     assign _326 = _101[1:1];
     always @(posedge _99) begin
         if (_97)
-            _328 <= vdd;
+            host_cs_n_s1 <= vdd;
         else
-            _328 <= _326;
+            host_cs_n_s1 <= _326;
     end
     always @(posedge _99) begin
         if (_97)
-            _330 <= vdd;
+            host_cs_n_s2 <= vdd;
         else
-            _330 <= _328;
+            host_cs_n_s2 <= host_cs_n_s1;
     end
-    assign _353 = ~ _330;
+    assign _353 = ~ host_cs_n_s2;
     always @(posedge _99) begin
         if (_97)
-            _340 <= _566;
+            host_sck_prev <= _566;
         else
-            _340 <= _336;
+            host_sck_prev <= host_sck_s2;
     end
-    assign _351 = ~ _340;
+    assign _351 = ~ host_sck_prev;
     assign vdd = 1'b1;
     assign _97 = clear;
     assign _99 = clock;
@@ -9436,30 +9436,30 @@ module protocol_emulator (
     assign _331 = _101[0:0];
     always @(posedge _99) begin
         if (_97)
-            _334 <= gnd;
+            host_sck_s1 <= gnd;
         else
-            _334 <= _331;
+            host_sck_s1 <= _331;
     end
     always @(posedge _99) begin
         if (_97)
-            _336 <= gnd;
+            host_sck_s2 <= gnd;
         else
-            _336 <= _334;
+            host_sck_s2 <= host_sck_s1;
     end
-    assign _352 = _336 & _351;
+    assign _352 = host_sck_s2 & _351;
     assign _354 = _352 & _353;
     assign _572 = _354 & _571;
     assign _3757 = _572 & _576;
     assign _3760 = _3757 & _3759;
-    assign _3762 = _3760 ? _3761 : _375;
+    assign _3762 = _3760 ? _3761 : cfg_ctrl;
     assign _102 = _3762;
     always @(posedge _99) begin
         if (_97)
-            _375 <= _510;
+            cfg_ctrl <= _510;
         else
-            _375 <= _102;
+            cfg_ctrl <= _102;
     end
-    assign _2292 = _375[2:2];
+    assign _2292 = cfg_ctrl[2:2];
     assign _3764 = _2292 & _3763;
     assign _3766 = _3764 & _3765;
     assign _103 = _3766;

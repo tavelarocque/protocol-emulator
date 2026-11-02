@@ -113,19 +113,28 @@ let bit s i = select s i i
 let create (i : _ I.t) : _ O.t =
   let spec = Reg_spec.create ~clock:i.clock ~clear:i.clear () in
   let spec_to v = Reg_spec.override spec ~clear_to:v in
+  (* Every register here is named, so the formal proof can pair it with its
+     counterpart in an independently written spec (sim/spec_top.ml). *)
   (* --- SPI pins into the core clock domain. CS_N resets high (idle). --- *)
-  let sync ?(init = gnd) s = reg (spec_to init) (reg (spec_to init) s) in
-  let sck = sync (bit i.ui_in 0) in
-  let cs_n = sync ~init:vdd (bit i.ui_in 1) in
-  let mosi = sync (bit i.ui_in 2) in
-  let sck_prev = reg spec sck in
+  let sync ?(init = gnd) name s =
+    let s1 = reg (spec_to init) s -- (name ^ "_s1") in
+    reg (spec_to init) s1 -- (name ^ "_s2")
+  in
+  let sck = sync "host_sck" (bit i.ui_in 0) in
+  let cs_n = sync ~init:vdd "host_cs_n" (bit i.ui_in 1) in
+  let mosi = sync "host_mosi" (bit i.ui_in 2) in
+  let sck_prev = reg spec sck -- "host_sck_prev" in
   let rise = sck &: ~:sck_prev &: ~:cs_n in
   let fall = ~:sck &: sck_prev &: ~:cs_n in
   let open Always in
-  let bit_count = Variable.reg spec ~width:5 in
-  let shift_in = Variable.reg spec ~width:23 in
-  let cmd = Variable.reg spec ~width:8 in
-  let miso_shift = Variable.reg spec ~width:16 in
+  let named name (v : Variable.t) =
+    ignore (v.value -- name : Signal.t);
+    v
+  in
+  let bit_count = Variable.reg spec ~width:5 |> named "host_bit_count" in
+  let shift_in = Variable.reg spec ~width:23 |> named "host_shift_in" in
+  let cmd = Variable.reg spec ~width:8 |> named "host_cmd" in
+  let miso_shift = Variable.reg spec ~width:16 |> named "host_miso_shift" in
   (* The word as it stands after this rising edge's bit is shifted in. *)
   let shifted = shift_in.value @: mosi in
   let cmd_now = select shifted 7 0 in
@@ -136,24 +145,27 @@ let create (i : _ I.t) : _ O.t =
   let addr = select cmd.value 6 0 in
   let write_to a = data_done &: is_write &: (addr ==:. a) in
   (* --- Configuration registers. --- *)
-  let config ?(init = 0) width = Variable.reg (spec_to (of_int ~width init)) ~width in
-  let ctrl = config 3 in
-  let pin_modes = config 16 in
-  let sync_bypass = config 8 in
+  let config ?(init = 0) name width =
+    Variable.reg (spec_to (of_int ~width init)) ~width |> named name
+  in
+  let ctrl = config "cfg_ctrl" 3 in
+  let pin_modes = config "cfg_pin_modes" 16 in
+  let sync_bypass = config "cfg_sync_bypass" 8 in
   (* One bank of per-thread registers. Returns its writes as (address,
      register, write rule), its RX pop strobe, and the thread's core inputs. *)
   let bank n =
     let a = Addr.for_thread n in
-    let start = config 6 in
-    let out_cfg = config ~init:0x10 8 in
-    let set_cfg = config ~init:0x10 8 in
-    let in_base = config 3 in
-    let threshold = config ~init:8 5 in
-    let timeout_vector = config 6 in
-    let timeout = config 16 in
-    let sideset = config 6 in
-    let clkdiv = config 16 in
-    let shift = config 2 in
+    let config ?init name width = config ?init (sprintf "cfg_t%d_%s" n name) width in
+    let start = config "start" 6 in
+    let out_cfg = config ~init:0x10 "out_cfg" 8 in
+    let set_cfg = config ~init:0x10 "set_cfg" 8 in
+    let in_base = config "in_base" 3 in
+    let threshold = config ~init:8 "threshold" 5 in
+    let timeout_vector = config "timeout_vector" 6 in
+    let timeout = config "timeout" 16 in
+    let sideset = config "sideset" 6 in
+    let clkdiv = config "clkdiv" 16 in
+    let shift = config "shift" 2 in
     let writes =
       List.map
         [ Addr.start, start
