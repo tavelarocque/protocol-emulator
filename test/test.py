@@ -437,6 +437,36 @@ async def test_spi_fast(dut):
     await spi_transfer(dut, fast=True)
 
 
+SHIFT = 0x4F  # bit 0: OUT MSB first, bit 1: IN MSB first
+
+
+@cocotb.test()
+async def test_spi_msb_first(dut):
+    """Side-set SPI with the thread shifting MSB first: the host pushes and
+    pops plain bytes, no bit reversal."""
+    await reset(dut)
+    sent, responses = [0x9F, 0x01, 0x80], [0x12, 0xFE, 0x7F]
+    slave, monitor = SpiSlave(responses), SpiMonitor()
+    await load(dut, firmware("spi_fast"))
+    await write(dut, SIDESET, 0x10)
+    await write(dut, OUT_CFG, 0x31)
+    await write(dut, IN_BASE, 2)
+    await write(dut, SHIFT, 0b11)
+    await write(dut, SYNC_BYPASS, 0b100)
+    await write(dut, PIN_MODES, 0b01_00_01_01)
+    bus = cocotb.start_soon(spi_bus(dut, slave, monitor))
+    await write(dut, CTRL, 1)
+    for i, b in enumerate(sent):
+        await push(dut, (b << 8) | ((i == len(sent) - 1) << 7))
+    got = [await pop(dut) for _ in sent]
+    await ClockCycles(dut.clk, 200)
+    bus.cancel()
+    assert monitor.errors == [], monitor.errors
+    assert monitor.events == ["SELECT"] + list(zip(sent, responses)) + ["DESELECT"], monitor.events
+    assert slave.received == sent, f"slave got {slave.received}"
+    assert got == responses, f"host got {got}"
+
+
 # --- Two threads ------------------------------------------------------------
 
 START = 0x41

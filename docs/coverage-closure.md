@@ -25,7 +25,7 @@ found and closed, and how the result is kept honest.
 2. **Generate.** An AI assistant (Claude) read the cross-bin report and
    wrote one small two-thread scenario per weak bin: two programs, their
    configurations, pin modes, CHAIN, and the stimulus (pin inputs, host
-   traffic, an enable script). It also wrote two scenarios aimed at
+   traffic, an enable script). It also wrote three scenarios aimed at
    planted RTL bugs. The scenarios are in `sim/directed.ml`, each with the
    list of bins or bugs it was written for.
 
@@ -54,48 +54,49 @@ found and closed, and how the result is kept honest.
 ## Results
 
 The random trials run 120,000 cycles (400 programs of 300). The directed
-suite is 9 scenarios, each run under 3 seeds for 200 to 400 cycles, about
-10,800 cycles in all.
+suite is 10 scenarios, each run under 3 seeds for 200 to 400 cycles, about
+12,000 cycles in all.
 
 | Cross bin | Random trials | Directed suite |
 |---|---:|---:|
-| pins: both threads write the same pin | 4,907 | 399 |
-| chain: move into thread 1 TX holding 0 | 136 | 12 |
-| chain: move into thread 1 TX holding 1 | 55 | 36 |
-| chain: move into thread 1 TX holding 2 | 44 | 33 |
-| chain: move into thread 1 TX holding 3 | 46 | 1,230 |
-| chain: move in a cycle thread 1 pulls | **2** | 420 |
-| chain: move in a cycle thread 0 pushes | **7** | 558 |
-| chain: thread 0 PUSH stalled behind a full chain | 994 | 1,626 |
-| divider: timed wait expires on a divided thread | 205 | 42 |
-| divider: delay counted on a divided thread | 9,131 | 534 |
-| divider: side-set on a divided thread | 16,664 | 780 |
-| enable: disabled during a delay | 202 | 9 |
-| enable: disabled during a timed wait | 31 | 6 |
-| enable: disabled between divider ticks | 183 | 6 |
-| side-set: driven during a stall | 43,096 | 351 |
-| fifo: both threads stalled on FIFOs | 2,161 | 1,176 |
+| pins: both threads write the same pin | 5,269 | 399 |
+| chain: move into thread 1 TX holding 0 | 129 | 12 |
+| chain: move into thread 1 TX holding 1 | 40 | 36 |
+| chain: move into thread 1 TX holding 2 | 23 | 33 |
+| chain: move into thread 1 TX holding 3 | 29 | 1,230 |
+| chain: move in a cycle thread 1 pulls | **1** | 420 |
+| chain: move in a cycle thread 0 pushes | 10 | 558 |
+| chain: thread 0 PUSH stalled behind a full chain | 1,149 | 1,626 |
+| divider: timed wait expires on a divided thread | 375 | 42 |
+| divider: delay counted on a divided thread | 8,997 | 534 |
+| divider: side-set on a divided thread | 14,455 | 780 |
+| enable: disabled during a delay | 177 | 9 |
+| enable: disabled during a timed wait | 44 | 6 |
+| enable: disabled between divider ticks | 196 | 6 |
+| side-set: driven during a stall | 42,230 | 351 |
+| fifo: both threads stalled on FIFOs | 2,714 | 1,176 |
 
 The two bins random testing almost never reached, a word crossing the chain
 in the same cycle that thread 1 pulls or thread 0 pushes, are the
 simultaneous-access cases a FIFO is most likely to get wrong. Random trials
-hit them 2 and 7 times; the directed suite hits them hundreds of times, with
-about 9% of the simulated cycles.
+hit them 1 and 10 times; the directed suite hits them hundreds of times, with
+about 10% of the simulated cycles.
 
-Planted RTL bugs caught by the directed suite (all 9; random trials needed
-up to 25 programs to catch the CHAIN bug):
+Planted RTL bugs caught by the directed suite (all 10; random trials needed
+up to 16 programs to catch the slowest):
 
 | Bug | Directed scenarios that catch it |
 |---|---:|
-| X never decrements (thread 1) | 1 of 9 |
-| Wait timeout ignores its budget (thread 1) | 3 of 9 |
-| Delay field ignored (thread 1) | 4 of 9 |
-| SET writes one pin too many (thread 1) | 2 of 9 |
-| PUSH not right-justified (thread 1) | 2 of 9 |
-| Pin priority inverted | 1 of 9 |
-| Thread 1 fetches from thread 0's PC | 9 of 9 |
-| CHAIN moves a word into a full FIFO | 3 of 9 |
-| Synchroniser bypass read with inverted polarity | 2 of 9 |
+| X never decrements (thread 1) | 1 of 10 |
+| Wait timeout ignores its budget (thread 1) | 3 of 10 |
+| Delay field ignored (thread 1) | 4 of 10 |
+| SET writes one pin too many (thread 1) | 2 of 10 |
+| PUSH not right-justified (thread 1) | 2 of 10 |
+| Pin priority inverted | 1 of 10 |
+| Thread 1 fetches from thread 0's PC | 10 of 10 |
+| CHAIN moves a word into a full FIFO | 3 of 10 |
+| PUSH ignores the IN shift direction (thread 1) | 1 of 10 |
+| Synchroniser bypass read with inverted polarity | 2 of 10 |
 
 **The checks rejected a generated test.** The first version of the
 streaming scenario used two-instruction loops for both producer and

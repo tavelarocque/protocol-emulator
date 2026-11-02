@@ -304,6 +304,32 @@ lp:     in pins, 8
     ]
 ;;
 
+(* Thread 1 runs MSB first in both directions: OUT from the top of words the
+   host pushes, IN into the bottom, partial words pushed. *)
+let msb_first =
+  make
+    ~name:"thread 1: MSB-first OUT, IN and partial PUSH"
+    ~target:[ "Push_ignores_in_direction" ]
+    ~modes:all_input
+    ~rates:[ 0, 0; 30, 100 ]
+    [ 0, {|
+lp:     nop
+        jmp lp
+|}, cfg
+    ; ( 2
+      , {|
+top:    pull
+        out x, 5
+        in x, 5
+        out y, 3
+        in y, 3
+        push
+        jmp top
+|}
+      , { cfg with out_msb_first = true; in_msb_first = true; threshold = 16 } )
+    ]
+;;
+
 let all =
   [ pin_fight
   ; chain_backpressure
@@ -314,6 +340,7 @@ let all =
   ; both_fifos_stalled
   ; thread1_datapath
   ; synchroniser_timing
+  ; msb_first
   ]
 ;;
 

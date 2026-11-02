@@ -133,20 +133,41 @@ module Make (C : Comb.S) = struct
           (select ins 8 7)
           [ read_pins i.lines ~base:i.in_base ~count; s.x; s.y; zero 16 ]
       in
-      let kept = log_shift srl (uresize s.isr 32) count in
-      let incoming =
-        log_shift sll (uresize (v &: low16 (mask32 count)) 32) (of_int ~width:5 16 -: count)
+      let m = low16 (mask32 count) in
+      let lsb_first =
+        let kept = log_shift srl (uresize s.isr 32) count in
+        let incoming =
+          log_shift sll (uresize (v &: m) 32) (of_int ~width:5 16 -: count)
+        in
+        low16 (kept |: incoming)
       in
+      (* MSB first, by rotation: rotate the ISR left by [count] (rotating by
+         16 is the identity) and replace the bits that wrapped round with
+         the new ones. *)
+      let msb_first = (log_shift rotl s.isr count &: ~:m) |: (v &: m) in
       finish
-        ~st:{ s with isr = low16 (kept |: incoming); isr_count = sat16 s.isr_count count }
+        ~st:
+          { s with
+            isr = mux2 i.in_msb_first msb_first lsb_first
+          ; isr_count = sat16 s.isr_count count
+          }
         ()
     in
     (* --- OUT --- *)
     let r_out =
-      let data = s.osr &: low16 (mask32 count) in
+      let m = low16 (mask32 count) in
+      (* MSB first, by rotation: rotating the OSR left by [count] brings its
+         top [count] bits round to the bottom, which is the data; what is
+         left above them is the rest of the OSR. *)
+      let rotated = log_shift rotl s.osr count in
+      let data = mux2 i.out_msb_first (rotated &: m) (s.osr &: m) in
       let st =
         { s with
-          osr = low16 (log_shift srl (uresize s.osr 32) count)
+          osr =
+            mux2
+              i.out_msb_first
+              (rotated &: ~:m)
+              (low16 (log_shift srl (uresize s.osr 32) count))
         ; osr_count = sat16 s.osr_count count
         }
       in
@@ -276,7 +297,10 @@ module Make (C : Comb.S) = struct
        pushing gives identical behaviour, but the equivalence checker compares
        the FIFO's data input as a function, enabled or not.) *)
     let justified_isr =
-      low16 (log_shift srl (uresize s.isr 32) (of_int ~width:5 16 -: s.isr_count))
+      mux2
+        i.in_msb_first
+        (s.isr &: low16 (mask32 s.isr_count))
+        (low16 (log_shift srl (uresize s.isr 32) (of_int ~width:5 16 -: s.isr_count)))
     in
     ignore (r.push_value : C.t);
     { P.Step_out.next = r.st; pull = r.pull; push = r.push; push_value = justified_isr }

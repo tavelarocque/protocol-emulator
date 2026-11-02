@@ -51,6 +51,8 @@
      bank + 0xC SIDESET: base pin [2:0], count [5:4] (0..3 delay bits used)
      bank + 0xD CLKDIV [15:0]: the thread runs one cycle in every CLKDIV
                 (0 and 1: every cycle)
+     bank + 0xF SHIFT: bit 0 = OUT most significant bit first, bit 1 = IN
+                most significant bit first (both 0: LSB first, as before)
    Configuration registers read back what was written; unmapped addresses
    read 0. Pin conflicts: if both threads write a pin in the same cycle,
    thread 1 wins. *)
@@ -100,9 +102,10 @@ module Addr = struct
   let timeout = 0x4B
   let sideset = 0x4C
   let clkdiv = 0x4D
+  let shift = 0x4F
   let bank_size = 0x10
   let for_thread n a = a + (bank_size * n)
-  let last = for_thread 1 clkdiv
+  let last = for_thread 1 shift
 end
 
 let bit s i = select s i i
@@ -150,6 +153,7 @@ let create (i : _ I.t) : _ O.t =
     let timeout = config 16 in
     let sideset = config 6 in
     let clkdiv = config 16 in
+    let shift = config 2 in
     let writes =
       List.map
         [ Addr.start, start
@@ -161,6 +165,7 @@ let create (i : _ I.t) : _ O.t =
         ; Addr.timeout, timeout
         ; Addr.sideset, sideset
         ; Addr.clkdiv, clkdiv
+        ; Addr.shift, shift
         ]
         ~f:(fun (offset, (r : Variable.t)) ->
           let addr = a offset in
@@ -181,6 +186,8 @@ let create (i : _ I.t) : _ O.t =
       ; sideset_base = select sideset.value 2 0
       ; sideset_count = select sideset.value 5 4
       ; clkdiv = clkdiv.value
+      ; out_msb_first = bit shift.value 0
+      ; in_msb_first = bit shift.value 1
       ; tx_push = write_to (a Addr.tx_fifo)
       ; tx_data = data_now
       ; rx_pop

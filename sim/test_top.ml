@@ -100,7 +100,8 @@ let configure h ~thread (c : Isa.Thread_config.t) =
   w Top.Addr.timeout_vector c.timeout_vector;
   w Top.Addr.timeout c.timeout;
   w Top.Addr.sideset (c.sideset_base lor (c.sideset_count lsl 4));
-  w Top.Addr.clkdiv c.clkdiv
+  w Top.Addr.clkdiv c.clkdiv;
+  w Top.Addr.shift (Bool.to_int c.out_msb_first lor (Bool.to_int c.in_msb_first lsl 1))
 ;;
 
 let push ?(thread = 0) h v =
@@ -158,6 +159,7 @@ let%test_unit "configuration registers read back what was written" =
       ; timeout, 0xFFFF
       ; sideset, 0x3F
       ; clkdiv, 0xFFFF
+      ; shift, 0x3
       ]
   in
   let registers =

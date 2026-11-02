@@ -109,6 +109,8 @@ let random_config rs =
        | 1 -> 1
        | 2 -> 2 + rand 2
        | _ -> rand 6)
+  ; out_msb_first = rand 2 = 0
+  ; in_msb_first = rand 2 = 0
   }
 ;;
 
@@ -376,7 +378,9 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
     set ti.timeout config.timeout;
     set ti.sideset_base config.sideset_base;
     set ti.sideset_count config.sideset_count;
-    set ti.clkdiv config.clkdiv);
+    set ti.clkdiv config.clkdiv;
+    set ti.out_msb_first (Bool.to_int config.out_msb_first);
+    set ti.in_msb_first (Bool.to_int config.in_msb_first));
   set i.chain (Bool.to_int s.chain);
   set i.sync_bypass s.sync_bypass;
   set

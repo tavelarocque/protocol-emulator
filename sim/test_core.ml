@@ -64,67 +64,67 @@ let%expect_test "coverage of the differential test" =
   List.iter Lockstep.all_cross_bins ~f:(fun bin ->
     printf "%-50s %6d\n" bin (Hashtbl.find coverage.cross bin |> Option.value ~default:0));
   [%expect {|
-    (between divider ticks)                   57460   13.4%
-    (both threads drive pins in one cycle)    10508    2.5%
-    (both threads enabled)                   103528   24.2%
-    (chain blocked: thread 1 TX full)          2641    0.6%
-    (chain moved a word)                        281    0.1%
-    (delay cycle)                             36657    8.6%
-    (side-set driving pins)                   71671   16.7%
-    (thread disabled)                         16890    3.9%
-    in null                                    1279    0.3%
-    in pins                                    1124    0.3%
-    in x                                       1444    0.3%
-    in y                                       1170    0.3%
-    jmp !isrf                                  1047    0.2%
-    jmp !osre                                  1000    0.2%
-    jmp !x                                     1265    0.3%
-    jmp !y                                     1666    0.4%
-    jmp (always)                               1147    0.3%
-    jmp x!=y                                   2393    0.6%
-    jmp x--                                     654    0.2%
-    jmp y--                                     908    0.2%
-    mov (reserved -> nop)                      2484    0.6%
-    mov to isr                                  596    0.1%
-    mov to null                                 436    0.1%
-    mov to osr                                  460    0.1%
-    mov to pins                                 781    0.2%
-    mov to x                                    466    0.1%
-    mov to y                                    475    0.1%
-    nop                                        5324    1.2%
-    out null                                   1430    0.3%
-    out pins                                   1193    0.3%
-    out x                                      1406    0.3%
-    out y                                      1347    0.3%
-    pull                                       1878    0.4%
-    pull: stalled, TX empty                   29721    6.9%
-    push                                       2434    0.6%
-    push: stalled, RX full                     4620    1.1%
-    set (reserved -> nop)                      1535    0.4%
-    set pins                                   1337    0.3%
-    set x                                      1448    0.3%
-    set y                                      1358    0.3%
-    wait: condition met                        3957    0.9%
-    wait: stalled                             37162    8.7%
-    wait: stalled, spending timeout budget    10471    2.4%
-    wait: timed out                            1577    0.4%
+    (between divider ticks)                   54923   12.9%
+    (both threads drive pins in one cycle)    10205    2.4%
+    (both threads enabled)                   104088   24.4%
+    (chain blocked: thread 1 TX full)          2707    0.6%
+    (chain moved a word)                        221    0.1%
+    (delay cycle)                             37173    8.7%
+    (side-set driving pins)                   70079   16.4%
+    (thread disabled)                         16493    3.9%
+    in null                                    1205    0.3%
+    in pins                                    1406    0.3%
+    in x                                       1183    0.3%
+    in y                                       1208    0.3%
+    jmp !isrf                                   856    0.2%
+    jmp !osre                                  1841    0.4%
+    jmp !x                                     1145    0.3%
+    jmp !y                                     1411    0.3%
+    jmp (always)                               1741    0.4%
+    jmp x!=y                                   1944    0.5%
+    jmp x--                                     710    0.2%
+    jmp y--                                     723    0.2%
+    mov (reserved -> nop)                      2172    0.5%
+    mov to isr                                  564    0.1%
+    mov to null                                 601    0.1%
+    mov to osr                                  623    0.1%
+    mov to pins                                 830    0.2%
+    mov to x                                    445    0.1%
+    mov to y                                    409    0.1%
+    nop                                        4977    1.2%
+    out null                                   1328    0.3%
+    out pins                                   1615    0.4%
+    out x                                      1222    0.3%
+    out y                                      1211    0.3%
+    pull                                       1848    0.4%
+    pull: stalled, TX empty                   28859    6.8%
+    push                                       2332    0.5%
+    push: stalled, RX full                     7050    1.6%
+    set (reserved -> nop)                      1595    0.4%
+    set pins                                   1232    0.3%
+    set x                                      1138    0.3%
+    set y                                      1296    0.3%
+    wait: condition met                        3668    0.9%
+    wait: stalled                             39017    9.1%
+    wait: stalled, spending timeout budget    10240    2.4%
+    wait: timed out                            1766    0.4%
 
-    pins: both threads write the same pin                4907
-    chain: move into thread 1 TX holding 0                136
-    chain: move into thread 1 TX holding 1                 55
-    chain: move into thread 1 TX holding 2                 44
-    chain: move into thread 1 TX holding 3                 46
-    chain: move in a cycle thread 1 pulls                   2
-    chain: move in a cycle thread 0 pushes                  7
-    chain: thread 0 PUSH stalled behind a full chain      994
-    divider: timed wait expires on a divided thread       205
-    divider: delay counted on a divided thread           9131
-    divider: side-set on a divided thread               16664
-    enable: disabled during a delay                       202
-    enable: disabled during a timed wait                   31
-    enable: disabled between divider ticks                183
-    side-set: driven during a stall                     43096
-    fifo: both threads stalled on FIFOs                  2161
+    pins: both threads write the same pin                5269
+    chain: move into thread 1 TX holding 0                129
+    chain: move into thread 1 TX holding 1                 40
+    chain: move into thread 1 TX holding 2                 23
+    chain: move into thread 1 TX holding 3                 29
+    chain: move in a cycle thread 1 pulls                   1
+    chain: move in a cycle thread 0 pushes                 10
+    chain: thread 0 PUSH stalled behind a full chain     1149
+    divider: timed wait expires on a divided thread       375
+    divider: delay counted on a divided thread           8997
+    divider: side-set on a divided thread               14455
+    enable: disabled during a delay                       177
+    enable: disabled during a timed wait                   44
+    enable: disabled between divider ticks                196
+    side-set: driven during a stall                     42230
+    fifo: both threads stalled on FIFOs                  2714
     |}]
 ;;
 
@@ -146,14 +146,15 @@ let%expect_test "every planted bug in the core is caught" =
         (Sexp.to_string (Rtl.Mutation.sexp_of_t mutation))
         (seed + 1));
   [%expect {|
-    Xdec_never_decrements        caught by program #2
-    Wait_timeout_ignores_budget  caught by program #2
-    Delay_field_ignored          caught by program #2
-    Set_pins_count_off_by_one    caught by program #4
-    Push_not_right_justified     caught by program #10
-    Pin_priority_inverted        caught by program #10
+    Xdec_never_decrements        caught by program #3
+    Wait_timeout_ignores_budget  caught by program #4
+    Delay_field_ignored          caught by program #1
+    Set_pins_count_off_by_one    caught by program #6
+    Push_not_right_justified     caught by program #16
+    Pin_priority_inverted        caught by program #6
     Fetch_port_crossed           caught by program #1
-    Chain_ignores_full           caught by program #25
+    Chain_ignores_full           caught by program #9
+    Push_ignores_in_direction    caught by program #11
     Sync_bypass_inverted         caught by program #1
     |}]
 ;;

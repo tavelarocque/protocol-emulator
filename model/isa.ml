@@ -281,6 +281,10 @@ module Thread_config = struct
     ; clkdiv : int
       (* 0..65535: the thread executes one cycle in every [clkdiv]; 0 and 1
          both mean every cycle *)
+    ; out_msb_first : bool
+      (* OUT takes bits from the top of the OSR and shifts it left *)
+    ; in_msb_first : bool
+      (* IN shifts the ISR left, new bits entering at the bottom *)
     }
   [@@deriving sexp_of]
 
@@ -297,6 +301,8 @@ module Thread_config = struct
     ; sideset_base = 0
     ; sideset_count = 0
     ; clkdiv = 0
+    ; out_msb_first = false
+    ; in_msb_first = false
     }
   ;;
 end
@@ -491,12 +497,24 @@ let tick t (th : Thread.t) ~lines_now ~pin_out =
           | Zeros -> 0
         in
         let data = v land mask count in
-        th.isr <- ((th.isr lsr count) lor (data lsl (word_bits - count))) land word_mask;
+        (* LSB first: new bits enter at the top and the ISR shifts right,
+           so the first bit in ends up least significant once pushed. MSB
+           first: they enter at the bottom and it shifts left, so the first
+           bit in ends up most significant. *)
+        th.isr
+        <- (if cfg.in_msb_first
+            then (th.isr lsl count) lor data
+            else (th.isr lsr count) lor (data lsl (word_bits - count)))
+           land word_mask;
         th.isr_count <- min word_bits (th.isr_count + count);
         `Next
       | Out { dst; count } ->
-        let data = th.osr land mask count in
-        th.osr <- th.osr lsr count;
+        let data, rest =
+          if cfg.out_msb_first
+          then (th.osr lsr (word_bits - count)) land mask count, (th.osr lsl count) land word_mask
+          else th.osr land mask count, th.osr lsr count
+        in
+        th.osr <- rest;
         th.osr_count <- min word_bits (th.osr_count + count);
         (match dst with
          | Pins -> pin_out := write_pins !pin_out ~base:cfg.out_base ~count data
@@ -515,8 +533,16 @@ let tick t (th : Thread.t) ~lines_now ~pin_out =
         if Queue.length th.rx_fifo >= fifo_depth
         then `Stall
         else (
-          (* Right-justify the bits shifted in since the last push. *)
-          let v = if th.isr_count = 0 then 0 else th.isr lsr (word_bits - th.isr_count) in
+          (* The bits shifted in since the last push, right-justified: for
+             LSB first they sit at the top of the ISR, for MSB first at the
+             bottom. *)
+          let v =
+            if th.isr_count = 0
+            then 0
+            else if cfg.in_msb_first
+            then th.isr land mask th.isr_count
+            else th.isr lsr (word_bits - th.isr_count)
+          in
           Queue.enqueue th.rx_fifo v;
           th.isr <- 0;
           th.isr_count <- 0;

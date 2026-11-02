@@ -18,8 +18,8 @@ and moves data through each thread's 4-deep TX and RX FIFOs. The two threads
 run at the same time, each executing one instruction per clock; if both
 write the same pin in the same cycle, thread 1 wins.
 
-Thread 0's registers are at 0x41-0x4D; thread 1 has an identical bank at
-0x51-0x5D. CTRL, PIN_MODES and SYNC_BYPASS are global. Every protocol
+Thread 0's registers are at 0x41-0x4F; thread 1 has an identical bank at
+0x51-0x5F. CTRL, PIN_MODES and SYNC_BYPASS are global. Every protocol
 pin's input passes through a two-flip-flop synchroniser (two cycles of
 delay) unless its SYNC_BYPASS bit is set; the side-set SPI controller needs
 it set on MISO.
@@ -42,7 +42,8 @@ it set on MISO.
 | 0x4C | SIDESET: base pin [2:0], count [5:4] |
 | 0x4D | CLKDIV: the thread runs one cycle in every CLKDIV (0, 1: every cycle) |
 | 0x4E | SYNC_BYPASS (global): 1 bit per pin; set to read that pin without the 2-cycle input synchroniser |
-| 0x51-0x5D | thread 1: same layout as 0x41-0x4D (0x57 unused) |
+| 0x4F | SHIFT: bit 0 OUT most significant bit first, bit 1 IN most significant bit first |
+| 0x51-0x5F | thread 1: same layout as 0x41-0x4F (0x57 and 0x5E unused) |
 
 Status pins: uo[1] thread 0 running, uo[2] thread 0 RX data waiting, uo[3]
 thread 0 TX FIFO full; uo[4]-uo[6] the same for thread 1.

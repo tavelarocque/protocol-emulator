@@ -60,6 +60,8 @@ let random_sample rs word =
     ; sideset_base = r 8
     ; sideset_count = r 4
     ; clkdiv = r 4
+    ; out_msb_first = r 2 = 0
+    ; in_msb_first = r 2 = 0
     }
   in
   let state =
@@ -174,6 +176,8 @@ let run_spec s =
       ; timeout = b 16 c.timeout
       ; sideset_base = b 3 c.sideset_base
       ; sideset_count = b 2 c.sideset_count
+      ; out_msb_first = Bits.of_bool c.out_msb_first
+      ; in_msb_first = Bits.of_bool c.in_msb_first
       }
   in
   { next = P.Thread_state.map out.next ~f:Bits.to_int
@@ -241,6 +245,7 @@ let%expect_test "every planted RTL bug is refuted with a counterexample" =
     Pin_priority_inverted        SAT: counterexample found
     Fetch_port_crossed           SAT: counterexample found
     Chain_ignores_full           SAT: counterexample found
+    Push_ignores_in_direction    SAT: counterexample found
     Sync_bypass_inverted         SAT: counterexample found
     |}]
 ;;

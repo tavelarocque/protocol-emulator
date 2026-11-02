@@ -40,6 +40,8 @@ module Thread_in = struct
     ; sideset_base : 'a [@bits 3]
     ; sideset_count : 'a [@bits 2] (* top bits of the delay field that are side-set *)
     ; clkdiv : 'a [@bits 16] (* one tick every [clkdiv] cycles; 0 and 1: every cycle *)
+    ; out_msb_first : 'a (* OUT takes bits from the top of the OSR *)
+    ; in_msb_first : 'a (* IN shifts the ISR left *)
     ; tx_push : 'a
     ; tx_data : 'a [@bits 16]
     ; rx_pop : 'a
@@ -116,6 +118,8 @@ module Mutation = struct
     | Pin_priority_inverted (* thread 0 wins a pin both threads write *)
     | Fetch_port_crossed (* thread 1 fetches from thread 0's pc *)
     | Chain_ignores_full (* the chain moves a word into a full FIFO, losing it *)
+    | Push_ignores_in_direction
+      (* PUSH right-justifies as if IN were always LSB first *)
     | Sync_bypass_inverted
       (* SYNC_BYPASS read with the wrong polarity: bypassed pins go through
          the synchroniser and synchronised ones skip it *)
@@ -128,6 +132,10 @@ let bit s i = select s i i
    shifting by the full width is well defined. [hi] supplies the bits that
    shift in from the top. *)
 let shift_right ~hi lo ~by = uresize (log_shift srl (hi @: lo) by) 16
+
+(* Shift left by 0..16, zeros in from the bottom, through 32 bits so that
+   shifting by the full width clears the word. *)
+let shift_left x ~by = uresize (log_shift sll (uresize x 32) by) 16
 
 (* min(16, a + b) for 5-bit a and b. *)
 let saturating_add a b =
@@ -203,6 +211,8 @@ module Step_in = struct
     ; timeout : 'a [@bits 16]
     ; sideset_base : 'a [@bits 3]
     ; sideset_count : 'a [@bits 2]
+    ; out_msb_first : 'a
+    ; in_msb_first : 'a
     }
   [@@deriving hardcaml]
 end
@@ -301,9 +311,14 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
   let pull = executing &: is_op 4 &: is_pull &: ~:(i.tx_empty) in
   let push = executing &: is_op 4 &: ~:is_pull &: ~:(i.rx_full) in
   let push_value =
+    let lsb_first = shift_right ~hi:(zero 16) s.isr ~by:(of_int ~width:5 16 -: s.isr_count) in
+    (* MSB first: the bits shifted in sit at the bottom of the ISR. *)
+    let msb_first = s.isr &: ~:(uresize (log_shift sll (ones 32) s.isr_count) 16) in
     if is Push_not_right_justified
     then s.isr
-    else shift_right ~hi:(zero 16) s.isr ~by:(of_int ~width:5 16 -: s.isr_count)
+    else if is Push_ignores_in_direction
+    then lsb_first
+    else mux2 i.in_msb_first msb_first lsb_first
   in
   (* --- Datapath values. --- *)
   let in_value =
@@ -312,7 +327,14 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
       [ read_pins ~lines:i.lines ~base:i.in_base ~count; s.x; s.y; zero 16 ]
   in
   let out_mask = ~:(uresize (log_shift sll (ones 32) count) 16) in
-  let out_data = s.osr &: out_mask in
+  (* LSB first: the low [count] bits. MSB first: the top [count] bits,
+     brought down to the bottom. *)
+  let out_data =
+    mux2
+      i.out_msb_first
+      (shift_right ~hi:(zero 16) s.osr ~by:(of_int ~width:5 16 -: count))
+      (s.osr &: out_mask)
+  in
   let mov_value =
     mux mov_src [ s.x; s.y; uresize i.lines 16; s.isr; s.osr; zero 16 ]
   in
@@ -382,11 +404,19 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
                        ; when_ (cond ==:. 4) [ y <-- s.y -:. 1 ]
                        ] )
                    ; ( of_int ~width:3 2
-                     , [ isr <-- shift_right ~hi:in_value s.isr ~by:count
+                     , [ isr
+                         <-- mux2
+                               i.in_msb_first
+                               (shift_left s.isr ~by:count |: (in_value &: out_mask))
+                               (shift_right ~hi:in_value s.isr ~by:count)
                        ; isr_count <-- saturating_add s.isr_count count
                        ] )
                    ; ( of_int ~width:3 3
-                     , [ osr <-- shift_right ~hi:(zero 16) s.osr ~by:count
+                     , [ osr
+                         <-- mux2
+                               i.out_msb_first
+                               (shift_left s.osr ~by:count)
+                               (shift_right ~hi:(zero 16) s.osr ~by:count)
                        ; osr_count <-- saturating_add s.osr_count count
                        ; switch
                            (select instr 8 7)
@@ -591,6 +621,8 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
           ; timeout = ti.timeout
           ; sideset_base = ti.sideset_base
           ; sideset_count = ti.sideset_count
+          ; out_msb_first = ti.out_msb_first
+          ; in_msb_first = ti.in_msb_first
           }
       in
       pull <== out.pull;

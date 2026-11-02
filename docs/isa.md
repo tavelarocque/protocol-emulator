@@ -95,6 +95,7 @@ output, read back on a push-pull or open-drain pin, is never delayed.
 | `timeout` | cycles (0 to 65535) a `wait ... timeout` may stall before it expires |
 | `sideset_base`, `sideset_count` | first side-set pin, and how many of the delay field's top bits (0 to 3) are side-set values |
 | `clkdiv` | the thread runs one cycle in every `clkdiv` (0 and 1: every cycle). Between those ticks it does nothing at all, so delays and wait timeouts count in ticks |
+| `out_msb_first`, `in_msb_first` | shift direction (SHIFT register). OUT: take bits from the top of the OSR and shift it left. IN: shift the ISR left, new bits entering at the bottom. Off by default, which is least significant bit first |
 
 Pin ranges wrap modulo 8.
 
@@ -306,13 +307,16 @@ rates.
   Existing firmware is unaffected except the side-set SPI controller, which
   bypasses MISO (a test shows it fails without the bypass).
 
+- **v1.4.** Shift direction per thread (SHIFT register), for OUT and IN
+  separately. Before it, OUT and IN both shifted right, so data always left
+  least significant bit first and arrived that way: every MSB-first
+  protocol (SPI, I2C) needed the host to bit-reverse every byte, and a
+  thread could not bridge an MSB-first protocol into an LSB-first one. With
+  SHIFT set, the side-set SPI controller takes and returns plain bytes. The
+  last hardware change before the design freeze.
+
 ## Open questions for review
 
-- **Bit order.** OUT and IN both shift right, so data leaves LSB first and
-  arrives MSB first, and nothing in the ISA can reverse a word. Protocols
-  that are MSB first (SPI, I2C) therefore take bit-reversed bytes from the
-  host, and a thread cannot bridge an MSB-first protocol into an LSB-first
-  one (UART) by itself. PIO solves this with a per-thread shift direction.
 - **Fractional divider.** PIO's divider has 8 fractional bits; this one is
   an integer. UART baud rates that do not divide the clock still need the
   X/Y loop for fine timing.

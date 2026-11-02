@@ -87,7 +87,7 @@ let run_on_model
     if sck && not !prev_sck then Queue.enqueue rises cycle;
     prev_sck := sck;
     Option.iter (Isa.pop_rx m ~thread:0) ~f:(fun v ->
-      Queue.enqueue host_rx (Firmware.reverse_byte (v land 0xFF)))
+      Queue.enqueue host_rx (if cfg.in_msb_first then v else Firmware.reverse_byte (v land 0xFF)))
   done;
   { events = Spi.Checker.events checker
   ; errors = Spi.Checker.errors checker
@@ -271,7 +271,37 @@ let%expect_test "side-set SPI bit timing" =
 
 (* --- The whole chip, over SPI ------------------------------------------- *)
 
-let chip_test ~fast =
+let msb_config = { fast_config with out_msb_first = true; in_msb_first = true }
+
+let msb_transfer bytes =
+  List.mapi bytes ~f:(fun i b -> Firmware.spi_msb_word ~last:(i = List.length bytes - 1) b)
+;;
+
+let%test_unit "model: side-set SPI with MSB-first shifting: plain bytes both ways" =
+  Quickcheck.test
+    (Quickcheck.Generator.list_non_empty (Int.gen_incl 0 255))
+    ~trials:200
+    ~sexp_of:[%sexp_of: int list]
+    ~f:(fun sent ->
+      let sent = List.take sent 6 in
+      let responses = List.map sent ~f:(fun b -> (b * 5) land 0xFF) in
+      let r =
+        run_on_model
+          ~sync_bypass:0b100
+          ~source:Firmware.spi_fast
+          ~cfg:msb_config
+          ~responses
+          ~words:(msb_transfer sent)
+          ~cycles:(60 + (30 * List.length sent))
+          ()
+      in
+      [%test_result: string list] r.errors ~expect:[];
+      [%test_result: Spi.Event.t list] r.events ~expect:(expected_events ~sent ~responses);
+      [%test_result: int list] r.received_by_slave ~expect:sent;
+      [%test_result: int list] r.received_by_host ~expect:responses)
+;;
+
+let chip_test ?(msb = false) ~fast () =
   Quickcheck.test
     (Quickcheck.Generator.both
        (Quickcheck.Generator.list_non_empty (Int.gen_incl 0 255))
@@ -317,9 +347,14 @@ let chip_test ~fast =
       Test_top.write h Top.Addr.in_base 2 (* MISO *);
       Test_top.write h Top.Addr.pin_modes mode_bits;
       Test_top.write h Top.Addr.ctrl 1;
-      List.iter ((if fast then [] else [ half ]) @ transfer sent) ~f:(Test_top.push h);
+      if msb then Test_top.write h Top.Addr.shift 0b11 (* MSB first, OUT and IN *);
+      List.iter
+        ((if fast then [] else [ half ]) @ if msb then msb_transfer sent else transfer sent)
+        ~f:(Test_top.push h);
       let got =
-        List.map sent ~f:(fun _ -> Firmware.reverse_byte (Test_top.pop h land 0xFF))
+        List.map sent ~f:(fun _ ->
+          let v = Test_top.pop h in
+          if msb then v else Firmware.reverse_byte (v land 0xFF))
       in
       Test_top.wait h 200;
       [%test_result: string list] (Spi.Checker.errors checker) ~expect:[];
@@ -331,9 +366,13 @@ let chip_test ~fast =
 ;;
 
 let%test_unit "chip: SPI firmware loaded over SPI talks to a slave device" =
-  chip_test ~fast:false
+  chip_test ~fast:false ()
 ;;
 
 let%test_unit "chip: side-set SPI firmware loaded over SPI talks to a slave device" =
-  chip_test ~fast:true
+  chip_test ~fast:true ()
+;;
+
+let%test_unit "chip: side-set SPI with MSB-first shifting, no bit reversal on the host" =
+  chip_test ~msb:true ~fast:true ()
 ;;

@@ -33,6 +33,8 @@ The instruction set ([`docs/isa.md`](docs/isa.md)) follows the RP2040's PIO:
   straight into thread 1
 - a two-flip-flop synchroniser on every protocol pin input, bypassable per
   pin for protocols too fast for the delay
+- shift direction per thread, so MSB-first protocols (SPI, I2C) take and
+  return plain bytes
 
 It departs from PIO where PIO is weakest for protocol emulation:
 
@@ -53,7 +55,7 @@ program memory is 64 words. The assembler places a program at any origin, so
 two fit in one image: full-duplex UART (TX and RX on the two threads),
 side-set SPI beside UART, and the bridge, divider I2C
 beside side-set SPI with CHAIN carrying every byte read over I2C out over SPI.
-The ISA is at v1.3, and each revision came from building something:
+The ISA is at v1.4, and each revision came from building something:
 writing the I2C controller showed that 32 words was too small and that a wait
 timeout counted down in Y could never exceed one half bit-period, so the memory
 doubled and timeouts got their own counter; writing SPI showed that toggling a
@@ -61,7 +63,8 @@ clock with a separate instruction costs most of the bit time, so side-set
 followed; building the bridge showed that the I2C controller's delay loops
 were a third of its size, so the clock divider followed; reviewing the design
 for silicon rather than simulation showed the protocol pins had no input
-synchronisers, so they got them.
+synchronisers, so they got them; and making every SPI host bit-reverse its
+bytes was an interface wart, so threads got a shift direction.
 
 ## Verification
 
@@ -91,10 +94,10 @@ has not been shown to work.
 | Layer | Planted bugs | Caught |
 |---|---|---|
 | UART bring-up | 3 (short stop bit, MSB-first, slow bits) | 3, with the oracle that caught each |
-| Core RTL | 9: five datapath bugs planted in thread 1 only (X never decrements, timeout ignores budget, delay ignored, SET ignores pin count, PUSH not right-justified), three in how the threads are joined (pin priority inverted, thread 1 fetching from thread 0's PC, CHAIN moving a word into a full FIFO), and the synchroniser bypass read with inverted polarity | all 9, within 25 random programs |
+| Core RTL | 10: six datapath bugs planted in thread 1 only (X never decrements, timeout ignores budget, delay ignored, SET ignores pin count, PUSH not right-justified, PUSH ignoring the shift direction), three in how the threads are joined (pin priority inverted, thread 1 fetching from thread 0's PC, CHAIN moving a word into a full FIFO), and the synchroniser bypass read with inverted polarity | all 10, within 16 random programs |
 | Firmware | start bit 1 cycle short, wrong loop condition | both |
 | SPI port | MISO shifts one edge early | 3 of 4 system tests |
-| Formal proof | the same 9 core bugs | all 9 refuted with SAT counterexamples |
+| Formal proof | the same 10 core bugs | all 10 refuted with SAT counterexamples |
 | I2C firmware | SDA moved before SCL falls; STOP raised with SCL low (divider version) | both, by the bus checker |
 | SPI firmware | MOSI moved after SCK rises | caught by the mode-0 checker |
 
@@ -121,11 +124,8 @@ difference in the RX FIFO's data wires that never reaches behaviour; the spec
 now matches. See [`docs/related-work.md`](docs/related-work.md) for the
 literature this draws on.
 
-One limit found while building the bridge, recorded in
-[`docs/isa.md`](docs/isa.md): nothing in the ISA can reverse a word's bit
-order, so a thread cannot bridge an MSB-first protocol (SPI, I2C) into an
-LSB-first one (UART) by itself. MSB-first to MSB-first, as in the bridge,
-works.
+The hardware is frozen at v1.4: everything after it is firmware, testing
+and documentation, none of which can put the chip at risk.
 
 ## Layout
 

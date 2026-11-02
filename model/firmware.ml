@@ -230,8 +230,16 @@ next:   pull                ; next byte; SCK held low until it arrives
 |}
 ;;
 
-(* Host-side encoding of one byte for [spi_controller]. *)
+(* Host-side encoding of one byte for [spi_controller] and [spi_fast], with
+   the thread shifting LSB first (the default). *)
 let spi_word ~last byte = reverse_byte byte lor (Bool.to_int last lsl 8)
+
+(* The same with the thread's SHIFT register set to MSB first in both
+   directions: the byte goes in plainly, in the top half of the word (OUT
+   takes bits from the top), and the deselect flag in the bit just below it.
+   The RX word is then the received byte as is. No bit reversal on either
+   side. *)
+let spi_msb_word ~last byte = (byte lsl 8) lor (Bool.to_int last lsl 7)
 
 (* SPI controller at 2 cycles per bit, using side-set for SCK.
 
