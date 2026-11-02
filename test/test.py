@@ -941,3 +941,124 @@ async def test_thirdparty_spi_controller(dut):
     miso, rx = await transfer(command, status[1:], [0xFF])
     assert miso == status, f"controller read {[hex(b) for b in miso]}"
     assert rx == command + [SPI_END], f"chip RX {[hex(w) for w in rx]}"
+
+
+# --- The host driver: the board's MicroPython code, run against the chip ------
+#
+# host/protocol_emulator.py is the driver the demo board's RP2040 runs. These
+# tests run that same file, unchanged, against the chip: the driver is
+# blocking code, so it runs in a thread (cocotb's bridge), and each pin change
+# it makes is handed back to the simulator, which waits HALF core clocks
+# before the next one, as a slow microcontroller would.
+
+import sys  # noqa: E402
+
+sys.path.insert(0, os.path.join(HERE, "..", "host"))
+import protocol_emulator as pe  # noqa: E402
+
+try:
+    from cocotb import bridge, resume  # noqa: E402
+except ImportError:  # cocotb 2.0 exposes them only inside a running simulation
+    from cocotb._bridge import bridge, resume  # noqa: E402
+
+
+def sim_port(dut):
+    @resume
+    async def set_pins(sck, cs_n, mosi):
+        drive(dut, sck, cs_n, mosi)
+        await ClockCycles(dut.clk, HALF)
+
+    @resume
+    async def read_miso():
+        return int(dut.uo_out.value) & 1
+
+    return pe.BitBangPort(set_pins, read_miso)
+
+
+def test_driver_constants():
+    assert (pe.I2C_STUCK, pe.I2C_TARGET_REST, pe.SPI_TARGET_DESEL) == (
+        I2C_STUCK, I2C_TARGET_REST, SPI_TARGET_DESEL)
+    assert (pe.CTRL, pe.PIN_MODES, pe.TX_FIFO, pe.RX_FIFO, pe.STATUS, pe.SHIFT) == (
+        CTRL, PIN_MODES, TX_FIFO, RX_FIFO, STATUS, SHIFT)
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_host_driver_uart_and_spi(dut):
+    """The board driver sends UART to cocotbext-uart's receiver, then reads
+    picosoc's SPI flash, from the same driver code the RP2040 runs."""
+    test_driver_constants()
+    await reset(dut)
+    dut.dev_mode.value = 3
+    divisor = 16
+    sink = UartSink(dut.uart_tx, baud=10_000_000 // divisor, bits=8)
+    chip = pe.Chip(sim_port(dut))
+    message = b"pins to pins"
+
+    @bridge
+    def send():
+        pe.UartTx(chip, firmware("uart_tx"), divisor=divisor).write(message)
+
+    await send()
+    received = bytearray()
+    while len(received) < len(message):
+        received += await sink.read()
+    assert bytes(received) == message, f"UART receiver got {bytes(received)!r}"
+
+    address, data = 0x000100, [0x12, 0x34, 0x56]
+    for k, b in enumerate(data):
+        dut.flash.memory[address + k].value = b
+    dut.dev_mode.value = 2
+
+    @bridge
+    def read_flash():
+        spi = pe.SpiController(chip, firmware("spi_fast"))
+        spi.transfer([0xAB])  # wake from power-down
+        return spi.transfer([0x03, 0x00, 0x01, 0x00, 0, 0, 0])[4:]
+
+    got = await read_flash()
+    assert got == data, f"flash returned {got}"
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_host_driver_devices(dut):
+    """The board driver runs the chip as an I2C device (cocotbext-i2c's
+    controller reads a register through a repeated START) and then as an SPI
+    device (cocotbext-spi's controller)."""
+    await reset(dut)
+    chip = pe.Chip(sim_port(dut))
+    dut.dev_mode.value = 1
+    master = I2cMaster(
+        sda=dut.i2c_sda, sda_o=dut.i2c_sda_dev, scl=dut.i2c_scl, scl_o=dut.i2c_scl_dev,
+        speed=400e3)
+
+    @bridge
+    def start_i2c():
+        device = pe.I2cDevice(chip, firmware("i2c_target"), address=0x2A)
+        device.reply([0xBE, 0xEF])
+        return device
+
+    device = await start_i2c()
+    await master.write(0x2A, [0x07])
+    back = await master.read(0x2A, 2)
+    await master.send_stop()
+    assert list(back) == [0xBE, 0xEF], f"controller read {list(back)}"
+    events = await bridge(device.events)()
+    assert events == [("start", False), 0x07, ("start", True)], events
+
+    dut.dev_mode.value = 4
+    spi_master = SpiMaster(SpiBus.from_prefix(dut, "spi"), SpiConfig(
+        word_width=8, sclk_freq=500e3, cpol=False, cpha=False, msb_first=True,
+        cs_active_low=True, frame_spacing_ns=2000))
+
+    @bridge
+    def start_spi():
+        spi_device = pe.SpiDevice(chip, firmware("spi_target"))
+        spi_device.reply([0xA1, 0xB2, 0xC3, 0x00])  # 3 bytes, plus 1 held ahead
+        return spi_device
+
+    spi_device = await start_spi()
+    spi_master.write_nowait([0x9F, 0x01, 0x02], burst=True)
+    await spi_master.wait()
+    assert list(spi_master.read_nowait()) == [0xA1, 0xB2, 0xC3]
+    transfers = await bridge(spi_device.transfers)()
+    assert transfers == [[0x9F, 0x01, 0x02]], transfers

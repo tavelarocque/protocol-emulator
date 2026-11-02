@@ -50,6 +50,14 @@ thread 0 TX FIFO full; uo[4]-uo[6] the same for thread 1.
 
 ## How to test
 
+`host/protocol_emulator.py` is a MicroPython driver for the demo board's
+RP2040: copy it and the `.hex` images from `test/` to the board, enable the
+project, clock it at 10 MHz (`tt.clock_project_PWM(10_000_000)`), and
+`pe.Chip(pe.demo_board_port())` gives register access, firmware loading and
+FIFO push/pop, with helpers for UART TX, the SPI controller, and the I2C and
+SPI device modes. The cocotb tests run this same file against the chip. The
+register-level recipes below are what it does underneath.
+
 With the demo board's RP2040 as SPI host: load a firmware image (for
 example the 15-instruction UART transmitter in `test/uart_tx.hex`) into
 addresses 0x00 upwards, set PIN_MODES to 0x0001 (P0 push-pull), write 1 to
