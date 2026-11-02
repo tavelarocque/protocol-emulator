@@ -179,3 +179,15 @@ From the GDS build reports. Timing is checked at 50 MHz (20 ns), the worst
 | UART bring-up | 328 | 0.5% | +12.4 ns | +0.17 ns |
 | Full chip v0 (SPI + 1-thread core, 32 words) | 8,002 | 12.5% | +6.3 ns | +0.14 ns |
 | Full chip v1.1 (1 thread, 64 words, side-set) | 11,838 | 19.1% | +3.87 ns | +0.13 ns |
+| Full chip v1.3 (2 threads, divider, CHAIN, input synchronisers) | 17,665 | 27.2% | +0.77 ns | +0.12 ns |
+| Full chip v1.4 (adds shift direction): the hardware being taped out | 18,830 | 28.3% | **−0.14 ns** | +0.12 ns |
+
+v1.4 misses 50 MHz by 0.14 ns on one path, at the slow corner only (1.08 V,
+125 °C); the typical corner has 7.3 ns to spare. That costs nothing at the
+specified 10 MHz (100 ns, about 80 ns of slack), but it means 50 MHz is not
+guaranteed at every corner, so it is not claimed. The 20 ns target is left as
+it is rather than relaxed to make the report clean. Every v1.4 build has 0
+DRC and 0 LVS errors, passes the Tiny Tapeout precheck, and passes all 16
+cocotb tests on the gate-level netlist, including the third-party controller
+tests that drive the chip as an I2C and an SPI device. Two-thread layouts take
+about 4 to 5 hours, most of it detailed routing (v1.1 took 91 minutes).
