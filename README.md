@@ -45,11 +45,13 @@ It departs from PIO where PIO is weakest for protocol emulation:
 | Undefined encodings | n/a | none: every 16-bit word is a defined instruction |
 
 Firmware ([`model/firmware.ml`](model/firmware.ml)): UART TX in 15
-instructions, SPI controller in 27 (9 cycles per bit), side-set SPI in 26 (2
+instructions, UART RX in 15 (tolerates the sender's baud rate off by about
+5%, the limit for a mid-bit sampler), SPI controller in 27 (9 cycles per bit), side-set SPI in 26 (2
 cycles per bit, 5 Mbit/s at 10 MHz), I2C controller in 49 (writes only, timed
 by loops), and I2C controller with reads in 25 (timed by the clock divider);
 program memory is 64 words. The assembler places a program at any origin, so
-two fit in one image: side-set SPI beside UART, and the bridge, divider I2C
+two fit in one image: full-duplex UART (TX and RX on the two threads),
+side-set SPI beside UART, and the bridge, divider I2C
 beside side-set SPI with CHAIN carrying every byte read over I2C out over SPI.
 The ISA is at v1.3, and each revision came from building something:
 writing the I2C controller showed that 32 words was too small and that a wait
@@ -75,7 +77,7 @@ independent protocol oracles.
 | Core RTL | `hw/pe_core.ml` against the model | lockstep differential test: 400 random programs × 300 cycles, both threads with random configs, random pins, host traffic on both threads and threads enabled and disabled at random; the full state of both threads and the pins compared every cycle |
 | Two threads | demo images on the model and the chip | SPI and UART running together, each judged by its own oracle; isolation: the SPI waveform is identical, cycle for cycle, whether or not the UART thread runs; the bridge: an I2C read (checked by the I2C oracles) comes out as one SPI transfer (checked by the SPI oracles), with the host never touching the data |
 | Whole chip | `hw/top.ml` through its pins only | bit-banged SPI host: register read-back, echo firmware through both FIFOs, UART firmware decoded on the pin |
-| Protocols | UART, I2C, SPI firmware | independent protocol oracles on the pins: UART waveform + receiver; I2C bus checker + target device that ACKs and stretches SCL; SPI mode-0 checker + slave with scripted responses |
+| Protocols | UART, I2C, SPI firmware | independent protocol oracles on the pins: UART waveform + receiver, and an off-rate frame generator (fractional bit times) driving the UART receiver; I2C bus checker + target device that ACKs and stretches SCL; SPI mode-0 checker + slave with scripted responses |
 | Coverage closure | 16 cross bins random testing reaches rarely | AI-written directed scenarios, each judged by the same lockstep comparison and required to hit its own targets; they close every cross bin and catch every planted bug ([`docs/coverage-closure.md`](docs/coverage-closure.md)) |
 | Silicon netlist | post-layout gates | the same chip-level tests in cocotb, with separate Python protocol models, on RTL and gate-level netlist |
 | **Formal** | core RTL against an independent spec | **SAT equivalence proof** (Hardcaml_verify + Z3): one clock of the two-thread RTL equals one step of [`sim/spec_step.ml`](sim/spec_step.ml) in each thread, for every state, instruction word, input and configuration; the spec itself matches the reference model on all 65,536 instruction words. The code joining the threads is shared by both sides of the proof, so it is covered by the differential test instead |

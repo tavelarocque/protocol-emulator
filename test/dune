@@ -64,3 +64,19 @@
   (with-stdout-to
    bridge.hex
    (run %{dep:../bin/firmware_hex.exe} bridge))))
+
+(rule
+ (targets uart_rx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   uart_rx.hex
+   (run %{dep:../bin/firmware_hex.exe} uart_rx))))
+
+(rule
+ (targets uart_duplex.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   uart_duplex.hex
+   (run %{dep:../bin/firmware_hex.exe} uart_duplex))))

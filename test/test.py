@@ -599,3 +599,53 @@ async def test_bridge(dut):
     assert spi_mon.events == ["SELECT"] + list(zip(sent, responses)) + ["DESELECT"], f"SPI: {spi_mon.events}"
     assert slave.received == sent, f"SPI device got {slave.received}"
     assert replies == responses, f"host got {replies}"
+
+
+# --- Full-duplex UART: TX on thread 0 (P0), RX on thread 1 (P1) --------------
+
+UART_RX_ORIGIN = 15  # Firmware.Uart_duplex.rx_origin; checked by the OCaml tests
+
+
+@cocotb.test()
+async def test_uart_duplex(dut):
+    """UART TX looped back into the UART RX firmware on the other thread, and
+    frames from an independent Python sender, off-rate by 2%."""
+    await reset(dut)
+    divisor = 16
+    await load(dut, firmware("uart_duplex"))
+    await write(dut, OUT_CFG, 0x10)  # TX: OUT/SET on P0
+    await write(dut, SET_CFG, 0x10)
+    await write(dut, START + BANK1, UART_RX_ORIGIN)
+    await write(dut, IN_BASE + BANK1, 1)  # RX on P1
+    await write(dut, 0x45 + BANK1, 9)  # THRESHOLD: 8 data bits + stop bit
+    await write(dut, TIMEOUT + BANK1, 0)  # stop-bit check: low jumps at once
+    await write(dut, TIMEOUT_VECTOR + BANK1, UART_RX_ORIGIN + 13)  # Firmware.uart_rx_bad
+    await write(dut, PIN_MODES, 0b00_01)  # P0 push-pull, P1 input
+    external = []  # when non-empty, P1 is driven from here instead of P0
+
+    async def wire():
+        while True:
+            await FallingEdge(dut.clk)
+            tx = int(dut.uio_out.value) & 1
+            rx = external.pop(0) if external else tx
+            dut.uio_in.value = 0xFD | (rx << 1)
+
+    w = cocotb.start_soon(wire())
+    await write(dut, CTRL, 0b11)
+    for v in [divisor - 4, divisor // 2 - 1]:
+        await push(dut, v, bank=BANK1)
+    await push(dut, divisor - 4)
+    data = [0x00, 0xFF, 0x5A, 0x81]
+    got = []
+    for b in data:
+        await push(dut, b)
+        got.append(await pop(dut, bank=BANK1))
+    assert got == [b | 0x100 for b in data], f"loopback: sent {data}, got {got}"
+    # Now an independent sender, 2% slow: bit time 16.32 cycles.
+    bit_time = divisor * 1.02
+    for b in [0xC3, 0x0F]:
+        bits = [1] * 3 + [0] + [(b >> k) & 1 for k in range(8)] + [1] * 3
+        external.extend(bits[int(c / bit_time)] for c in range(int(len(bits) * bit_time)))
+        got = await pop(dut, bank=BANK1)
+        assert got == b | 0x100, f"off-rate sender: sent {b:#x}, got {got:#x}"
+    w.cancel()

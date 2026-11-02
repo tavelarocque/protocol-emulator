@@ -62,6 +62,13 @@ thread 0 for SPI (SIDESET 0x10, OUT 0x31, IN base 2) and thread 1 for UART
 on P4 (START 26, OUT 0x14, SET 0x14 in its bank at 0x50), set PIN_MODES to
 0x0145, SYNC_BYPASS to 0x04 (MISO), and write 3 to CTRL. SPI words go to 0x48, UART words to 0x58.
 
+Full-duplex UART: `test/uart_duplex.hex` holds the transmitter at 0 and the
+receiver at 15. Thread 0 sends on P0; thread 1 receives on P1 (bank at 0x50:
+START 15, IN base 1, THRESHOLD 9, TIMEOUT 0, TIMEOUT_VECTOR 28). Push
+`divisor - 4` to each thread, then `divisor/2 - 1` to thread 1; bytes pushed
+to 0x48 go out on P0, bytes received on P1 come back from 0x59 with bit 8 set
+for a good stop bit.
+
 The I2C-to-SPI bridge: `test/bridge.hex` holds the I2C controller at 0 and
 the side-set SPI controller at 25. Thread 0 runs I2C on P0 (SDA) and P1
 (SCL), open-drain; thread 1 runs SPI on P2-P5 (SCK, MOSI, MISO, CS_N).
