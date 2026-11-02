@@ -872,3 +872,72 @@ async def test_thirdparty_i2c_controller(dut):
     got = [await pop(dut) for _ in range(3)]
     assert got == [marker(address, False), register, marker(address, True)], \
         f"RX {[hex(w) for w in got]}"
+
+
+# --- Device mode: the chip as an SPI device, driven by an outside controller -
+
+# cocotbext-spi 0.5.0 predates cocotb 2.0, which removed two things it
+# uses: cocotb.clock.BaseClock (only a base class holding the signal) and
+# the .integer of a one-bit value (it reads MISO as bool(v.integer)). Both
+# are put back, with the same meaning; the package itself is unchanged.
+import cocotb.clock  # noqa: E402
+import cocotb.types  # noqa: E402
+
+if not hasattr(cocotb.clock, "BaseClock"):
+    class _BaseClock:
+        def __init__(self, signal):
+            self.signal = signal
+
+    cocotb.clock.BaseClock = _BaseClock
+if not hasattr(cocotb.types.Logic, "integer"):
+    cocotb.types.Logic.integer = property(lambda v: int(v))
+
+from cocotbext.spi import SpiBus, SpiConfig, SpiMaster  # noqa: E402
+
+SPI_TARGET_DESEL = 16  # Firmware.spi_target_desel; checked by the OCaml tests
+SPI_END = 0x100  # Firmware.spi_target_end_marker
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_thirdparty_spi_controller(dut):
+    """The roles reversed for SPI: cocotbext-spi's SpiMaster is the controller
+    (mode 0, 500 kHz) and the chip is the device. Two transfers, a JEDEC ID
+    read and a 3-byte command, with the host keeping the replies queued."""
+    await reset(dut)
+    dut.dev_mode.value = 4
+    master = SpiMaster(SpiBus.from_prefix(dut, "spi"), SpiConfig(
+        word_width=8, sclk_freq=500e3, cpol=False, cpha=False, msb_first=True,
+        cs_active_low=True, frame_spacing_ns=2000))
+    await load(dut, firmware("spi_target"))
+    await write(dut, OUT_CFG, 0x12)  # OUT: MISO (P2), 1 pin
+    await write(dut, IN_BASE, 1)  # MOSI
+    await write(dut, THRESHOLD, 8)
+    await write(dut, TIMEOUT, 0)  # timed waits become branches on a pin
+    await write(dut, TIMEOUT_VECTOR, SPI_TARGET_DESEL)
+    await write(dut, SHIFT, 0b10)  # IN MSB first: bytes arrive as they are
+    await write(dut, PIN_MODES, 0b00_01_00_00)  # P2 MISO push-pull, the rest inputs
+    await write(dut, CTRL, 1)
+
+    async def transfer(mosi, replies, more):
+        """Queue [replies] (plus [more], the start of the next transfer's,
+        to keep one ahead), run one transfer, return what the controller read
+        and what the chip received."""
+        for b in replies + more:
+            await push(dut, rev8(b))
+        master.write_nowait(mosi, burst=True)
+        await master.wait()
+        miso = list(master.read_nowait())
+        rx = [await pop(dut) for _ in range(len(mosi) + 1)]
+        return miso, rx
+
+    jedec = [0xEF, 0x40, 0x18]
+    command = [0x03, 0x12, 0x34]
+    status = [0x00, 0x5A, 0xA5]
+    # The firmware takes the first reply at start and one more after every
+    # byte, so the first transfer's 4 replies plus 1 for the next.
+    miso, rx = await transfer([0x9F, 0, 0, 0], [0x00] + jedec, [status[0]])
+    assert miso == [0x00] + jedec, f"controller read {[hex(b) for b in miso]}"
+    assert rx == [0x9F, 0, 0, 0, SPI_END], f"chip RX {[hex(w) for w in rx]}"
+    miso, rx = await transfer(command, status[1:], [0xFF])
+    assert miso == status, f"controller read {[hex(b) for b in miso]}"
+    assert rx == command + [SPI_END], f"chip RX {[hex(w) for w in rx]}"

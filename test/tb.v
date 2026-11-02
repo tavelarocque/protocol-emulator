@@ -34,13 +34,15 @@ module tb ();
   //      chip or the device pulls
   //   2: picosoc's SPI flash on P0 (SCK), P1 (MOSI), P2 (MISO), P3 (CS_N)
   //   3: UART, chip TX on P0, chip RX on P1
-  reg [1:0] dev_mode = 0;
+  //   4: an SPI controller (cocotbext-spi) driving the chip as a device:
+  //      SCK on P0, MOSI on P1, CS_N on P3; the chip's MISO on P2
+  reg [2:0] dev_mode = 0;
   reg i2c_sda_dev = 1;  // the device's drives, 1 = released
   reg i2c_scl_dev = 1;
   wire i2c_sda = !uio_oe[0] && i2c_sda_dev;
   wire i2c_scl = !uio_oe[1] && i2c_scl_dev;
-  wire flash_csb = (dev_mode == 2) ? uio_out[3] : 1'b1;
-  wire flash_clk = (dev_mode == 2) && uio_out[0];
+  wire flash_csb = (dev_mode == 3'd2) ? uio_out[3] : 1'b1;
+  wire flash_clk = (dev_mode == 3'd2) && uio_out[0];
   wire flash_io0 = uio_out[1];
   wire flash_io1, flash_io2, flash_io3;
   pullup (flash_io1);
@@ -56,10 +58,15 @@ module tb ();
   );
   wire uart_tx = uio_out[0];
   reg uart_rx = 1;
+  reg spi_sclk = 0;
+  reg spi_mosi = 1;
+  reg spi_cs = 1;  // active low
+  wire spi_miso = uio_out[2];
   wire [7:0] uio_in_dut =
-      dev_mode == 2'd1 ? {6'b111111, i2c_scl, i2c_sda} :
-      dev_mode == 2'd2 ? {5'b11111, flash_io1, 2'b11} :
-      dev_mode == 2'd3 ? {6'b111111, uart_rx, 1'b1} : uio_in;
+      dev_mode == 3'd1 ? {6'b111111, i2c_scl, i2c_sda} :
+      dev_mode == 3'd2 ? {5'b11111, flash_io1, 2'b11} :
+      dev_mode == 3'd3 ? {6'b111111, uart_rx, 1'b1} :
+      dev_mode == 3'd4 ? {4'b1111, spi_cs, 1'b1, spi_mosi, spi_sclk} : uio_in;
 
   // Replace tt_um_example with your module name:
   tt_um_tavelarocque_protocol_emulator user_project (

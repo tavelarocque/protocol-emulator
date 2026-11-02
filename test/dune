@@ -88,3 +88,11 @@
   (with-stdout-to
    i2c_target.hex
    (run %{dep:../bin/firmware_hex.exe} i2c_target))))
+
+(rule
+ (targets spi_target.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   spi_target.hex
+   (run %{dep:../bin/firmware_hex.exe} spi_target))))

@@ -159,3 +159,37 @@ module Checker = struct
   let events t = Queue.to_list t.events
   let errors t = Queue.to_list t.errors
 end
+
+(* --- A reference controller, for testing SPI devices --------------------- *)
+
+(* The wires an ideal mode-0 controller drives for [transfers] (each a list
+   of bytes sent in one selection), one (cs_n, sck, mosi) per cycle, with
+   [half] cycles per SCK phase, [byte_gap] extra cycles with SCK low between
+   bytes of a transfer, and [gap] cycles deselected before, between and
+   after transfers. MOSI changes in the same cycle as SCK falls: mode 0
+   gives the device no hold time beyond that edge. *)
+module Controller = struct
+  let waveform ?(byte_gap = 0) ?(gap = 40) ~half transfers =
+    let out = Queue.create () in
+    let hold n v =
+      for _ = 1 to n do
+        Queue.enqueue out v
+      done
+    in
+    hold gap (true, false, true);
+    List.iter transfers ~f:(fun bytes ->
+      let bit b i = (b lsr (7 - i)) land 1 = 1 in
+      let n = List.length bytes in
+      List.iteri bytes ~f:(fun k b ->
+        (* SCK low with the first bit on MOSI: after selecting, or the gap
+           between bytes. *)
+        hold (if k = 0 then half else half + byte_gap) (false, false, bit b 0);
+        for i = 0 to 7 do
+          hold half (false, true, bit b i);
+          if i < 7 then hold half (false, false, bit b (i + 1))
+        done;
+        if k = n - 1 then hold half (false, false, bit b 7));
+      hold gap (true, false, true));
+    Queue.to_array out
+  ;;
+end

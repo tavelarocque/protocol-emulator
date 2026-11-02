@@ -19,7 +19,8 @@ the RTL and on the post-layout gate-level netlist; side-set SPI at 5 Mbit/s
 and a UART run side by side from one memory image. The chip can also be the
 device rather than the controller: as an I2C target it answers an outside
 controller (cocotbext-i2c's, at 400 kHz) with writes, register reads through a
-repeated START, and clock stretching. Both threads' datapaths are formally
+repeated START, and clock stretching; as an SPI device it answers an outside
+mode-0 controller (cocotbext-spi's, at 500 kHz) full duplex. Both threads' datapaths are formally
 proven equivalent to an independent specification.
 
 ## Architecture
@@ -56,7 +57,8 @@ cycles per bit, 5 Mbit/s at 10 MHz), I2C controller in 49 (writes only, timed
 by loops), I2C controller with reads in 25 (timed by the clock divider), and
 I2C target in 63 (the chip as a 7-bit-address device: address match, ACK,
 STOP and repeated START detection, stretching while either FIFO waits on the
-host); program memory is 64 words. The assembler places a program at any origin, so
+host), and SPI device in 23 (mode 0 up to 625 kHz at 10 MHz, deselect seen
+even mid-byte); program memory is 64 words. The assembler places a program at any origin, so
 two fit in one image: full-duplex UART (TX and RX on the two threads),
 side-set SPI beside UART, and the bridge, divider I2C
 beside side-set SPI with CHAIN carrying every byte read over I2C out over SPI.
@@ -87,8 +89,8 @@ independent protocol oracles.
 | Whole chip | `hw/top.ml` through its pins only | bit-banged SPI host: register read-back, echo firmware through both FIFOs, UART firmware decoded on the pin |
 | Protocols | UART, I2C, SPI firmware | independent protocol oracles on the pins: UART waveform + receiver, and an off-rate frame generator (fractional bit times) driving the UART receiver; I2C bus checker + target device that ACKs and stretches SCL; SPI mode-0 checker + slave with scripted responses |
 | Coverage closure | 16 cross bins random testing reaches rarely | AI-written directed scenarios, each judged by the same lockstep comparison and required to hit its own targets; they close every cross bin and catch every planted bug ([`docs/coverage-closure.md`](docs/coverage-closure.md)) |
-| Device mode | the I2C target firmware, on the model and the chip | the spec-derived reference controller (with one clock of data hold time and with none, 7 to 62 clocks of SCL low) writing, reading and register-reading through a repeated START, judged by the bus checker; a shared bus where the chip must ignore a model device at another address; the host late on both FIFOs so the chip must stretch; two model chips talking, the controller firmware on one and the target on the other; the whole chip over SPI |
-| Third-party devices | the chip against device models written by other people from real datasheets | picosoc's Verilog SPI flash (wake, then a 0x03 read at a 24-bit address), cocotbext-i2c's I2C EEPROM (write, pointer set, read back), cocotbext-uart's UART sender and receiver, and, with the roles reversed, cocotbext-i2c's I2C controller driving the chip as a device at 400 kHz (probe, a write that makes it stretch the clock, a register read through a repeated START); on the RTL and the gate-level netlist |
+| Device mode | the I2C and SPI device firmware, on the model and the chip | the spec-derived reference controller (with one clock of data hold time and with none, 7 to 62 clocks of SCL low) writing, reading and register-reading through a repeated START, judged by the bus checker; a shared bus where the chip must ignore a model device at another address; the host late on both FIFOs so the chip must stretch; two model chips talking, the controller firmware on one and the target on the other; the whole chip over SPI. For SPI, the same with a spec-derived mode-0 controller, with and without gaps between bytes, a transfer abandoned mid-byte, and two chips (controller and device firmware) on four wires |
+| Third-party devices | the chip against device models written by other people from real datasheets | picosoc's Verilog SPI flash (wake, then a 0x03 read at a 24-bit address), cocotbext-i2c's I2C EEPROM (write, pointer set, read back), cocotbext-uart's UART sender and receiver, and, with the roles reversed, cocotbext-i2c's I2C controller driving the chip as a device at 400 kHz (probe, a write that makes it stretch the clock, a register read through a repeated START), and cocotbext-spi's SPI controller reading the chip as a device (a JEDEC ID read and a command); on the RTL and the gate-level netlist |
 | Silicon netlist | post-layout gates | the same chip-level tests in cocotb, with separate Python protocol models, on RTL and gate-level netlist |
 | **Formal** | core RTL against an independent spec | **SAT equivalence proof** (Hardcaml_verify + Z3): one clock of the two-thread RTL equals one step of [`sim/spec_step.ml`](sim/spec_step.ml) in each thread, for every state, instruction word, input and configuration; the spec itself matches the reference model on all 65,536 instruction words. The code joining the threads is shared by both sides of the proof, so it is covered by the differential test instead |
 
@@ -107,6 +109,7 @@ has not been shown to work.
 | Formal proof | the same 10 core bugs | all 10 refuted with SAT counterexamples |
 | I2C firmware | SDA moved before SCL falls; STOP raised with SCL low (divider version) | both, by the bus checker |
 | I2C target firmware | 6: never ACKs, answers every address, repeated START missed, STOP missed, no stretching on a full RX FIFO, and SCL checked before SDA when watching for STOP and repeated START | all 6; the last only by a controller with zero data hold time (legal in the spec) swept across speeds |
+| SPI device firmware | 5: MOSI sampled after SCK falls, no wait for SCK to fall, deselect never seen, reply bits lost to the poll, deselect dropping the queued reply | all 5 |
 | SPI firmware | MOSI moved after SCK rises | caught by the mode-0 checker |
 
 Two oracles exist because each misses things alone. A start bit one cycle
