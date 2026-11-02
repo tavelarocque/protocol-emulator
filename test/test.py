@@ -679,3 +679,117 @@ async def test_uart_duplex(dut):
         got = await pop(dut, bank=BANK1)
         assert got == b | 0x100, f"off-rate sender: sent {b:#x}, got {got:#x}"
     w.cancel()
+
+
+# --- Third-party devices -----------------------------------------------------
+#
+# Every device above was written for this project. These tests connect the
+# chip to device models written by other people, from real datasheets, via
+# bus wires in tb.v (dev_mode): picosoc's Verilog SPI flash (YosysHQ, ISC),
+# and the I2C EEPROM and UART models from cocotbext-i2c and cocotbext-uart
+# (Alex Forencich, MIT). The chip's firmware has to speak the real protocol
+# well enough for someone else's device to understand it.
+
+from cocotbext.i2c import I2cMemory
+from cocotbext.uart import UartSink, UartSource
+
+
+@cocotb.test(timeout_time=20, timeout_unit="ms")
+async def test_thirdparty_spi_flash(dut):
+    """Read a SPI flash the way a real driver does: release from power-down
+    (0xAB), then a 0x03 read at a 24-bit address. Plain bytes both ways
+    (SHIFT = MSB first)."""
+    await reset(dut)
+    address, data = 0x012345, [0xC0, 0xFF, 0xEE, 0x42]
+    for k, b in enumerate(data):
+        dut.flash.memory[address + k].value = b
+    dut.dev_mode.value = 2
+    await load(dut, firmware("spi_fast"))
+    await write(dut, SIDESET, 0x10)  # SCK = P0 by side-set
+    await write(dut, OUT_CFG, 0x31)  # MOSI P1, (MISO P2), CS_N P3
+    await write(dut, IN_BASE, 2)
+    await write(dut, SHIFT, 0b11)
+    await write(dut, SYNC_BYPASS, 0b100)
+    await write(dut, PIN_MODES, 0b01_00_01_01)
+    await write(dut, CTRL, 1)
+
+    async def transaction(tx):
+        for i, b in enumerate(tx):
+            await push(dut, (b << 8) | ((i == len(tx) - 1) << 7))
+        return [await pop(dut) for _ in tx]
+
+    await transaction([0xAB])  # the model starts powered down, as real parts can
+    command = [0x03, address >> 16, (address >> 8) & 0xFF, address & 0xFF]
+    got = await transaction(command + [0] * len(data))
+    assert got[len(command):] == data, f"flash returned {got[len(command):]}"
+
+
+@cocotb.test(timeout_time=40, timeout_unit="ms")
+async def test_thirdparty_i2c_eeprom(dut):
+    """Write three bytes into an I2C EEPROM, set its address pointer, and
+    read them back, with the divider-timed I2C controller."""
+    await reset(dut)
+    dut.dev_mode.value = 1
+    eeprom = I2cMemory(
+        sda=dut.i2c_sda, sda_o=dut.i2c_sda_dev, scl=dut.i2c_scl, scl_o=dut.i2c_scl_dev,
+        addr=0x50, size=256)
+    await load(dut, firmware("i2c"))
+    await configure_i2c(dut)
+    await write(dut, PIN_MODES, 0b1010)  # P0 SDA, P1 SCL open-drain
+    await write(dut, CTRL, 1)
+    pointer, data = 0x10, [0xDE, 0xAD, 0xBE]
+    # Write: address + W, memory pointer, data, STOP.
+    words = [i2c_write_word(0x50 << 1, False), i2c_write_word(pointer, False)]
+    words += [i2c_write_word(b, i == len(data) - 1) for i, b in enumerate(data)]
+    for w in words:
+        await push(dut, w)
+    reports = [await pop(dut) for _ in words]
+    assert all(r & 0x100 == 0 for r in reports), f"NACKed: {[hex(r) for r in reports]}"
+    assert eeprom.read_mem(pointer, len(data)) == bytes(data), "EEPROM contents"
+    # Read back: set the pointer, then address + R and three reads.
+    words = [i2c_write_word(0x50 << 1, False), i2c_write_word(pointer, True),
+             i2c_write_word((0x50 << 1) | 1, False)]
+    words += [i2c_read_word(i == len(data) - 1) for i in range(len(data))]
+    for w in words:
+        await push(dut, w)
+    reports = [await pop(dut) for _ in words]
+    got = [rev8(r & 0xFF) for r in reports[3:]]
+    assert got == data, f"read back {got}"
+
+
+@cocotb.test(timeout_time=40, timeout_unit="ms")
+async def test_thirdparty_uart(dut):
+    """The chip's UART transmitter into an outside UART receiver, and an
+    outside UART transmitter into the chip's receiver, at 625 kbaud."""
+    await reset(dut)
+    divisor = 16
+    baud = 10_000_000 // divisor
+    dut.dev_mode.value = 3
+    sink = UartSink(dut.uart_tx, baud=baud, bits=8)
+    source = UartSource(dut.uart_rx, baud=baud, bits=8)
+    await load(dut, firmware("uart_duplex"))
+    await write(dut, OUT_CFG, 0x10)
+    await write(dut, SET_CFG, 0x10)
+    await write(dut, START + BANK1, UART_RX_ORIGIN)
+    await write(dut, IN_BASE + BANK1, 1)
+    await write(dut, 0x45 + BANK1, 9)
+    await write(dut, TIMEOUT + BANK1, 0)
+    await write(dut, TIMEOUT_VECTOR + BANK1, UART_RX_ORIGIN + 13)
+    await write(dut, PIN_MODES, 0b00_01)
+    await write(dut, CTRL, 0b11)
+    for v in [divisor - 4, divisor // 2 - 1]:
+        await push(dut, v, bank=BANK1)
+    await push(dut, divisor - 4)
+    sent = b"Hi, JS!"
+    for b in sent:
+        await push(dut, b)
+    received = bytearray()
+    while len(received) < len(sent):  # read() returns whatever has arrived
+        received += await sink.read()
+    assert bytes(received) == sent, f"outside receiver got {bytes(received)!r}"
+    incoming = b"\x00\xffOK"
+    await source.write(incoming)
+    words = [await pop(dut, bank=BANK1) for _ in incoming]
+    assert all(w & 0x100 for w in words), "stop bits"
+    got = bytes(w & 0xFF for w in words)
+    assert got == incoming, f"chip received {got!r}"
