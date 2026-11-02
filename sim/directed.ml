@@ -30,6 +30,7 @@ let all_input = Array.create ~len:Isa.num_pins Isa.Pin_mode.Input
    (with [start] set to the origin), linked into one 64-word image. *)
 let make
   ?(chain = false)
+  ?(sync_bypass = 0)
   ?(modes = all_push_pull)
   ?(enabled = [| true; true |])
   ?(enables = Scenario.Script [])
@@ -55,6 +56,7 @@ let make
       ; configs = List.map assembled ~f:(fun (_, _, c) -> c)
       ; modes
       ; chain
+      ; sync_bypass
       ; enabled
       ; enables
       ; rates
@@ -278,6 +280,30 @@ lp:     jmp x-- lp
     ]
 ;;
 
+(* Reads every pin, every cycle, into X and Y, so the cycle a level is seen
+   is directly visible in the compared state. Half the pins bypass the
+   synchroniser, half do not. Added after the first eight scenarios all
+   missed a planted synchroniser bug: none of them read pins in a way where
+   two cycles of delay changed the outcome. *)
+let synchroniser_timing =
+  make
+    ~name:"synchroniser: pins read every cycle, half of them bypassed"
+    ~target:[ "Sync_bypass_inverted" ]
+    ~modes:all_input
+    ~sync_bypass:0x0F
+    [ 0, {|
+lp:     mov x, pins
+        mov y, pins
+        jmp lp
+|}, cfg
+    ; 3, {|
+lp:     in pins, 8
+        mov y, isr
+        jmp lp
+|}, { cfg with in_base = 2 }
+    ]
+;;
+
 let all =
   [ pin_fight
   ; chain_backpressure
@@ -287,6 +313,7 @@ let all =
   ; enable_mid_flight
   ; both_fifos_stalled
   ; thread1_datapath
+  ; synchroniser_timing
   ]
 ;;
 

@@ -191,7 +191,10 @@ let spi_word ~last byte = reverse_byte byte lor (Bool.to_int last lsl 8)
 
    Timing limit: IN samples MISO one core clock after SCK falls, so the
    slave's clock-to-output time plus pad delays must be under one clock
-   period (100 ns at 10 MHz). Slower slaves need [spi_controller]. *)
+   period (100 ns at 10 MHz). Slower slaves need [spi_controller]. For the
+   same reason MISO must bypass the input synchroniser (SYNC_BYPASS), whose
+   two-cycle delay would make every sample stale; that is safe here because
+   MISO changes only after SCK falls, a full clock before it is sampled. *)
 let spi_fast =
   {|
         .side_set 1
@@ -349,6 +352,9 @@ module Two_protocols = struct
 
   (* P0, P1, P3, P4 push-pull; P2 (MISO) and the rest inputs. *)
   let mode_bits = 0b01_01_00_01_01
+
+  (* MISO read directly; see [spi_fast]. *)
+  let sync_bypass = 1 lsl 2
 end
 
 (* An I2C-to-SPI bridge with no host in the data path: [i2c] on thread 0
@@ -384,6 +390,10 @@ module Bridge = struct
 
   (* P0, P1 open-drain; P2, P3, P5 push-pull; P4 input. *)
   let mode_bits = 0b01_00_01_01_10_10
+
+  (* MISO (P4) read directly; see [spi_fast]. I2C goes through the
+     synchroniser. *)
+  let sync_bypass = 1 lsl 4
 
   (* Host words for one I2C read of [count] bytes from [address]. *)
   let read_command ~address ~count =

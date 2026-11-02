@@ -19,7 +19,10 @@ run at the same time, each executing one instruction per clock; if both
 write the same pin in the same cycle, thread 1 wins.
 
 Thread 0's registers are at 0x41-0x4D; thread 1 has an identical bank at
-0x51-0x5D. CTRL and PIN_MODES are global.
+0x51-0x5D. CTRL, PIN_MODES and SYNC_BYPASS are global. Every protocol
+pin's input passes through a two-flip-flop synchroniser (two cycles of
+delay) unless its SYNC_BYPASS bit is set; the side-set SPI controller needs
+it set on MISO.
 
 | Address | Register |
 |---|---|
@@ -38,6 +41,7 @@ Thread 0's registers are at 0x41-0x4D; thread 1 has an identical bank at
 | 0x4B | TIMEOUT: max cycles a timed wait stalls |
 | 0x4C | SIDESET: base pin [2:0], count [5:4] |
 | 0x4D | CLKDIV: the thread runs one cycle in every CLKDIV (0, 1: every cycle) |
+| 0x4E | SYNC_BYPASS (global): 1 bit per pin; set to read that pin without the 2-cycle input synchroniser |
 | 0x51-0x5D | thread 1: same layout as 0x41-0x4D (0x57 unused) |
 
 Status pins: uo[1] thread 0 running, uo[2] thread 0 RX data waiting, uo[3]
@@ -56,7 +60,7 @@ Both threads at once: `test/two_protocols.hex` holds the side-set SPI
 controller at address 0 and the UART transmitter at address 26. Configure
 thread 0 for SPI (SIDESET 0x10, OUT 0x31, IN base 2) and thread 1 for UART
 on P4 (START 26, OUT 0x14, SET 0x14 in its bank at 0x50), set PIN_MODES to
-0x0145, and write 3 to CTRL. SPI words go to 0x48, UART words to 0x58.
+0x0145, SYNC_BYPASS to 0x04 (MISO), and write 3 to CTRL. SPI words go to 0x48, UART words to 0x58.
 
 The I2C-to-SPI bridge: `test/bridge.hex` holds the I2C controller at 0 and
 the side-set SPI controller at 25. Thread 0 runs I2C on P0 (SDA) and P1

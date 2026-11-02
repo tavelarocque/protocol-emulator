@@ -54,6 +54,7 @@ type outcome =
 let fast_config = { config with sideset_base = 0; sideset_count = 1 }
 
 let run_on_model
+  ?(sync_bypass = 0)
   ?(source = Firmware.spi_controller)
   ?(cfg = config)
   ?half
@@ -63,6 +64,7 @@ let run_on_model
   ()
   =
   let m = Isa.create ~program:(Asm.assemble source) ~pin_modes:modes ~threads:[ cfg ] in
+  Isa.set_sync_bypass m sync_bypass;
   let slave = Spi.Slave.create ~responses in
   let checker = Spi.Checker.create () in
   let pending = Queue.of_list (Option.to_list half @ words) in
@@ -213,7 +215,24 @@ let%expect_test "bit timing (loop-timed firmware)" =
     |}]
 ;;
 
-let run_fast = run_on_model ~source:Firmware.spi_fast ~cfg:fast_config
+(* MISO (P2) bypasses the input synchroniser: see [Firmware.spi_fast]. *)
+let run_fast = run_on_model ~sync_bypass:0b100 ~source:Firmware.spi_fast ~cfg:fast_config
+
+let%test_unit "side-set SPI through the synchroniser reads MISO two cycles stale" =
+  (* Why [spi_fast] needs SYNC_BYPASS on MISO: with the two-cycle delay it
+     samples bits from the wrong SCK period. *)
+  let responses = [ 0xA5; 0x3C ] in
+  let r =
+    run_on_model
+      ~source:Firmware.spi_fast
+      ~cfg:fast_config
+      ~responses
+      ~words:(transfer [ 0x00; 0x00 ])
+      ~cycles:200
+      ()
+  in
+  [%test_pred: int list] (fun got -> not ([%equal: int list] got responses)) r.received_by_host
+;;
 
 let%test_unit "model: side-set SPI, full-duplex transfers of random bytes" =
   Quickcheck.test
@@ -289,7 +308,8 @@ let chip_test ~fast =
       if fast
       then (
         Test_top.load_firmware h Firmware.spi_fast;
-        Test_top.write h Top.Addr.sideset 0x10 (* side-set: base 0 (SCK), count 1 *))
+        Test_top.write h Top.Addr.sideset 0x10 (* side-set: base 0 (SCK), count 1 *);
+        Test_top.write h Top.Addr.sync_bypass 0b100 (* MISO read directly *))
       else (
         Test_top.load_firmware h Firmware.spi_controller;
         Test_top.write h Top.Addr.set_cfg 0x10 (* SET: base 0 (SCK), count 1 *));

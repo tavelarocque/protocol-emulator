@@ -77,7 +77,8 @@ module I = struct
     ; prog_addr : 'a [@bits 6]
     ; prog_data : 'a [@bits 16]
     ; pin_modes : 'a [@bits 16] (* 2 bits per pin: 0 input, 1 push-pull, 2 open-drain *)
-    ; pins_in : 'a [@bits 8]
+    ; pins_in : 'a [@bits 8] (* straight from the pads, asynchronous *)
+    ; sync_bypass : 'a [@bits 8] (* pins read without the 2-flop synchroniser *)
     ; chain : 'a (* thread 0's RX FIFO feeds thread 1's TX FIFO *)
     ; t0 : 'a Thread_in.t [@rtlprefix "t0_"]
     ; t1 : 'a Thread_in.t [@rtlprefix "t1_"]
@@ -115,6 +116,9 @@ module Mutation = struct
     | Pin_priority_inverted (* thread 0 wins a pin both threads write *)
     | Fetch_port_crossed (* thread 1 fetches from thread 0's pc *)
     | Chain_ignores_full (* the chain moves a word into a full FIFO, losing it *)
+    | Sync_bypass_inverted
+      (* SYNC_BYPASS read with the wrong polarity: bypassed pins go through
+         the synchroniser and synchronised ones skip it *)
   [@@deriving sexp_of, enumerate, equal]
 end
 
@@ -453,12 +457,22 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
   let pin_out =
     reg (Reg_spec.override spec ~clear_to:(ones num_pins)) pin_next -- "pin_out"
   in
+  (* --- External inputs into the clock domain: two flip-flops per pin, so
+     a level that changes as the first one samples it has a full cycle to
+     settle before any logic sees it. Reset high, like the idle bus. Pins in
+     [sync_bypass] are read directly, for protocols that cannot afford the
+     two-cycle delay. --- *)
+  let sync_spec = Reg_spec.override spec ~clear_to:(ones num_pins) in
+  let sync1 = reg sync_spec i.pins_in -- "pins_sync1" in
+  let sync2 = reg sync_spec sync1 -- "pins_sync2" in
+  let bypass = if is Sync_bypass_inverted then ~:(i.sync_bypass) else i.sync_bypass in
+  let ext_in = (i.pins_in &: bypass) |: (sync2 &: ~:bypass) in
   (* --- Pin levels seen by both threads this cycle. --- *)
   let mode p = select i.pin_modes ((2 * p) + 1) (2 * p) in
   let lines =
     concat_lsb
       (List.init num_pins ~f:(fun p ->
-         let ext = bit i.pins_in p in
+         let ext = bit ext_in p in
          let out = bit pin_out p in
          mux (mode p) [ ext; out; out &: ext; ext ]))
   in

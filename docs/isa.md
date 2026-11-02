@@ -63,6 +63,25 @@ weakest for this job:
 For open-drain, writing 0 drives the line low and writing 1 releases it.
 That is exactly I2C's wired-AND bus.
 
+### Input synchroniser
+
+"External level" above means the level after the input synchroniser. A
+signal from another device can change at any moment relative to the core
+clock, and a flip-flop that samples it mid-change can hang between 0 and 1
+for a while before settling (metastability), long enough for two parts of
+the logic to read it differently. So every protocol pin's input passes
+through two flip-flops in series before any logic uses it: a level that
+arrives during cycle t is seen by the threads in cycle t + 2. The first
+flop may go metastable; it has a whole cycle to settle before the second
+samples it.
+
+The host can bypass the synchroniser per pin (SYNC_BYPASS). That is only
+safe for a signal known to be stable whenever it is sampled, and it is
+needed only where two cycles of delay are too many: the side-set SPI
+controller samples MISO one clock after SCK falls, so it bypasses MISO,
+which the slave changes only after that falling edge. A thread's own
+output, read back on a push-pull or open-drain pin, is never delayed.
+
 ### Per-thread configuration (written by the host)
 
 | Field | Meaning |
@@ -278,6 +297,14 @@ rates.
   bit rate set by the divider (6 ticks a bit). CHAIN removes the host from
   the bridge's data path. With CLKDIV at 0 and CHAIN clear, everything
   behaves exactly as v1.1.
+
+- **v1.3.** Input synchronisers on the protocol pins, with a per-pin bypass
+  (SYNC_BYPASS). Found by reviewing the design for silicon rather than for
+  simulation: the SPI host port was synchronised from the start, but the
+  protocol pins went straight into the threads, which simulation can never
+  show is a problem. Every pin read is now two cycles later unless bypassed.
+  Existing firmware is unaffected except the side-set SPI controller, which
+  bypasses MISO (a test shows it fails without the bypass).
 
 ## Open questions for review
 

@@ -25,12 +25,12 @@ found and closed, and how the result is kept honest.
 2. **Generate.** An AI assistant (Claude) read the cross-bin report and
    wrote one small two-thread scenario per weak bin: two programs, their
    configurations, pin modes, CHAIN, and the stimulus (pin inputs, host
-   traffic, an enable script). It also wrote one scenario aimed at the
+   traffic, an enable script). It also wrote two scenarios aimed at
    planted RTL bugs. The scenarios are in `sim/directed.ml`, each with the
    list of bins or bugs it was written for.
 
    One caveat, stated plainly: the same assistant also wrote the RTL and
-   the planted bugs, so the bug-targeted scenario is not a blind search.
+   the planted bugs, so the bug-targeted scenarios are not a blind search.
    What it shows is that the directed suite exercises those behaviours in
    thread 1, not that an independent generator discovered the bugs. The
    coverage-targeted scenarios do not have this problem: their success is
@@ -54,47 +54,48 @@ found and closed, and how the result is kept honest.
 ## Results
 
 The random trials run 120,000 cycles (400 programs of 300). The directed
-suite is 8 scenarios, each run under 3 seeds for 200 to 400 cycles, about
-9,600 cycles in all.
+suite is 9 scenarios, each run under 3 seeds for 200 to 400 cycles, about
+10,800 cycles in all.
 
 | Cross bin | Random trials | Directed suite |
 |---|---:|---:|
-| pins: both threads write the same pin | 4,896 | 399 |
-| chain: move into thread 1 TX holding 0 | 138 | 12 |
-| chain: move into thread 1 TX holding 1 | 69 | 36 |
-| chain: move into thread 1 TX holding 2 | 39 | 33 |
-| chain: move into thread 1 TX holding 3 | 47 | 1,230 |
+| pins: both threads write the same pin | 4,907 | 399 |
+| chain: move into thread 1 TX holding 0 | 136 | 12 |
+| chain: move into thread 1 TX holding 1 | 55 | 36 |
+| chain: move into thread 1 TX holding 2 | 44 | 33 |
+| chain: move into thread 1 TX holding 3 | 46 | 1,230 |
 | chain: move in a cycle thread 1 pulls | **2** | 420 |
 | chain: move in a cycle thread 0 pushes | **7** | 558 |
-| chain: thread 0 PUSH stalled behind a full chain | 745 | 1,626 |
-| divider: timed wait expires on a divided thread | 315 | 42 |
-| divider: delay counted on a divided thread | 9,198 | 534 |
-| divider: side-set on a divided thread | 16,328 | 780 |
-| enable: disabled during a delay | 185 | 9 |
-| enable: disabled during a timed wait | 50 | 6 |
-| enable: disabled between divider ticks | 206 | 6 |
-| side-set: driven during a stall | 43,012 | 348 |
-| fifo: both threads stalled on FIFOs | 2,166 | 1,176 |
+| chain: thread 0 PUSH stalled behind a full chain | 994 | 1,626 |
+| divider: timed wait expires on a divided thread | 205 | 42 |
+| divider: delay counted on a divided thread | 9,131 | 534 |
+| divider: side-set on a divided thread | 16,664 | 780 |
+| enable: disabled during a delay | 202 | 9 |
+| enable: disabled during a timed wait | 31 | 6 |
+| enable: disabled between divider ticks | 183 | 6 |
+| side-set: driven during a stall | 43,096 | 351 |
+| fifo: both threads stalled on FIFOs | 2,161 | 1,176 |
 
 The two bins random testing almost never reached, a word crossing the chain
 in the same cycle that thread 1 pulls or thread 0 pushes, are the
 simultaneous-access cases a FIFO is most likely to get wrong. Random trials
 hit them 2 and 7 times; the directed suite hits them hundreds of times, with
-about 8% of the simulated cycles.
+about 9% of the simulated cycles.
 
-Planted RTL bugs caught by the directed suite (all 8; random trials needed
+Planted RTL bugs caught by the directed suite (all 9; random trials needed
 up to 25 programs to catch the CHAIN bug):
 
 | Bug | Directed scenarios that catch it |
 |---|---:|
-| X never decrements (thread 1) | 1 of 8 |
-| Wait timeout ignores its budget (thread 1) | 3 of 8 |
-| Delay field ignored (thread 1) | 4 of 8 |
-| SET writes one pin too many (thread 1) | 2 of 8 |
-| PUSH not right-justified (thread 1) | 2 of 8 |
-| Pin priority inverted | 1 of 8 |
-| Thread 1 fetches from thread 0's PC | 8 of 8 |
-| CHAIN moves a word into a full FIFO | 3 of 8 |
+| X never decrements (thread 1) | 1 of 9 |
+| Wait timeout ignores its budget (thread 1) | 3 of 9 |
+| Delay field ignored (thread 1) | 4 of 9 |
+| SET writes one pin too many (thread 1) | 2 of 9 |
+| PUSH not right-justified (thread 1) | 2 of 9 |
+| Pin priority inverted | 1 of 9 |
+| Thread 1 fetches from thread 0's PC | 9 of 9 |
+| CHAIN moves a word into a full FIFO | 3 of 9 |
+| Synchroniser bypass read with inverted polarity | 2 of 9 |
 
 **The checks rejected a generated test.** The first version of the
 streaming scenario used two-instruction loops for both producer and
@@ -105,6 +106,15 @@ fix (bursty loops whose phases drift) is in the scenario's comment. This is
 the failure mode an AI-written test is most prone to, a plausible test that
 does not test what it claims, and it is why every scenario's targets are
 checked rather than assumed.
+
+**A planted bug survived the first directed suite.** When the input
+synchronisers were added (ISA v1.3), so was a planted bug in them. The
+random trials caught it in the first program, but none of the first eight
+directed scenarios did: none read the pins in a way where two cycles of
+delay changed what the thread did. That is a gap in the suite, and the
+closure check that every bug is caught failed the build. The ninth
+scenario, which reads every pin on every cycle with half of them bypassing
+the synchroniser, closes it.
 
 ## Why this design
 

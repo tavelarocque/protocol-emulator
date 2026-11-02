@@ -57,7 +57,7 @@ let%expect_test "cross coverage of the directed suite, and each scenario's targe
     enable: disabled during a delay                         9
     enable: disabled during a timed wait                    6
     enable: disabled between divider ticks                  6
-    side-set: driven during a stall                       348
+    side-set: driven during a stall                       351
     fifo: both threads stalled on FIFOs                  1176
     |}]
 ;;
@@ -80,13 +80,14 @@ let%expect_test "the directed suite catches every planted bug" =
     if List.is_empty catchers then raise_s [%message "mutant survived" name];
     printf "%-28s caught by %d of %d\n" name (List.length catchers) (List.length Directed.all));
   [%expect {|
-    Xdec_never_decrements        caught by 1 of 8
-    Wait_timeout_ignores_budget  caught by 3 of 8
-    Delay_field_ignored          caught by 4 of 8
-    Set_pins_count_off_by_one    caught by 2 of 8
-    Push_not_right_justified     caught by 2 of 8
-    Pin_priority_inverted        caught by 1 of 8
-    Fetch_port_crossed           caught by 8 of 8
-    Chain_ignores_full           caught by 3 of 8
+    Xdec_never_decrements        caught by 1 of 9
+    Wait_timeout_ignores_budget  caught by 3 of 9
+    Delay_field_ignored          caught by 4 of 9
+    Set_pins_count_off_by_one    caught by 2 of 9
+    Push_not_right_justified     caught by 2 of 9
+    Pin_priority_inverted        caught by 1 of 9
+    Fetch_port_crossed           caught by 9 of 9
+    Chain_ignores_full           caught by 3 of 9
+    Sync_bypass_inverted         caught by 2 of 9
     |}]
 ;;

@@ -31,6 +31,8 @@ The instruction set ([`docs/isa.md`](docs/isa.md)) follows the RP2040's PIO:
   in the same cycle, thread 1 wins
 - a clock divider per thread, and CHAIN, which feeds thread 0's output
   straight into thread 1
+- a two-flip-flop synchroniser on every protocol pin input, bypassable per
+  pin for protocols too fast for the delay
 
 It departs from PIO where PIO is weakest for protocol emulation:
 
@@ -49,13 +51,15 @@ by loops), and I2C controller with reads in 25 (timed by the clock divider);
 program memory is 64 words. The assembler places a program at any origin, so
 two fit in one image: side-set SPI beside UART, and the bridge, divider I2C
 beside side-set SPI with CHAIN carrying every byte read over I2C out over SPI.
-The ISA is at v1.2:
+The ISA is at v1.3, and each revision came from building something:
 writing the I2C controller showed that 32 words was too small and that a wait
 timeout counted down in Y could never exceed one half bit-period, so the memory
 doubled and timeouts got their own counter; writing SPI showed that toggling a
 clock with a separate instruction costs most of the bit time, so side-set
 followed; building the bridge showed that the I2C controller's delay loops
-were a third of its size, so the clock divider followed.
+were a third of its size, so the clock divider followed; reviewing the design
+for silicon rather than simulation showed the protocol pins had no input
+synchronisers, so they got them.
 
 ## Verification
 
@@ -85,10 +89,10 @@ has not been shown to work.
 | Layer | Planted bugs | Caught |
 |---|---|---|
 | UART bring-up | 3 (short stop bit, MSB-first, slow bits) | 3, with the oracle that caught each |
-| Core RTL | 8: five datapath bugs planted in thread 1 only (X never decrements, timeout ignores budget, delay ignored, SET ignores pin count, PUSH not right-justified), and three in how the threads are joined (pin priority inverted, thread 1 fetching from thread 0's PC, CHAIN moving a word into a full FIFO) | all 8, within 25 random programs |
+| Core RTL | 9: five datapath bugs planted in thread 1 only (X never decrements, timeout ignores budget, delay ignored, SET ignores pin count, PUSH not right-justified), three in how the threads are joined (pin priority inverted, thread 1 fetching from thread 0's PC, CHAIN moving a word into a full FIFO), and the synchroniser bypass read with inverted polarity | all 9, within 25 random programs |
 | Firmware | start bit 1 cycle short, wrong loop condition | both |
 | SPI port | MISO shifts one edge early | 3 of 4 system tests |
-| Formal proof | the same 8 core bugs | all 8 refuted with SAT counterexamples |
+| Formal proof | the same 9 core bugs | all 9 refuted with SAT counterexamples |
 | I2C firmware | SDA moved before SCL falls; STOP raised with SCL low (divider version) | both, by the bus checker |
 | SPI firmware | MOSI moved after SCK rises | caught by the mode-0 checker |
 

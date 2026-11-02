@@ -106,6 +106,9 @@ let run_model s =
       ~pin_modes:(Array.create ~len:Isa.num_pins Isa.Pin_mode.Input)
       ~threads:[ s.config ]
   in
+  (* The spec is one step of a thread given the levels it sees, so read the
+     pins directly, without the synchroniser in front. *)
+  Isa.set_sync_bypass m 0xFF;
   let th = Isa.thread m 0 in
   th.pc <- s.state.pc;
   th.x <- s.state.x;
@@ -238,5 +241,6 @@ let%expect_test "every planted RTL bug is refuted with a counterexample" =
     Pin_priority_inverted        SAT: counterexample found
     Fetch_port_crossed           SAT: counterexample found
     Chain_ignores_full           SAT: counterexample found
+    Sync_bypass_inverted         SAT: counterexample found
     |}]
 ;;

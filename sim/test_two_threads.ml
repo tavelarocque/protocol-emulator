@@ -55,6 +55,7 @@ let run_model ~sent ~responses ~uart ~cycles =
       ~threads:[ Demo.spi_config; Demo.uart_config ]
   in
   Isa.set_enabled m ~thread:1 (Option.is_some uart);
+  Isa.set_sync_bypass m Demo.sync_bypass;
   let slave = Spi.Slave.create ~responses in
   let checker = Spi.Checker.create () in
   let pending =
@@ -177,6 +178,7 @@ let chip ~responses =
   Test_top.configure h ~thread:0 Demo.spi_config;
   Test_top.configure h ~thread:1 Demo.uart_config;
   Test_top.write h Top.Addr.pin_modes Demo.mode_bits;
+  Test_top.write h Top.Addr.sync_bypass Demo.sync_bypass;
   h, slave, checker
 ;;
 
@@ -395,6 +397,7 @@ let%test_unit "model: bridge: an I2C read comes out as one SPI transfer, untouch
           ~threads:[ { Bridge.i2c_config with clkdiv }; Bridge.spi_config ]
       in
       Isa.set_chain m true;
+      Isa.set_sync_bypass m Bridge.sync_bypass;
       let pending = Queue.of_list (Bridge.read_command ~address ~count:n) in
       let replies = Queue.create () in
       let inputs = ref 0xFF in
@@ -454,6 +457,7 @@ let%test_unit "chip: the bridge, loaded and started over SPI" =
       Test_top.configure h ~thread:0 { Bridge.i2c_config with clkdiv = 3 };
       Test_top.configure h ~thread:1 Bridge.spi_config;
       Test_top.write h Top.Addr.pin_modes Bridge.mode_bits;
+      Test_top.write h Top.Addr.sync_bypass Bridge.sync_bypass;
       Test_top.write h Top.Addr.ctrl 0b111 (* both threads, CHAIN *);
       List.iter (Bridge.read_command ~address ~count:n) ~f:(Test_top.push ~thread:0 h);
       let replies =

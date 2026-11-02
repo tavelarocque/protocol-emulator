@@ -161,7 +161,7 @@ let%test_unit "configuration registers read back what was written" =
       ]
   in
   let registers =
-    Top.Addr.[ ctrl, 0x7; pin_modes, 0xFFFF ]
+    Top.Addr.[ ctrl, 0x7; pin_modes, 0xFFFF; sync_bypass, 0xFF ]
     @ per_thread
     @ List.map per_thread ~f:(fun (a, m) -> Top.Addr.for_thread 1 a, m)
   in

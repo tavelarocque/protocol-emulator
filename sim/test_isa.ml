@@ -53,8 +53,12 @@ let%test_unit "assembler rejects bad input" =
 
 let all_input = Array.create ~len:Isa.num_pins Isa.Pin_mode.Input
 
+(* These tests are about instruction semantics, so pins are read directly;
+   the synchroniser has its own test below. *)
 let machine ?(pin_modes = all_input) ?(configs = [ Isa.Thread_config.default ]) src =
-  Isa.create ~program:(Asm.assemble src) ~pin_modes ~threads:configs
+  let m = Isa.create ~program:(Asm.assemble src) ~pin_modes ~threads:configs in
+  Isa.set_sync_bypass m 0xFF;
+  m
 ;;
 
 let run m ~cycles ~inputs =
@@ -144,6 +148,46 @@ hang2:  jmp hang2
   [%test_result: int] (Isa.thread m 0).pc ~expect:1;
   run m ~cycles:1 ~inputs:0b100;
   [%test_result: int] (Isa.thread m 0).pc ~expect:5
+;;
+
+let%test_unit "synchroniser: a pin change is seen two cycles later, or at once if bypassed" =
+  (* Pin 2 rises; count the cycles until a WAIT on it completes. *)
+  let cycles_to_see ~bypass =
+    let m =
+      Isa.create
+        ~program:(Asm.assemble "wait 0 pin 2\nwait 1 pin 2\nhang: jmp hang")
+        ~pin_modes:all_input
+        ~threads:[ Isa.Thread_config.default ]
+    in
+    Isa.set_sync_bypass m (if bypass then 0b100 else 0);
+    (* Low long enough to flush the reset value through the synchroniser
+       and pass the first wait. *)
+    run m ~cycles:4 ~inputs:0;
+    [%test_result: int] (Isa.thread m 0).pc ~expect:1;
+    let n = ref 0 in
+    while (Isa.thread m 0).pc = 1 do
+      Isa.step m ~inputs:0b100;
+      incr n
+    done;
+    !n
+  in
+  [%test_result: int] (cycles_to_see ~bypass:true) ~expect:1;
+  [%test_result: int] (cycles_to_see ~bypass:false) ~expect:3
+;;
+
+let%test_unit "synchroniser: the threads' own output on a pin is read back at once" =
+  (* Push-pull pin 0: SET writes it, and the very next cycle's WAIT sees it,
+     synchroniser or not. *)
+  let pin_modes = Array.copy all_input in
+  pin_modes.(0) <- Isa.Pin_mode.Push_pull;
+  let m =
+    Isa.create
+      ~program:(Asm.assemble "set pins, 0\nwait 0 pin 0\nset x, 1\nhang: jmp hang")
+      ~pin_modes
+      ~threads:[ Isa.Thread_config.default ]
+  in
+  run m ~cycles:3 ~inputs:0xFF;
+  [%test_result: int] (Isa.thread m 0).x ~expect:1
 ;;
 
 let%test_unit "wait without timeout stalls forever" =

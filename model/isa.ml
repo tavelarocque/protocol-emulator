@@ -361,6 +361,10 @@ type t =
   { program : Instruction.t array
   ; pin_modes : Pin_mode.t array
   ; threads : Thread.t array
+  ; mutable sync_bypass : int
+    (* pins whose inputs skip the 2-flop synchroniser; see [seen_inputs] *)
+  ; mutable sync1 : int (* the synchroniser's two stages *)
+  ; mutable sync2 : int
   ; mutable chain : bool
     (* thread 0's RX FIFO feeds thread 1's TX FIFO, one word per cycle *)
   ; mutable pin_out : int
@@ -381,6 +385,9 @@ let create ~program ~pin_modes ~threads =
   { program
   ; pin_modes = Array.copy pin_modes
   ; threads = Array.of_list_map threads ~f:Thread.create
+  ; sync_bypass = 0
+  ; sync1 = mask num_pins (* reset high, like the idle bus *)
+  ; sync2 = mask num_pins
   ; chain = false
   ; pin_out = mask num_pins (* all high: idle for UART, released for open-drain *)
   ; cycle = 0
@@ -391,7 +398,8 @@ let thread t i = t.threads.(i)
 let pin_out t = t.pin_out
 let cycle t = t.cycle
 
-(* The level on each physical pin, given what is driving it from outside. *)
+(* The level on each physical pin, given what is driving it from outside.
+   This is the wire, as a logic analyser would see it. *)
 let lines t ~inputs =
   List.init num_pins ~f:(fun i ->
     let ext = (inputs lsr i) land 1 in
@@ -580,8 +588,22 @@ let exec t (th : Thread.t) ~lines_now ~pin_out =
    full. Like every FIFO rule here it is judged at the start of the cycle,
    so a word thread 0 pushes is not available to thread 1 until the cycle
    after it moves. *)
+(* What the threads see of the outside world this cycle. External inputs
+   change with no relation to the core clock, so each one passes through two
+   flip-flops before any logic uses it: a level that arrives during cycle t
+   is seen by the threads in cycle t + 2. Pins in [sync_bypass] skip this
+   and are seen in the same cycle, for protocols too fast for the delay
+   (the side-set SPI controller's MISO); the host sets them only where the
+   signal is known to be stable when sampled. The threads' own outputs, read
+   back on push-pull and open-drain pins, are never delayed. *)
+let seen_inputs t ~inputs =
+  ((inputs land t.sync_bypass) lor (t.sync2 land lnot t.sync_bypass)) land mask num_pins
+;;
+
+let seen_lines t ~inputs = lines t ~inputs:(seen_inputs t ~inputs)
+
 let step t ~inputs =
-  let lines_now = lines t ~inputs in
+  let lines_now = seen_lines t ~inputs in
   let pin_out = ref t.pin_out in
   let move =
     t.chain
@@ -592,8 +614,12 @@ let step t ~inputs =
   Array.iter t.threads ~f:(fun th -> exec t th ~lines_now ~pin_out);
   if move then Queue.enqueue t.threads.(1).tx_fifo (Queue.dequeue_exn t.threads.(0).rx_fifo);
   t.pin_out <- !pin_out;
+  t.sync2 <- t.sync1;
+  t.sync1 <- inputs land mask num_pins;
   t.cycle <- t.cycle + 1
 ;;
+
+let set_sync_bypass t pins = t.sync_bypass <- pins land mask num_pins
 
 (* Host side of the FIFOs. [push_tx] returns false if the FIFO is full.
    While [chain] is set the host cannot push to thread 1 or pop from thread

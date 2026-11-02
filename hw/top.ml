@@ -24,7 +24,7 @@
    phase must last at least 4 core clocks.
 
    Register map. Thread 0's bank is at 0x40, thread 1's at 0x50, with the
-   same layout; offsets 0x0 and 0x7 hold the two global registers and are
+   same layout; offsets 0x0, 0x7 and 0xE hold the global registers and are
    unused in thread 1's bank.
      0x00-0x3F  program memory word (write), shared by both threads
      0x40       CTRL (global): bit 0 = thread 0 enable, bit 1 = thread 1
@@ -33,6 +33,10 @@
                 and the host cannot pop thread 0 or push thread 1.
      0x47       PIN_MODES (global), 2 bits per pin: 0 input, 1 push-pull,
                 2 open-drain
+     0x4E       SYNC_BYPASS (global), 1 bit per pin: read that pin's input
+                directly instead of through the 2-flop synchroniser (two
+                cycles sooner, but only safe for signals known to be stable
+                when sampled)
      bank + 0x1 START address [5:0]
      bank + 0x2 OUT config: base [2:0], count [7:4]
      bank + 0x3 SET config: base [2:0], count [7:4]
@@ -80,6 +84,7 @@ module Addr = struct
   (* Global registers. *)
   let ctrl = 0x40
   let pin_modes = 0x47
+  let sync_bypass = 0x4E
 
   (* Thread 0's per-thread registers; [for_thread n] moves one into thread
      n's bank. *)
@@ -131,6 +136,7 @@ let create (i : _ I.t) : _ O.t =
   let config ?(init = 0) width = Variable.reg (spec_to (of_int ~width init)) ~width in
   let ctrl = config 3 in
   let pin_modes = config 16 in
+  let sync_bypass = config 8 in
   (* One bank of per-thread registers. Returns its writes as (address,
      register, write rule), its RX pop strobe, and the thread's core inputs. *)
   let bank n =
@@ -196,6 +202,7 @@ let create (i : _ I.t) : _ O.t =
       ; prog_data = data_now
       ; pin_modes = pin_modes.value
       ; pins_in = i.uio_in
+      ; sync_bypass = sync_bypass.value
       ; chain = bit ctrl.value 2
       ; t0 = bank_in 0
       ; t1 = bank_in 1
@@ -208,6 +215,7 @@ let create (i : _ I.t) : _ O.t =
   let table = Array.create ~len:(Addr.last + 2) (zero 16) in
   table.(Addr.ctrl) <- uresize ctrl.value 16;
   table.(Addr.pin_modes) <- pin_modes.value;
+  table.(Addr.sync_bypass) <- uresize sync_bypass.value 16;
   List.iteri banks ~f:(fun n (writes, _, _) ->
     let a = Addr.for_thread n in
     let t = Pe_core.O.thread core n in
@@ -241,6 +249,7 @@ let create (i : _ I.t) : _ O.t =
          ]
      ; when_ (write_to Addr.ctrl) [ ctrl <-- select data_now 2 0 ]
      ; when_ (write_to Addr.pin_modes) [ pin_modes <-- data_now ]
+     ; when_ (write_to Addr.sync_bypass) [ sync_bypass <-- select data_now 7 0 ]
      ]
      @ List.concat_map banks ~f:(fun (writes, _, _) ->
        List.map writes ~f:(fun (_, _, w) -> w)));

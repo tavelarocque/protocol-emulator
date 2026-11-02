@@ -312,6 +312,7 @@ async def test_i2c(dut):
 # Undriven pins read as the board pulls them: SCK low, CS_N high.
 
 OUT_CFG, IN_BASE, SIDESET = 0x42, 0x44, 0x4C
+SYNC_BYPASS = 0x4E  # pins read without the 2-flop input synchroniser
 
 
 def rev8(b):
@@ -401,6 +402,7 @@ async def spi_transfer(dut, fast):
     if fast:
         await load(dut, firmware("spi_fast"))
         await write(dut, SIDESET, 0x10)  # side-set drives SCK: base 0, count 1
+        await write(dut, SYNC_BYPASS, 0b100)  # MISO is sampled one clock after SCK falls
     else:
         await load(dut, firmware("spi_controller"))
         await write(dut, SET_CFG, 0x10)  # SET drives SCK: base 0, count 1
@@ -459,6 +461,7 @@ async def test_two_protocols(dut):
     await write(dut, OUT_CFG + BANK1, 0x14)
     await write(dut, SET_CFG + BANK1, 0x14)
     await write(dut, PIN_MODES, 0b01_01_00_01_01)  # P0, P1, P3, P4 push-pull
+    await write(dut, SYNC_BYPASS, 0b100)  # MISO (P2) read directly
     bus = cocotb.start_soon(spi_bus(dut, slave, monitor))
     samples = []
 
@@ -561,6 +564,7 @@ async def test_bridge(dut):
     await write(dut, OUT_CFG + BANK1, 0x33)  # MOSI P3, (MISO P4), CS_N P5
     await write(dut, IN_BASE + BANK1, 4)  # MISO
     await write(dut, PIN_MODES, 0b01_00_01_01_10_10)
+    await write(dut, SYNC_BYPASS, 0b1_0000)  # MISO (P4) read directly
 
     async def buses():
         while True:

@@ -72,6 +72,7 @@ module Scenario = struct
     ; configs : Isa.Thread_config.t list
     ; modes : Isa.Pin_mode.t array
     ; chain : bool
+    ; sync_bypass : int (* pins read without the synchroniser *)
     ; enabled : bool array (* at the start *)
     ; enables : enables
     ; rates : (int * int) list (* per thread: host push %, host pop % *)
@@ -152,11 +153,20 @@ let random_scenario ~seed ~cycles =
      keeps trying to use the chained FIFO ends, which both implementations
      must ignore. *)
   let chain = rand 3 = 0 in
+  (* A third of the trials read every pin through the synchroniser, a third
+     bypass it on every pin, a third on a random subset. *)
+  let sync_bypass =
+    match rand 3 with
+    | 0 -> 0
+    | 1 -> 0xFF
+    | _ -> rand 256
+  in
   ( { Scenario.name = sprintf "random #%d" (seed + 1)
     ; words
     ; configs
     ; modes
     ; chain
+    ; sync_bypass
     ; enabled
     ; enables = Random_flips
     ; rates
@@ -177,7 +187,7 @@ let classify (model : Isa.t) ~thread ~word ~inputs =
   | Jmp { cond = Always; _ } -> "jmp (always)"
   | Jmp { cond; _ } -> "jmp " ^ Isa.Cond.to_string cond
   | Wait { polarity; pin; timeout } ->
-    let level = (Isa.lines model ~inputs lsr pin) land 1 = 1 in
+    let level = (Isa.seen_lines model ~inputs lsr pin) land 1 = 1 in
     if Bool.equal level polarity
     then "wait: condition met"
     else if timeout && (if th.waiting then th.wait_count else th.config.timeout) = 0
@@ -368,6 +378,7 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
     set ti.sideset_count config.sideset_count;
     set ti.clkdiv config.clkdiv);
   set i.chain (Bool.to_int s.chain);
+  set i.sync_bypass s.sync_bypass;
   set
     i.pin_modes
     (Array.foldi s.modes ~init:0 ~f:(fun p acc m -> acc lor (mode_code m lsl (2 * p))));
@@ -384,6 +395,14 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
       ~threads:s.configs
   in
   Isa.set_chain model s.chain;
+  Isa.set_sync_bypass model s.sync_bypass;
+  (* The hardware's synchroniser has been sampling the pin inputs (held at
+     0) all through configuration and program loading, so by now it holds
+     0, not its reset value. Start the model's in the same place. The first
+     version of this harness missed that, and the test caught the model and
+     the RTL disagreeing about a pin on cycle 0. *)
+  model.sync1 <- 0;
+  model.sync2 <- 0;
   let rec loop cycle =
     if cycle >= s.cycles
     then None
