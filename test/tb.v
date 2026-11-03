@@ -42,6 +42,10 @@ module tb ();
   //      TDI (P2) and TDO (P3); cocotbext-jtag's monitor watches the wires
   //   6: an SWD target (swd_dp.v) on the chip's SWCLK (P0) and SWDIO (P1,
   //      open-drain, pulled up here)
+  //   7: low-speed USB: the chip drives a USB 1.1 transceiver in VO/FSE0
+  //      mode (P2 VO, P3 FSE0, P4 OE_N) and reads its VP and VM receivers
+  //      (P0, P1); on the other side of the bus is usbhostslave's usbDevice
+  //      (test/usbhostslave), clocked at 48 MHz by usb_clk
   reg [2:0] dev_mode = 0;
   reg i2c_sda_dev = 1;  // the device's drives, 1 = released
   reg i2c_scl_dev = 1;
@@ -87,13 +91,43 @@ module tb ();
       .tdi(jtag_tdi),
       .tdo(jtag_tdo)
   );
+  // --- Low-speed USB (dev_mode 7) ----------------------------------------
+  // The host side: a USB 1.1 transceiver in VO/FSE0 mode, driving D+ and D-
+  // while OE_N is low (VO = 1 is D+ high; FSE0 forces both low).
+  reg usb_clk = 0;  // 48 MHz, started by the test
+  reg usb_rst = 1;
+  wire host_oe = (dev_mode == 3'd7) && uio_oe[4] && !uio_out[4];
+  wire host_dp = !uio_out[3] && uio_out[2];
+  wire host_dm = !uio_out[3] && !uio_out[2];
+  // The device side: its own transceiver, and its pull-up (D- at low speed);
+  // the host's pull-downs hold an undriven line low.
+  wire dev_vp_out, dev_vm_out, dev_oe_n, dev_dp_pullup, dev_dm_pullup;
+  wire dev_oe = !dev_oe_n;
+  // Both driving at once is a protocol error: the bus goes X so it shows.
+  wire usb_dp = host_oe && dev_oe ? 1'bx : host_oe ? host_dp : dev_oe ? dev_vp_out : dev_dp_pullup;
+  wire usb_dm = host_oe && dev_oe ? 1'bx : host_oe ? host_dm : dev_oe ? dev_vm_out : dev_dm_pullup;
+  usbDevice usb_dev (
+      .clk(usb_clk),
+      .rst(usb_rst),
+      .usbSlaveVP_in(usb_dp),
+      .usbSlaveVM_in(usb_dm),
+      .usbSlaveVP_out(dev_vp_out),
+      .usbSlaveVM_out(dev_vm_out),
+      .usbSlaveOE_n(dev_oe_n),
+      .USBFullSpeed(),
+      .usbDPlusPullup(dev_dp_pullup),
+      .usbDMinusPullup(dev_dm_pullup),
+      .vBusDetect(1'b1)
+  );
+
   wire [7:0] uio_in_dut =
       dev_mode == 3'd1 ? {6'b111111, i2c_scl, i2c_sda} :
       dev_mode == 3'd2 ? {5'b11111, flash_io1, 2'b11} :
       dev_mode == 3'd3 ? {6'b111111, uart_rx, 1'b1} :
       dev_mode == 3'd4 ? {4'b1111, spi_cs, 1'b1, spi_mosi, spi_sclk} :
       dev_mode == 3'd5 ? {4'b1111, jtag_tdo, 3'b111} :
-      dev_mode == 3'd6 ? {6'b111111, swdio, 1'b1} : uio_in;
+      dev_mode == 3'd6 ? {6'b111111, swdio, 1'b1} :
+      dev_mode == 3'd7 ? {6'b111111, usb_dm, usb_dp} : uio_in;
 
   // Replace tt_um_example with your module name:
   tt_um_tavelarocque_protocol_emulator user_project (

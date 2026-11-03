@@ -480,3 +480,137 @@ class SpiDevice:
                 self._current = []
             else:
                 self._current.append(w)
+
+
+# --- Low-speed USB --------------------------------------------------------
+#
+# Packet encoding, from the USB 1.1 specification (chapter 8): the chip's
+# usb_tx engine clocks out line states at 8 core clocks per bit (so the core
+# clock must be 12 MHz) and adds EOP itself; everything above the wire is
+# built here, the split RP2040 PIO-USB uses as well.
+
+USB_OUT, USB_IN, USB_SETUP = 0x1, 0x9, 0xD
+USB_DATA0, USB_DATA1 = 0x3, 0xB
+USB_ACK, USB_NAK, USB_STALL = 0x2, 0xA, 0xE
+
+
+def usb_pid(p):
+    return p | ((~p & 0xF) << 4)
+
+
+def usb_crc5(value, nbits):
+    crc = 0x1F
+    for i in range(nbits):
+        if (crc ^ (value >> i)) & 1:
+            crc = (crc >> 1) ^ 0x14
+        else:
+            crc >>= 1
+    return ~crc & 0x1F
+
+
+def usb_crc16(data):
+    crc = 0xFFFF
+    for b in data:
+        for i in range(8):
+            if (crc ^ (b >> i)) & 1:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+    return ~crc & 0xFFFF
+
+
+def usb_token(pid, addr, endp):
+    field = addr | (endp << 7)
+    v = field | (usb_crc5(field, 11) << 11)
+    return [usb_pid(pid), v & 0xFF, v >> 8]
+
+
+def usb_data(pid, payload):
+    c = usb_crc16(payload)
+    return [usb_pid(pid)] + list(payload) + [c & 0xFF, c >> 8]
+
+
+def usb_handshake(pid):
+    return [usb_pid(pid)]
+
+
+def usb_line_states(packet):
+    """Line states (1 = K, 0 = J) of a packet from its bytes after SYNC:
+    SYNC, bit stuffing and NRZI from idle J. EOP is the chip's."""
+    bits = []
+    for b in [0x80] + list(packet):
+        for i in range(8):
+            bits.append((b >> i) & 1)
+    states = []
+    level = 0  # J
+    run = 0
+    for b in bits:
+        if b:
+            states.append(level)
+            run += 1
+            if run == 6:
+                level ^= 1  # a stuffed 0 toggles the line
+                states.append(level)
+                run = 0
+        else:
+            level ^= 1
+            states.append(level)
+            run = 0
+    return states
+
+
+USB_TX_ORIGIN = 5  # Firmware.Usb_host.tx_origin (the OCaml tests check it)
+USB_TX_IDLE = USB_TX_ORIGIN + 2  # the engine's pull, where it waits between packets
+USB_BUFFER_WORDS = 13  # both threads' FIFOs, chained
+
+
+def usb_words(packet):
+    """The chip's words for one packet: its line-state count less one, then
+    the line states 16 to a word, first in bit 0."""
+    states = usb_line_states(packet)
+    words = [len(states) - 1]
+    for start in range(0, len(states), 16):
+        w = 0
+        for k, s in enumerate(states[start:start + 16]):
+            w |= s << k
+        words.append(w)
+    return words
+
+
+class UsbHost:
+    """Low-speed USB host (usb_host.hex) through a USB 1.1 transceiver in
+    VO/FSE0 mode: P0 VP, P1 VM (inputs); P2 VO, P3 FSE0, P4 OE_N. The core
+    clock must be 12 MHz (8 clocks per bit at 1.5 Mbit/s).
+
+    Thread 1 is the transmit engine; thread 0 relays to it through CHAIN, so
+    both threads' FIFOs hold one transaction. Each transaction is loaded
+    with the engine stopped and then started with one CTRL write, so the
+    packets go out at full speed however slowly this code runs."""
+
+    def __init__(self, chip, image):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(thread=0)  # the relay (echo) at 0
+        chip.configure(thread=1, start=USB_TX_ORIGIN, out_base=2, out_count=1,
+                       set_base=2, set_count=1, sideset_base=3, sideset_count=2,
+                       threshold=16)
+        chip.set_pin_modes({2: PUSH_PULL, 3: PUSH_PULL, 4: PUSH_PULL})
+        chip.run(threads=(0,), chain=True)
+
+    def transaction(self, packets):
+        """Sends [packets] (each its bytes after SYNC) back to back, two bit
+        times apart, and returns when the last has gone out."""
+        words = []
+        for p in packets:
+            words += usb_words(p)
+        if len(words) > USB_BUFFER_WORDS:
+            raise ValueError("transaction too long for the chip's buffers")
+        for w in words:
+            self.chip.push(w)
+        self.chip.run(threads=(0, 1), chain=True)
+        while True:
+            s = self.chip.status(thread=1)
+            if s["tx_level"] == 0 and s["pc"] == USB_TX_IDLE:
+                break
+        self.chip.run(threads=(0,), chain=True)

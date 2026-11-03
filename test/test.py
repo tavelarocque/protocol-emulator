@@ -31,8 +31,8 @@ def drive(dut, sck, cs_n, mosi):
     dut.ui_in.value = sck | (cs_n << 1) | (mosi << 2)
 
 
-async def reset(dut):
-    cocotb.start_soon(Clock(dut.clk, 100, unit="ns").start())  # 10 MHz
+async def reset(dut, period_ps=100_000):
+    cocotb.start_soon(Clock(dut.clk, period_ps, unit="ps").start())  # 10 MHz by default
     dut.ena.value = 1
     drive(dut, 0, 1, 0)
     dut.uio_in.value = 0
@@ -1285,3 +1285,125 @@ async def test_driver_planted_bugs(dut):
         results.append((name, caught))
     missed = [name for name, caught in results if not caught]
     assert not missed, f"planted driver bugs not caught: {missed}"
+
+
+
+# --- Low-speed USB: the chip as host, usbhostslave's usbDevice as the device -
+
+USB_CLK_PS = 83_334  # 12 MHz (even, for cocotb): 8 clocks per bit at 1.5 Mbit/s
+USB_DEV_CLK_PS = 20_834  # 48 MHz, the device's own clock
+
+
+def usb_line(dp, dm):
+    return {(0, 1): "J", (1, 0): "K", (0, 0): "SE0"}.get((dp, dm), "SE1")
+
+
+async def usb_monitor(dut, trace):
+    """Records (who drives, line state) once per core clock: 8 per bit."""
+    while True:
+        await RisingEdge(dut.clk)
+        who = "host" if dut.host_oe.value == 1 else "dev" if dut.dev_oe.value == 1 else None
+        try:
+            line = usb_line(int(dut.usb_dp.value), int(dut.usb_dm.value))
+        except ValueError:
+            line = "X"  # both sides driving
+        trace.append((who, line))
+
+
+def usb_decode(lines):
+    """A low-speed receiver written from the USB 1.1 spec: from the first K,
+    one sample in the middle of each 8-clock bit, NRZI and stuffing undone,
+    up to an EOP of two bit times of SE0 then J. Returns the bytes after
+    SYNC, or a string saying what is wrong."""
+    start = lines.index("K") if "K" in lines else None
+    if start is None:
+        return "no packet"
+    levels = []
+    k = 0
+    while True:
+        i = start + 8 * k + 4
+        if i >= len(lines):
+            return "no EOP"
+        if lines[i] == "SE0":
+            tail = [lines[j] if j < len(lines) else "J" for j in (i + 8, i + 16)]
+            if tail != ["SE0", "J"]:
+                return "bad EOP"
+            break
+        levels.append(lines[i])
+        k += 1
+    bits, prev, run = [], "J", 0
+    for lv in levels:
+        b = 1 if lv == prev else 0
+        prev = lv
+        if run == 6:
+            if b:
+                return "stuffing violation"
+            run = 0
+            continue
+        run = run + 1 if b else 0
+        bits.append(b)
+    if bits[:8] != [0, 0, 0, 0, 0, 0, 0, 1]:
+        return "bad SYNC"
+    bits = bits[8:]
+    if not bits or len(bits) % 8:
+        return "not whole bytes"
+    return [sum(bits[8 * n + i] << i for i in range(8)) for n in range(len(bits) // 8)]
+
+
+def usb_packets(trace):
+    """Splits the bus record into packets by who drove them: [(who, bytes)]."""
+    packets, cur, who = [], [], None
+    for w, line in trace + [(None, "J")]:
+        if w is not None and (who is None or w == who):
+            cur.append(line)
+            who = w
+        elif cur:
+            packets.append((who, usb_decode(["J"] + cur + ["J", "J"])))
+            cur, who = ([line], w) if w is not None else ([], None)
+    return packets
+
+
+async def usb_start(dut):
+    """Chip at 12 MHz, the device at 48 MHz on the bus; returns once the
+    device has connected (its pull-up on D-)."""
+    await reset(dut, period_ps=USB_CLK_PS)
+    cocotb.start_soon(Clock(dut.usb_clk, USB_DEV_CLK_PS, unit="ps").start())
+    dut.dev_mode.value = 7
+    dut.usb_rst.value = 1
+    await ClockCycles(dut.usb_clk, 64)
+    dut.usb_rst.value = 0
+    for _ in range(200):
+        await ClockCycles(dut.clk, 100)
+        if dut.dev_dm_pullup.value == 1:
+            return
+    raise AssertionError("the USB device never connected")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_usb_device_acks_setup(dut):
+    """The chip, as a low-speed USB host driven by the board driver, sends a
+    SETUP token and GET_DESCRIPTOR's DATA0 to usbhostslave's USB device,
+    which checks PID, bit stuffing, CRC5 and CRC16 before it answers ACK.
+    The same transaction with one CRC16 bit flipped must get no answer."""
+    await usb_start(dut)
+    trace = []
+    cocotb.start_soon(usb_monitor(dut, trace))
+    chip = pe.Chip(sim_port(dut))
+    setup = pe.usb_token(pe.USB_SETUP, 0, 0)
+    get_descriptor = pe.usb_data(pe.USB_DATA0, [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00])
+    corrupt = get_descriptor[:-1] + [get_descriptor[-1] ^ 0x01]
+
+    @bridge
+    def send(packets):
+        usb = pe.UsbHost(chip, firmware("usb_host"))
+        usb.transaction(packets)
+
+    await send([setup, corrupt])
+    await ClockCycles(dut.clk, 2000)
+    bad = usb_packets(trace)
+    trace.clear()
+    await send([setup, get_descriptor])
+    await ClockCycles(dut.clk, 2000)
+    good = usb_packets(trace)
+    assert bad == [("host", setup), ("host", corrupt)], f"corrupted CRC: {bad}"
+    assert good == [("host", setup), ("host", get_descriptor), ("dev", [0xD2])], f"bus saw {good}"

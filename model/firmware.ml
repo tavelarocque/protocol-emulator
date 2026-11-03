@@ -754,6 +754,84 @@ let swd_sampled ~n words =
     List.init (min 16 (n - (16 * w))) ~f:(fun k -> (v lsr k) land 1 = 1))
 ;;
 
+(* Low-speed USB transmit engine (1.5 Mbit/s): sends one packet's line
+   states at exactly 8 core clocks per bit, so the core clock must be
+   12 MHz, then ends it with EOP (two bit times of SE0, one of J) and
+   releases the bus. The packet itself (SYNC, PID, payload, CRC, bit
+   stuffing, NRZI) is built by the host ([Usb_model.packet_lines], and
+   UsbHost in the board driver), the split RP2040 PIO-USB uses too.
+
+   The chip cannot release a push-pull pin by itself (pin modes are the
+   host's), so it drives the bus through a standard USB 1.1 transceiver in
+   its VO/FSE0 mode, as FPGA and microcontroller USB cores do: VO is the
+   differential data (1 = D+ high = K at low speed), FSE0 forces SE0, OE_N
+   enables the drivers, and VP / VM are the transceiver's single-ended
+   receivers (D+ and D-).
+
+   Pins: P0 = VP, P1 = VM (inputs, for the receive side); P2 = VO,
+   P3 = FSE0, P4 = OE_N (push-pull; FSE0 and OE_N by side-set, value bit 0
+   is FSE0). Config: [usb_tx_config].
+
+   Host protocol, per packet:
+     TX word 0 : N - 1, for N line states (the packet without its EOP)
+     then      : ceil(N / 16) words, bit k = VO for the k-th bit time.
+   The host must keep the TX FIFO from running dry mid-packet: a word
+   arriving late stretches a bit.
+
+   Timing: every bit, word boundaries included, is 8 clocks: out [3] (4),
+   jmp x-- (1), jmp !osre (1), jmp bit [1] (2); at a boundary the last two
+   are replaced by the fall-through (1) and pull [1] (2). Between packets
+   the bus is released and idle for at least 17 clocks, two bit times, the
+   USB 1.1 minimum between a host's consecutive packets (7.1.18). *)
+let usb_tx =
+  {|
+        .side_set 2
+gap:    set x, 4            side 2     ; bus released and idle at least two
+idle:   jmp x-- idle        side 2 [2] ; bit times before every packet
+        pull                side 2     ; X <- line states - 1
+        out x, 16           side 2
+        pull                side 2     ; the first 16 line states
+        jmp bit             side 2
+more:   jmp !osre pad       side 0
+        pull                side 0 [1] ; word boundary, in the same 8 clocks
+bit:    out pins, 1         side 0 [3] ; VO for this bit time, drivers on
+        jmp x-- more        side 0
+        nop                 side 0 [2] ; the last bit's 8 clocks
+        set x, 4            side 1     ; EOP: SE0 for two bit times,
+se0:    jmp x-- se0         side 1 [2]
+        set pins, 0         side 0 [3] ; then J (VO = 0) for one,
+        nop                 side 0 [3]
+        jmp gap             side 2     ; then release the bus
+pad:    jmp bit             side 0 [1]
+|}
+;;
+
+let usb_tx_config =
+  { Isa.Thread_config.default with
+    out_base = 2
+  ; out_count = 1
+  ; set_base = 2
+  ; set_count = 1
+  ; sideset_base = 3
+  ; sideset_count = 2
+  ; threshold = 16
+  }
+;;
+
+(* Host words for one packet, from its line states without the EOP (J and K
+   only): VO = 1 for K. *)
+let usb_tx_words (lines : Usb_model.line list) =
+  let n = List.length lines in
+  assert (n >= 1 && n <= 65536);
+  (n - 1)
+  :: List.map (List.chunks_of lines ~length:16) ~f:(fun chunk ->
+    List.foldi chunk ~init:0 ~f:(fun k acc (l : Usb_model.line) ->
+      match l with
+      | K -> acc lor (1 lsl k)
+      | J -> acc
+      | Se0 -> invalid_arg "usb_tx_words: SE0 is the firmware's"))
+;;
+
 (* Two protocols at once, one per thread, from one shared memory image:
    [spi_fast] on thread 0 (P0 SCK, P1 MOSI, P2 MISO, P3 CS_N) and [uart_tx]
    on thread 1 (P4 TX). Each program keeps its own host protocol on its own
@@ -841,6 +919,30 @@ module Bridge = struct
   ;;
 end
 
+(* Low-speed USB host, as the board uses it: [usb_tx] on thread 1, fed
+   through CHAIN by [echo] on thread 0, which turns the FIFOs of both threads
+   into one buffer of about 13 words. The host loads a whole transaction
+   (a SETUP token and its 8-byte DATA0 packet are 10 words) with thread 1
+   stopped, then starts it with one CTRL write, so the packets go out at
+   full speed however slowly the host fed them. CHAIN moves words whether or
+   not thread 1 runs; a re-enabled thread starts again at its START. *)
+module Usb_host = struct
+  let relay_origin = 0
+  let relay = Asm.assemble ~origin:relay_origin echo
+  let tx_origin = relay_origin + Array.length relay
+  let tx = Asm.assemble ~origin:tx_origin usb_tx
+  let image = Asm.link [ relay_origin, relay; tx_origin, tx ]
+  let relay_config = { Isa.Thread_config.default with start = relay_origin }
+  let tx_config = { usb_tx_config with start = tx_origin }
+
+  (* P2, P3, P4 push-pull; the rest inputs. *)
+  let mode_bits = 0b01_01_01_00_00
+
+  (* CTRL while loading (thread 0 and CHAIN) and to send (both threads). *)
+  let ctrl_load = 0b101
+  let ctrl_send = 0b111
+end
+
 (* Full-duplex UART: [uart_tx] on thread 0 sending on P0, [uart_rx] on
    thread 1 receiving on P1, one memory image. *)
 module Uart_duplex = struct
@@ -889,4 +991,5 @@ let all =
   ; "spi_target", spi_target
   ; "jtag", jtag
   ; "swd", swd
+  ; "usb_tx", usb_tx
   ]

@@ -35,6 +35,52 @@ COMPILE_ARGS 		+= -I$(SRC_DIR)
 
 # Include the testbench sources:
 VERILOG_SOURCES += $(PWD)/tb.v
+
+# usbhostslave's USB device (third-party, LGPL, test only), compiled first:
+# Icarus carries `default_nettype none` from our files into later ones, and
+# this code relies on implicit nets.
+# In the order its macros need (usbDevice/sim/filelist.icarus upstream).
+USB_DEVICE_FILES = \
+  dpMem_dc.v \
+  fifoRTL.v \
+  RxFifoBI.v \
+  TxFifoBI.v \
+  RxFifo.v \
+  TxFifo.v \
+  wishBoneBI.v \
+  hostSlaveMuxBI.v \
+  lineControlUpdate.v \
+  processRxBit.v \
+  processRxByte.v \
+  processTxByte.v \
+  readUSBWireData.v \
+  siereceiver.v \
+  SIETransmitter.v \
+  updateCRC5.v \
+  updateCRC16.v \
+  usbSerialInterfaceEngine.v \
+  usbTxWireArbiter.v \
+  writeUSBWireData.v \
+  USBSlaveControlBI.v \
+  endpMux.v \
+  fifoMux.v \
+  sctxportarbiter.v \
+  slaveDirectcontrol.v \
+  slaveGetpacket.v \
+  slaveRxStatusMonitor.v \
+  slaveSendpacket.v \
+  slavecontroller.v \
+  usbSlaveControl.v \
+  usbSlave.v \
+  checkLineState.v \
+  EP0.v \
+  EP1Mouse.v \
+  usbDevice.v \
+  usbROM.v \
+  wishboneArb.v
+USB_DEVICE = $(addprefix $(PWD)/usbhostslave/,$(USB_DEVICE_FILES))
+VERILOG_SOURCES := $(USB_DEVICE) $(VERILOG_SOURCES)
+COMPILE_ARGS += -I$(PWD)/usbhostslave/include -DSIM_COMPILE
 TOPLEVEL = tb
 
 # List test modules to run, separated by commas and without the .py suffix:

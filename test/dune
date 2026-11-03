@@ -112,3 +112,19 @@
   (with-stdout-to
    swd.hex
    (run %{dep:../bin/firmware_hex.exe} swd))))
+
+(rule
+ (targets usb_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   usb_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} usb_tx))))
+
+(rule
+ (targets usb_host.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   usb_host.hex
+   (run %{dep:../bin/firmware_hex.exe} usb_host))))

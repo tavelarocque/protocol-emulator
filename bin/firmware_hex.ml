@@ -2,7 +2,7 @@
    Used to generate the .hex files the cocotb testbench loads over SPI.
 
    Usage: firmware_hex.exe NAME, where NAME is one of Firmware.all, or
-   two_protocols, bridge or uart_duplex for the two-thread images. *)
+   two_protocols, bridge, uart_duplex or usb_host for the two-thread images. *)
 
 open! Core
 module Isa = Pe_model.Isa
@@ -14,6 +14,7 @@ let () =
     | "two_protocols" -> Pe_model.Firmware.Two_protocols.image
     | "bridge" -> Pe_model.Firmware.Bridge.image
     | "uart_duplex" -> Pe_model.Firmware.Uart_duplex.image
+    | "usb_host" -> Pe_model.Firmware.Usb_host.image
     | name ->
       Pe_model.Asm.assemble
         (List.Assoc.find_exn Pe_model.Firmware.all name ~equal:String.equal)
