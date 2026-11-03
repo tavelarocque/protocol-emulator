@@ -263,7 +263,7 @@ let%expect_test "a bug planted in the spec core breaks the whole-core proof" =
 
 module Top_circuit = Circuit.With_interface (Pe_hw.Top.I) (Pe_hw.Top.O)
 
-let top () = Top_circuit.create_exn ~name:"chip" Pe_hw.Top.create
+let top ?mutation () = Top_circuit.create_exn ~name:"chip" (Pe_hw.Top.create ?mutation)
 
 let spec_top ?plant () =
   Top_circuit.create_exn ~name:"chip" (Spec_top.create ?plant)
@@ -285,6 +285,15 @@ let%expect_test "bugs planted in the chip spec each break the proof" =
     Status_levels_swapped    SAT: counterexample found
     Pop_on_write             SAT: counterexample found
     |}]
+;;
+
+let%expect_test "every planted host-port bug is refuted by the whole-chip proof" =
+  List.iter Pe_hw.Top.Mutation.all ~f:(fun mutation ->
+    printf
+      "%-24s %s\n"
+      (Sexp.to_string (Pe_hw.Top.Mutation.sexp_of_t mutation))
+      (prove (top ~mutation ()) (spec_top ())));
+  [%expect {| Miso_shifts_early        SAT: counterexample found |}]
 ;;
 
 (* --- 3. The proof can fail ------------------------------------------------- *)

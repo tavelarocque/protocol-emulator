@@ -275,7 +275,7 @@ let%test_unit "chip: register read over I2C, firmware loaded over SPI" =
       let bytes = List.take bytes 3 in
       let n = List.length bytes in
       let register = 0x0F in
-      let h = Test_top.create ~half:4 in
+      let h = Test_top.create ~half:4 () in
       let target = I2c.Target.create ~to_send:bytes ~address ~stretch () in
       let checker = I2c.Checker.create () in
       attach_bus h ~target ~checker;

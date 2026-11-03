@@ -109,18 +109,16 @@ independent protocol oracles.
 
 Three practices run through all of it.
 
-**Mutation testing.** Every layer has deliberately planted bugs, 43 in all.
-36 are kept in the repo as code and the suite fails if any survives; 7 (the
-UART firmware pair, the SPI port's, and the four in the drivers) were checked
-by hand and are not yet re-run. A test suite that has never failed has not
-been shown to work.
+**Mutation testing, kept in the repo.** Every layer has deliberately planted
+bugs, 43 in all, kept as code, and the suite fails if any survives. A test
+suite that has never failed has not been shown to work.
 
 | Layer | Planted bugs | Caught |
 |---|---|---|
 | UART bring-up | 3 (short stop bit, MSB-first, slow bits) | 3, with the oracle that caught each |
 | Core RTL | 10: six datapath bugs planted in thread 1 only (X never decrements, timeout ignores budget, delay ignored, SET ignores pin count, PUSH not right-justified, PUSH ignoring the shift direction), three in how the threads are joined (pin priority inverted, thread 1 fetching from thread 0's PC, CHAIN moving a word into a full FIFO), and the synchroniser bypass read with inverted polarity | all 10, within 16 random programs |
-| Firmware | start bit 1 cycle short, wrong loop condition | both |
-| SPI port | MISO shifts one edge early | 3 of 4 system tests |
+| UART TX firmware | start bit one clock short, wrong loop condition | both, by the cycle-exact check; a real receiver misses the short start bit in all 300 cases |
+| SPI host port | MISO shifts one edge early (`Top.Mutation`) | refuted by the whole-chip proof, and caught through the pins by register read-back and echo |
 | Formal proof | the same 10 core bugs, plus 3 planted in the specs themselves (CHAIN ignoring a full FIFO; STATUS levels swapped; RX popped by a write) | all 13 refuted with SAT counterexamples. A fourth spec-side candidate (an empty RX FIFO popped by a read) came back UNSAT: the proof showed it was not a bug, since the FIFO ignores that pop |
 | I2C firmware | SDA moved before SCL falls; STOP raised with SCL low (divider version) | both, by the bus checker |
 | I2C target firmware | 6: never ACKs, answers every address, repeated START missed, STOP missed, no stretching on a full RX FIFO, and SCL checked before SDA when watching for STOP and repeated START | all 6; the last only by a controller with zero data hold time (legal in the spec) swept across speeds |
@@ -128,11 +126,11 @@ been shown to work.
 | SWD | 3 in the firmware (SWDIO never driven, SWDIO moving in the same clock as SWCLK rises, last samples never pushed), 2 in the driver's framing (request parity inverted, write turnaround missing) | all 5: the firmware ones by random tests against the engine's contract, the driver ones by an ADIv5 target |
 | SPI device firmware | 5: MOSI sampled after SCK falls, no wait for SCK to fall, deselect never seen, reply bits lost to the poll, deselect dropping the queued reply | all 5 |
 | SPI firmware | MOSI moved after SCK rises | caught by the mode-0 checker |
-| Host driver | pin modes packed one bit per pin | fails both driver tests |
+| Host driver | pin modes packed one bit per pin | caught. All four driver bugs (this one, the JTAG swap and the two SWD ones) are planted by one cocotb test, which also checks each scenario passes with the real driver |
 
-Two oracles exist because each misses things alone. A start bit one cycle
-short decodes fine at a real receiver and is caught only by the cycle-exact
-check.
+Two oracles exist because each misses things alone. A start bit one clock
+short decodes fine at a real receiver in all 300 test cases and is caught
+only by the cycle-exact check.
 
 **Functional coverage that fails the build.** The differential test counts
 what the random programs actually did: every instruction, every stall, every

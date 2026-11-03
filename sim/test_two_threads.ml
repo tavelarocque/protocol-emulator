@@ -158,7 +158,7 @@ let%test_unit "model: the SPI waveform is identical whether or not the UART runs
    and checker to P0..P3. Returns the chip with both threads still
    disabled. *)
 let chip ~responses =
-  let h = Test_top.create ~half:4 in
+  let h = Test_top.create ~half:4 () in
   let slave = Spi.Slave.create ~responses in
   let checker = Spi.Checker.create () in
   h.on_cycle
@@ -308,7 +308,7 @@ let%test_unit "model: chained echo: words go in at thread 0 and out of thread 1"
 
 let%test_unit "chip: chained echo through both threads" =
   let values = [ 0x0000; 0xFFFF; 0x1234; 0xBEEF; 0x8001; 0x7FFE ] in
-  let h = Test_top.create ~half:4 in
+  let h = Test_top.create ~half:4 () in
   Test_top.load_image h Chained_echo.image;
   Test_top.configure h ~thread:1 (List.nth_exn Chained_echo.configs 1);
   Test_top.write h Top.Addr.ctrl 0b111 (* both threads, CHAIN *);
@@ -444,7 +444,7 @@ let%test_unit "chip: the bridge, loaded and started over SPI" =
       let slave = Spi.Slave.create ~responses in
       let spi_checker = Spi.Checker.create () in
       let devices = bridge_devices ~target ~i2c_checker ~slave ~spi_checker in
-      let h = Test_top.create ~half:4 in
+      let h = Test_top.create ~half:4 () in
       h.on_cycle
       <- (fun () ->
            let out = Bits.to_int !((Test_top.o h).uio_out) in

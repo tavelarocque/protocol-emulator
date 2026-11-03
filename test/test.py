@@ -1154,3 +1154,134 @@ async def test_swd(dut):
     assert idr == SWD_AP_IDR, f"AP IDR {idr:#x}"
     assert (posted, tar) == (SWD_AP_IDR, 0xDEADBEEF), f"posted {posted:#x}, RDBUFF {tar:#x}"
     assert int(dut.dp.parity_errors.value) == 0
+
+
+# --- Planted driver bugs: each must make its test fail ------------------------
+#
+# Each bug is planted by replacing one driver method for the length of one
+# scenario, then restored. The scenarios are the checks above, cut down to
+# what can fail without hanging: every call clocks a fixed number of bits,
+# so a broken driver gets wrong data or an SwdError, never a wait for
+# something that will not come.
+
+def _pin_modes_one_bit_per_pin(self, modes):
+    v = 0
+    for pin, mode in modes.items():
+        v |= mode << pin  # the bug: one bit per pin instead of two
+    self.write(pe.PIN_MODES, v)
+
+
+def _make_scan_swapped(original):
+    def scan(self, tms, tdi):
+        return original(self, tdi, tms)  # the bug: TMS and TDI swapped
+    return scan
+
+
+def _make_request_bad_parity(original):
+    def _request(apndp, rnw, addr):
+        req = original(apndp, rnw, addr)
+        req[5] ^= 1  # the bug: request parity inverted
+        return req
+    return staticmethod(_request)
+
+
+def _transfer_no_write_turnaround(self, apndp, rnw, addr, value=0):
+    req = self._request(apndp, rnw, addr)
+    if rnw:
+        bits = req + [1] + [1] * 3 + [1] * 33 + [1] + [0, 0]
+    else:  # the bug: no turnaround between the ACK and the write data
+        data = [(value >> i) & 1 for i in range(32)]
+        bits = req + [1] + [1] * 3 + data + [sum(data) & 1] + [0, 0]
+    s = self.clock(bits)
+    ack = s[9] | (s[10] << 1) | (s[11] << 2)
+    if ack != 0b001:
+        raise pe.SwdError("ACK %s" % format(ack, "03b"))
+    if not rnw:
+        return None
+    v = sum(s[12 + i] << i for i in range(32))
+    if (sum(s[12:44]) & 1) != s[44]:
+        raise pe.SwdError("read data parity error")
+    return v
+
+
+async def _flash_read_ok(dut):
+    address, data = 0x000200, [0xC4, 0x5E, 0x91]
+    for k, b in enumerate(data):
+        dut.flash.memory[address + k].value = b
+    dut.dev_mode.value = 2
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def read_flash():
+        spi = pe.SpiController(chip, firmware("spi_fast"))
+        spi.transfer([0xAB])
+        return spi.transfer([0x03, 0x00, 0x02, 0x00, 0, 0, 0])[4:]
+
+    return await read_flash() == data
+
+
+async def _jtag_idcode_ok(dut):
+    dut.dev_mode.value = 5
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def idcode():
+        j = pe.JtagController(chip, firmware("jtag"))
+        j.reset()
+        return j.shift_dr(0, 32)
+
+    return await idcode() == JTAG_IDCODE
+
+
+async def _swd_power_up_ok(dut):
+    dut.dev_mode.value = 6
+    chip = pe.Chip(sim_port(dut))
+    errors_before = int(dut.dp.parity_errors.value)  # the target is never reset
+
+    @bridge
+    def session():
+        swd = pe.SwdController(chip, firmware("swd"))
+        try:
+            dpidr = swd.connect()
+            swd.write_dp(swd.CTRL_STAT, 0x50000000)
+            return dpidr, swd.read_dp(swd.CTRL_STAT)
+        except pe.SwdError:
+            return None
+
+    got = await session()
+    return (got == (SWD_DPIDR, 0xF0000000)
+            and int(dut.dp.parity_errors.value) == errors_before)
+
+
+DRIVER_BUGS = [
+    ("pin modes packed one bit per pin", pe.Chip, "set_pin_modes",
+     lambda _: _pin_modes_one_bit_per_pin, _flash_read_ok),
+    ("JTAG TMS and TDI swapped", pe.JtagController, "scan",
+     _make_scan_swapped, _jtag_idcode_ok),
+    ("SWD request parity inverted", pe.SwdController, "_request",
+     lambda _: _make_request_bad_parity(pe.SwdController._request), _swd_power_up_ok),
+    ("SWD write turnaround missing", pe.SwdController, "_transfer",
+     lambda _: _transfer_no_write_turnaround, _swd_power_up_ok),
+]
+
+
+@cocotb.test(timeout_time=300, timeout_unit="ms")
+async def test_driver_planted_bugs(dut):
+    """Every planted driver bug fails its scenario, and each scenario passes
+    with the real driver, so a later change cannot quietly blind the driver
+    tests."""
+    results = []
+    for name, cls, attr, make, scenario in DRIVER_BUGS:
+        await reset(dut)
+        assert await scenario(dut), f"scenario for {name!r} fails without the bug"
+        original = cls.__dict__[attr]
+        setattr(cls, attr, make(original))
+        try:
+            await reset(dut)
+            caught = not await scenario(dut)
+        finally:
+            setattr(cls, attr, original)
+        dut._log.info("%-34s %s", name, "caught" if caught else "MISSED")
+        results.append((name, caught))
+    missed = [name for name, caught in results if not caught]
+    assert not missed, f"planted driver bugs not caught: {missed}"

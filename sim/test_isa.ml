@@ -251,19 +251,19 @@ let%test_unit "out: bits leave the OSR LSB-first" =
 
 (* --- First firmware: UART TX on the model, judged by the UART oracles ---- *)
 
-let uart_tx_machine () =
+let uart_tx_machine ?(source = Firmware.uart_tx) () =
   let pin_modes = Array.copy all_input in
   pin_modes.(0) <- Isa.Pin_mode.Push_pull;
   Isa.create
-    ~program:(Asm.assemble Firmware.uart_tx)
+    ~program:(Asm.assemble source)
     ~pin_modes
     ~threads:[ Isa.Thread_config.default ]
 ;;
 
 (* Feed [divisor - 4] then [bytes] to the FIFO as space allows, and record
    the TX pin on every cycle. *)
-let run_uart_tx ~divisor ~bytes =
-  let m = uart_tx_machine () in
+let run_uart_tx ?source ~divisor ~bytes () =
+  let m = uart_tx_machine ?source () in
   let pending = Queue.of_list ((divisor - 4) :: bytes) in
   let cycles = 32 + (List.length bytes * ((10 * divisor) + 8)) + (2 * divisor) in
   (* An explicit loop, not List.init: List.init does not promise to call its
@@ -285,7 +285,7 @@ let%test_unit "UART TX firmware: exact 8N1 waveform for random bytes and baud ra
     ~trials:300
     ~sexp_of:[%sexp_of: int * int]
     ~f:(fun (byte, divisor) ->
-      let line = run_uart_tx ~divisor ~bytes:[ byte ] in
+      let line = run_uart_tx ~divisor ~bytes:[ byte ] () in
       let start =
         match List.findi line ~f:(fun _ level -> not level) with
         | Some (i, _) -> i
@@ -306,10 +306,62 @@ let%test_unit "UART TX firmware: back-to-back bytes decode with a real receiver"
     ~sexp_of:[%sexp_of: int list * int]
     ~f:(fun (bytes, divisor) ->
       let bytes = List.take bytes 6 in
-      let line = run_uart_tx ~divisor ~bytes in
+      let line = run_uart_tx ~divisor ~bytes () in
       [%test_result: (int list, Uart_model.Decode_error.t) Result.t]
         (Uart_model.decode ~divisor line)
         ~expect:(Ok bytes))
+;;
+
+(* Planted firmware bugs, kept here so the suite fails if a change blinds
+   these tests. Each is judged by both oracles above: the cycle-exact
+   waveform and a real (mid-bit sampling) receiver. The counts show what a
+   receiver alone would miss. *)
+let%expect_test "planted UART TX firmware bugs: each is caught, and by which oracle" =
+  let mutate ~pattern ~with_ =
+    let m = String.substr_replace_first Firmware.uart_tx ~pattern ~with_ in
+    assert (not (String.equal m Firmware.uart_tx));
+    m
+  in
+  let cases = List.init 300 ~f:(fun k -> (k * 37) % 256, 4 + (k % 61)) in
+  List.iter
+    [ ( "start bit one clock short"
+      , mutate ~pattern:"set pins, 0 [1]     ; start bit" ~with_:"set pins, 0         ; start bit" )
+    ; ( "wrong loop condition"
+      , mutate ~pattern:"jmp !osre bit" ~with_:"jmp !x bit   " )
+    ]
+    ~f:(fun (name, source) ->
+      let exact, receiver =
+        List.fold cases ~init:(0, 0) ~f:(fun (exact, receiver) (byte, divisor) ->
+          let line = run_uart_tx ~source ~divisor ~bytes:[ byte ] () in
+          let exact_ok =
+            match List.findi line ~f:(fun _ level -> not level) with
+            | None -> false
+            | Some (start, _) ->
+              List.length line >= start + (10 * divisor)
+              && [%equal: bool list]
+                   (List.sub line ~pos:start ~len:(10 * divisor))
+                   (Uart_model.frame ~divisor byte)
+          in
+          let receiver_ok =
+            match Uart_model.decode ~divisor line with
+            | Ok [ b ] -> b = byte
+            | Ok _ | Error _ -> false
+          in
+          ( (exact + if exact_ok then 0 else 1)
+          , receiver + if receiver_ok then 0 else 1 ))
+      in
+      if exact = 0 then raise_s [%message "planted bug survived" name];
+      printf
+        "%-26s exact waveform caught %3d/%d   receiver caught %3d/%d\n"
+        name
+        exact
+        (List.length cases)
+        receiver
+        (List.length cases));
+  [%expect {|
+    start bit one clock short  exact waveform caught 300/300   receiver caught   0/300
+    wrong loop condition       exact waveform caught 298/300   receiver caught 298/300
+    |}]
 ;;
 
 (* --- Side-set ------------------------------------------------------------ *)

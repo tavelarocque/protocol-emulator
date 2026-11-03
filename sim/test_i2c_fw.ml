@@ -217,7 +217,7 @@ let%test_unit "chip: I2C firmware loaded over SPI writes to a target device" =
     ~sexp_of:[%sexp_of: int * int list * int]
     ~f:(fun (address, bytes, stretch) ->
       let bytes = List.take bytes 3 in
-      let h = Test_top.create ~half:4 in
+      let h = Test_top.create ~half:4 () in
       let target = I2c.Target.create ~address ~stretch () in
       let checker = I2c.Checker.create () in
       h.on_cycle

@@ -311,7 +311,7 @@ let chip_test ?(msb = false) ~fast () =
     ~f:(fun (sent, half) ->
       let sent = List.take sent 3 in
       let responses = List.map sent ~f:(fun b -> b lxor 0xFF) in
-      let h = Test_top.create ~half:4 in
+      let h = Test_top.create ~half:4 () in
       let slave = Spi.Slave.create ~responses in
       let checker = Spi.Checker.create () in
       h.on_cycle

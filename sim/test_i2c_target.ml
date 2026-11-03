@@ -582,7 +582,7 @@ let%test_unit "chip: write and register read from the reference controller" =
   and register = 0x20
   and data = [ 0xDE; 0xAD ]
   and reply = [ 0x5A; 0xC3 ] in
-  let h = Test_top.create ~half:4 in
+  let h = Test_top.create ~half:4 () in
   Test_top.load_firmware h Firmware.i2c_target;
   Test_top.configure h ~thread:0 Firmware.i2c_target_config;
   Test_top.write h Top.Addr.pin_modes 0b1010;

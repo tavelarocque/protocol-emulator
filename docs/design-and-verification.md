@@ -175,7 +175,7 @@ an author with the driver, which is a weaker check.
 | Two threads interacting wrongly | pin priority inverted; CHAIN into a full FIFO | the whole-core proof; lockstep with cross bins | the datapath-only proof in general: it shares the composition logic on both sides, so it refutes the planted composition bugs only because they are planted on one side |
 | Host port or register map | STATUS bits swapped | the whole-chip proof; cocotb register tests | the core proof |
 | RTL and spec agree, both misread the ISA document | (none found) | lockstep against the reference model, which was written separately | the proof |
-| Firmware timing | a stop bit one clock short; SDA moved before SCL falls | cycle-exact oracles; bus checkers | a forgiving receiver: a real UART receiver caught the short stop bit in only 13 of 300 cases (`sim/test_uart_tx.ml`) |
+| Firmware timing | a stop bit one clock short; SDA moved before SCL falls | cycle-exact oracles; bus checkers | a forgiving receiver: a real UART receiver caught the bring-up's short stop bit in 13 of 300 cases, and the firmware's short start bit in none (`sim/test_uart_tx.ml`, `sim/test_isa.ml`) |
 | Firmware and project oracles share a misreading of a protocol | (none found) | third-party device models | the project's own oracles |
 | Corner cases a typical controller never produces | an I2C controller with zero data hold time | spec-derived reference controllers swept across speed and hold time | any controller with ordinary data hold time |
 | Synthesis or layout | a mis-synthesised mux | gate-level cocotb suite; LVS | every OCaml test (they see only the RTL) |
@@ -190,31 +190,32 @@ with planted bugs. Section 5 lists the layers that found real ones.
 
 ### Planted bugs
 
-There are 43 planted bugs in all. 36 are kept in the repository as code and
-run in every build, and the suite fails if any survives. The other 7 were
-planted by hand, seen to fail the tests, and reverted. They are recorded in
-the README and commit messages, but nothing re-checks them, so a later change
-could quietly blind those tests.
+Every layer keeps its planted bugs in the repository as code, and the suite
+fails if any survives. There are 43 in all:
 
-| Layer | Kept as code, run every build | Checked once by hand |
-|---|---:|---:|
-| core RTL | 10 | |
-| specs | 3 | |
-| UART bring-up | 3 | |
-| UART firmware | | 2 |
-| SPI host port | | 1 |
-| SPI controller firmware | 1 | |
-| SPI device firmware | 5 | |
-| I2C controller firmware | 2 | |
-| I2C target firmware | 6 | |
-| JTAG firmware | 3 | |
-| JTAG driver | | 1 |
-| SWD firmware | 3 | |
-| SWD driver | | 2 |
-| host driver | | 1 |
-| **total** | **36** | **7** |
+| Layer | Planted bugs | Where |
+|---|---:|---|
+| core RTL | 10 | `Pe_core.Mutation`: lockstep and both core proofs |
+| specs | 3 | `Spec_top.Plant`, `Spec_core`: the proofs |
+| UART bring-up | 3 | `sim/test_uart_tx.ml` |
+| UART TX firmware | 2 | `sim/test_isa.ml` |
+| SPI host port | 1 | `Top.Mutation`: the whole-chip proof and `sim/test_top.ml` |
+| SPI controller firmware | 1 | `sim/test_spi_fw.ml` |
+| SPI device firmware | 5 | `sim/test_spi_target.ml` |
+| I2C controller firmware | 2 | `sim/test_i2c_fw.ml` |
+| I2C target firmware | 6 | `sim/test_i2c_target.ml` |
+| JTAG firmware | 3 | `sim/test_jtag.ml` |
+| SWD firmware | 3 | `sim/test_swd.ml` |
+| JTAG, SWD and host drivers | 4 | `test_driver_planted_bugs` in `test/test.py` |
 
-All 43 were caught. Two candidates turned out not to be bugs, and the
+The driver bugs are planted by replacing one driver method for one
+scenario. The same test first runs each scenario with the real driver and
+requires it to pass, so a scenario that fails for some other reason cannot
+count as a catch. The SPI host-port bug is a parameter of `hw/top.ml`, off
+by default, following `hw/pe_core.ml`; the generated Verilog is
+byte-identical with or without the parameter in the source.
+
+All 43 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -264,8 +265,8 @@ answer it.
    checked against at least one device model written by someone else, from
    the real datasheet or standard. They are the backstop against a shared
    misreading, and they do not know this project exists.
-4. **Every check is shown to fail.** Planted bugs show each layer can fail
-   (36 of the 43 are kept as code; section 5). One caveat from
+4. **Every check is shown to fail.** Planted bugs, kept in the repository
+   as code, show each layer can fail (section 5). One caveat from
    [`coverage-closure.md`](coverage-closure.md) applies: the bug-targeted
    scenarios were written by the same assistant that planted the bugs. The
    coverage-targeted scenarios are measured by the model's own counts and do
@@ -300,8 +301,6 @@ answer it.
 - **Protocols not done.** CAN, low-speed USB and 10 Mbit Ethernet. A USB
   low-speed bit is about 6.7 core clocks at 10 MHz, which side-set makes
   conceivable but untried.
-- **Seven planted bugs are not kept as code** (section 5): the UART firmware
-  pair, the SPI host port's, and the four in the JTAG, SWD and host drivers.
 - **SWD's target model** was written for this project, from ADIv5, so it does
   not give the independence a third-party model would.
 

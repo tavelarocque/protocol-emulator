@@ -110,7 +110,16 @@ end
 
 let bit s i = select s i i
 
-let create (i : _ I.t) : _ O.t =
+(* Planted bugs, as in [Pe_core.Mutation]. Production builds use none (the
+   generated Verilog is identical either way); the test suite builds each one
+   and asserts that the chip-level tests and the formal proof catch it. *)
+module Mutation = struct
+  type t = Miso_shifts_early (* MISO moves on the falling edge before the first data bit *)
+  [@@deriving sexp_of, enumerate, equal]
+end
+
+let create ?mutation (i : _ I.t) : _ O.t =
+  let is m = Option.value_map mutation ~default:false ~f:(Mutation.equal m) in
   let spec = Reg_spec.create ~clock:i.clock ~clear:i.clear () in
   let spec_to v = Reg_spec.override spec ~clear_to:v in
   (* Every register here is named, so the formal proof can pair it with its
@@ -263,7 +272,7 @@ let create (i : _ I.t) : _ O.t =
          ; (* MISO changes on falling edges, once the host has sampled the
               first data bit. *)
            when_
-             (fall &: (bit_count.value >=:. 9))
+             (fall &: (bit_count.value >=:. if is Miso_shifts_early then 8 else 9))
              [ miso_shift <-- sll miso_shift.value 1 ]
          ]
      ; when_ (write_to Addr.ctrl) [ ctrl <-- select data_now 2 0 ]

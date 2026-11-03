@@ -42,9 +42,9 @@ let drive h ~sck ~cs_n ~mosi =
   (i h).ui_in := Bits.of_int ~width:8 (sck lor (cs_n lsl 1) lor (mosi lsl 2))
 ;;
 
-let create ~half =
+let create ?mutation ~half () =
   let h =
-    { sim = Sim.create Top.create; half; trace = Queue.create (); on_cycle = (fun () -> ()) }
+    { sim = Sim.create (Top.create ?mutation); half; trace = Queue.create (); on_cycle = (fun () -> ()) }
   in
   drive h ~sck:0 ~cs_n:1 ~mosi:0;
   (i h).clear := Bits.vdd;
@@ -121,7 +121,7 @@ let pop ?(thread = 0) h =
 (* --- Register file ------------------------------------------------------ *)
 
 let%test_unit "reset values" =
-  let h = create ~half:4 in
+  let h = create ~half:4 () in
   [%test_result: int] (read h Top.Addr.ctrl) ~expect:0;
   [%test_result: int] (read h Top.Addr.out_cfg) ~expect:0x10;
   [%test_result: int] (read h Top.Addr.set_cfg) ~expect:0x10;
@@ -133,7 +133,7 @@ let%test_unit "reset values" =
 ;;
 
 let%test_unit "thread 1's bank resets like thread 0's, and the unused slots read 0" =
-  let h = create ~half:4 in
+  let h = create ~half:4 () in
   let t1 = Top.Addr.for_thread 1 in
   [%test_result: int] (read h (t1 Top.Addr.out_cfg)) ~expect:0x10;
   [%test_result: int] (read h (t1 Top.Addr.set_cfg)) ~expect:0x10;
@@ -172,7 +172,7 @@ let%test_unit "configuration registers read back what was written" =
     ~trials:20
     ~sexp_of:[%sexp_of: int * int]
     ~f:(fun (half, seed) ->
-      let h = create ~half in
+      let h = create ~half () in
       let values = List.map registers ~f:(fun (a, m) -> a, m, (seed * (a + 7)) land 0xFFFF) in
       List.iter values ~f:(fun (a, _, v) -> write h a v);
       List.iter values ~f:(fun (a, m, v) ->
@@ -190,7 +190,7 @@ let%test_unit "echo firmware: words round-trip through SPI, both FIFOs and the c
     ~sexp_of:[%sexp_of: int * int list]
     ~f:(fun (half, values) ->
       let values = List.take values 12 in
-      let h = create ~half in
+      let h = create ~half () in
       load_firmware h Firmware.echo;
       write h Top.Addr.ctrl 1;
       (* Interleave: push up to 3 ahead, then drain, so both FIFOs fill. *)
@@ -214,7 +214,7 @@ let%test_unit "UART firmware loaded over SPI: bytes on pin 0 decode with a real 
     ~sexp_of:[%sexp_of: int * int * int list]
     ~f:(fun (half, divisor, bytes) ->
       let bytes = List.take bytes 4 in
-      let h = create ~half in
+      let h = create ~half () in
       load_firmware h Firmware.uart_tx;
       write h Top.Addr.pin_modes 0b01 (* pin 0 push-pull, rest inputs *);
       write h Top.Addr.ctrl 1;
@@ -232,4 +232,31 @@ let%test_unit "UART firmware loaded over SPI: bytes on pin 0 decode with a real 
       [%test_result: (int list, Uart_model.Decode_error.t) Result.t]
         (Uart_model.decode ~divisor line)
         ~expect:(Ok bytes))
+;;
+
+(* --- Planted host-port bugs --------------------------------------------- *)
+
+(* Each bug in [Top.Mutation] must be caught through the pins alone, by the
+   register read-back and the echo firmware. *)
+let%expect_test "planted host-port bugs: each is caught through the pins" =
+  List.iter Top.Mutation.all ~f:(fun mutation ->
+    let h = create ~mutation ~half:4 () in
+    let values = Top.Addr.[ timeout, 0xA5C3; clkdiv, 0x1234; out_cfg, 0x37 ] in
+    List.iter values ~f:(fun (a, v) -> write h a v);
+    let readback_ok = List.for_all values ~f:(fun (a, v) -> read h a = v) in
+    let h = create ~mutation ~half:4 () in
+    load_firmware h Firmware.echo;
+    write h Top.Addr.ctrl 1;
+    let words = [ 0x0001; 0x8000; 0x5A5A ] in
+    (* Plain writes and reads, not [push] and [pop]: those poll STATUS, which
+       a broken MISO could make them do forever. Three words fit both FIFOs. *)
+    List.iter words ~f:(write h Top.Addr.tx_fifo);
+    wait h 200;
+    let echo_ok = List.for_all words ~f:(fun w -> read h Top.Addr.rx_fifo = w) in
+    printf
+      "%-20s read-back %s, echo %s\n"
+      (Sexp.to_string (Top.Mutation.sexp_of_t mutation))
+      (if readback_ok then "MISSED" else "caught")
+      (if echo_ok then "MISSED" else "caught"));
+  [%expect {| Miso_shifts_early    read-back caught, echo caught |}]
 ;;

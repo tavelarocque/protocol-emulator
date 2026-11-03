@@ -165,7 +165,7 @@ let%test_unit "chip: full-duplex UART, TX looped back into RX" =
     ~sexp_of:[%sexp_of: int * int list]
     ~f:(fun (divisor, bytes) ->
       let bytes = List.take bytes 4 in
-      let h = Test_top.create ~half:4 in
+      let h = Test_top.create ~half:4 () in
       (* A wire from P0 (TX) to P1 (RX). *)
       h.on_cycle
       <- (fun () ->
