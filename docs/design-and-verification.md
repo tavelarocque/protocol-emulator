@@ -15,7 +15,7 @@ AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
 | C1 | The RTL does what the instruction set and register map say, in every state, including states no test reaches | SAT equivalence proof of the whole chip against an independent spec; the spec checked against the reference model | Proof, for the RTL. The spec's agreement with the reference model is tested, not proven (section 3) |
 | C2 | The firmware implements each protocol correctly at the pins | Protocol oracles on the model and the RTL; device models written by other people from real datasheets and standards | Tests, judged by independent oracles |
 | C3 | The gate-level netlist behaves like the RTL | Formal equivalence of the post-layout netlist and the generated Verilog (Yosys, in CI after every layout); the cocotb suite rerun on the netlist; LVS | Proof, from the first cycle after a reset, on every output pin; Hardcaml's Verilog generation itself is trusted (section 7) |
-| C4 | The chip meets timing at its rated 10 MHz | Static timing analysis at 50 MHz, slow corner | About 80 ns of slack at 10 MHz; 50 MHz missed by 0.14 ns at the slow corner only |
+| C4 | The chip meets timing at its rated 10 MHz | Static timing analysis at 50 MHz, slow corner | About 80 ns of slack at 10 MHz. At 50 MHz, the slow corner's slack has varied by 1.3 ns between layout runs of the same logic (−0.14 ns, then +1.19 ns), so 50 MHz is not claimed |
 | C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb | Tests in simulation; not yet run on hardware |
 
 ## 2. Design
@@ -269,7 +269,7 @@ specification allows. The firmware now reads SDA first.
 | An AI-written scenario ran phase-locked and never hit the bins it claimed | the closure check |
 | No directed scenario caught a synchroniser bug | the closure check (requires every planted bug caught) |
 | The project's SPI slave model dropped a preloaded response on deselect; the I2C checker was too strict about the edge before STOP | the oracles disagreeing with the firmware, with the oracle at fault |
-| v1.4 misses 50 MHz by 0.14 ns at the slow corner | static timing analysis |
+| The first v1.4 build missed 50 MHz by 0.14 ns at the slow corner | static timing analysis |
 
 ## 6. AI-assisted verification, and independence
 
@@ -314,9 +314,10 @@ answer it.
   every protocol input and on the host port. A pin with SYNC_BYPASS set is
   the firmware author's responsibility. The host port requires each SCK
   phase to last at least 4 core clocks.
-- **Timing.** The chip is rated at 10 MHz. At 50 MHz it misses by 0.14 ns
-  on one path at the slow corner (1.08 V, 125 °C), so 50 MHz is not claimed.
-  The typical corner has 7.3 ns to spare.
+- **Timing.** The chip is rated at 10 MHz. At 50 MHz, the slow corner
+  (1.08 V, 125 °C) missed by 0.14 ns in the first v1.4 build and met it with
+  1.19 ns to spare in the current one, with no change in logic: placement
+  varies between layout runs, so 50 MHz is not claimed.
 - **Pads, reset and power** are Tiny Tapeout's and are not modelled beyond
   the gate-level simulation.
 - **Hardware.** Nothing has run on silicon yet. The host driver has run in
