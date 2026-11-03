@@ -285,6 +285,68 @@ class I2cDevice:
             got.append(("start", bool((w >> 8) & 1)) if w >= 0x100 else w)
 
 
+class JtagController:
+    """JTAG controller (jtag.hex): P0 TCK, P1 TMS, P2 TDI, P3 TDO. TCK runs
+    at core clock / (5 x clkdiv), 2 MHz at 10 MHz with clkdiv 0 or 1."""
+
+    def __init__(self, chip, image, clkdiv=0):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(sideset_base=0, sideset_count=1, out_base=1, out_count=2,
+                       in_base=3, threshold=16, clkdiv=clkdiv)
+        chip.set_pin_modes({0: PUSH_PULL, 1: PUSH_PULL, 2: PUSH_PULL})
+        chip.run()
+
+    def scan(self, tms, tdi):
+        """Clock len(tms) times with the given TMS and TDI bits; return the
+        TDO bit sampled before each rising edge."""
+        n = len(tms)
+        words = []
+        for start in range(0, n, 8):
+            w = 0
+            for k in range(min(8, n - start)):
+                w |= (tms[start + k] & 1) << (2 * k)
+                w |= (tdi[start + k] & 1) << (2 * k + 1)
+            words.append(w)
+        got = []
+        self.chip.push(n - 1)
+        for w in words:
+            self.chip.push(w)
+            r = self.chip.try_pop()  # keep RX draining so neither FIFO jams
+            if r is not None:
+                got.append(r)
+        while len(got) < len(words):
+            got.append(self.chip.pop())
+        tdo = []
+        for i, w in enumerate(got):
+            for k in range(min(8, n - 8 * i)):
+                tdo.append((w >> k) & 1)
+        return tdo
+
+    def reset(self):
+        """Five clocks with TMS high reach Test-Logic-Reset from any state;
+        one more with TMS low parks the TAP in Run-Test/Idle."""
+        self.scan([1, 1, 1, 1, 1, 0], [0] * 6)
+
+    def _shift(self, prefix, value, n):
+        bits = [(value >> i) & 1 for i in range(n)]
+        tms = prefix + [0] * (n - 1) + [1] + [1, 0]  # last bit exits; update; idle
+        tdi = [0] * len(prefix) + bits + [0, 0]
+        tdo = self.scan(tms, tdi)[len(prefix):len(prefix) + n]
+        return sum(b << i for i, b in enumerate(tdo))
+
+    def shift_ir(self, value, n):
+        """From Run-Test/Idle: shift an n-bit instruction in (LSB first),
+        return what the IR captured, end in Run-Test/Idle."""
+        return self._shift([1, 1, 0, 0], value, n)
+
+    def shift_dr(self, value, n):
+        """From Run-Test/Idle: shift n bits through the selected data
+        register, return what it held, end in Run-Test/Idle."""
+        return self._shift([1, 0, 0], value, n)
+
+
 class SpiDevice:
     """The chip as a mode-0 SPI device (spi_target.hex): P0 SCK, P1 MOSI,
     P2 MISO, P3 CS_N. The host must keep replies queued ahead of the

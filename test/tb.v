@@ -1,6 +1,7 @@
 `timescale 1ns / 1ps
 // A third-party SPI flash model (picosoc), compiled before default_nettype.
 `include "spiflash.v"
+`include "jtag_tap.v"
 `default_nettype none
 
 /* This testbench just instantiates the module and makes some convenient wires
@@ -36,6 +37,8 @@ module tb ();
   //   3: UART, chip TX on P0, chip RX on P1
   //   4: an SPI controller (cocotbext-spi) driving the chip as a device:
   //      SCK on P0, MOSI on P1, CS_N on P3; the chip's MISO on P2
+  //   5: a JTAG device (jtag_tap.v) on the chip's TCK (P0), TMS (P1),
+  //      TDI (P2) and TDO (P3); cocotbext-jtag's monitor watches the wires
   reg [2:0] dev_mode = 0;
   reg i2c_sda_dev = 1;  // the device's drives, 1 = released
   reg i2c_scl_dev = 1;
@@ -62,11 +65,22 @@ module tb ();
   reg spi_mosi = 1;
   reg spi_cs = 1;  // active low
   wire spi_miso = uio_out[2];
+  wire jtag_tck = (dev_mode == 3'd5) && uio_out[0];
+  wire jtag_tms = uio_out[1];
+  wire jtag_tdi = uio_out[2];
+  wire jtag_tdo;
+  jtag_tap tap (
+      .tck(jtag_tck),
+      .tms(jtag_tms),
+      .tdi(jtag_tdi),
+      .tdo(jtag_tdo)
+  );
   wire [7:0] uio_in_dut =
       dev_mode == 3'd1 ? {6'b111111, i2c_scl, i2c_sda} :
       dev_mode == 3'd2 ? {5'b11111, flash_io1, 2'b11} :
       dev_mode == 3'd3 ? {6'b111111, uart_rx, 1'b1} :
-      dev_mode == 3'd4 ? {4'b1111, spi_cs, 1'b1, spi_mosi, spi_sclk} : uio_in;
+      dev_mode == 3'd4 ? {4'b1111, spi_cs, 1'b1, spi_mosi, spi_sclk} :
+      dev_mode == 3'd5 ? {4'b1111, jtag_tdo, 3'b111} : uio_in;
 
   // Replace tt_um_example with your module name:
   tt_um_tavelarocque_protocol_emulator user_project (

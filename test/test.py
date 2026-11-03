@@ -1062,3 +1062,49 @@ async def test_host_driver_devices(dut):
     assert list(spi_master.read_nowait()) == [0xA1, 0xB2, 0xC3]
     transfers = await bridge(spi_device.transfers)()
     assert transfers == [[0x9F, 0x01, 0x02]], transfers
+
+
+
+# --- JTAG: the chip as a JTAG controller, judged by cocotbext-jtag's monitor --
+
+from cocotbext.jtag import JTAGBus, JTAGMonitor  # noqa: E402
+
+JTAG_IDCODE = 0x1BADC0DE  # jtag_tap.v's IDCODE parameter
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_thirdparty_jtag(dut):
+    """The JTAG firmware, driven through the board driver, against a TAP
+    written from IEEE 1149.1 (test/jtag_tap.v): reset, read the IDCODE, select
+    a user register, write it, read it back, then BYPASS. cocotbext-jtag's
+    passive monitor decodes every scan on the wires, separately from the
+    driver's own reading of TDO."""
+    await reset(dut)
+    dut.dev_mode.value = 5
+    monitor = JTAGMonitor(JTAGBus.from_prefix(dut, "jtag"))
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        j = pe.JtagController(chip, firmware("jtag"))
+        j.reset()
+        idcode = j.shift_dr(0, 32)  # IDCODE is selected after reset
+        captured = j.shift_ir(0b1000, 4)  # USER
+        before = j.shift_dr(0xCAFEF00D, 32)
+        after = j.shift_dr(0x12345678, 32)
+        j.shift_ir(0b1111, 4)  # BYPASS
+        bypass = j.shift_dr(0b1011, 4)
+        return idcode, captured, before, after, bypass
+
+    idcode, captured, before, after, bypass = await session()
+    assert idcode == JTAG_IDCODE, f"IDCODE {idcode:#x}"
+    assert captured == 0b0101, f"IR capture {captured:#x}"  # 1149.1: low bits 01
+    assert (before, after) == (0, 0xCAFEF00D), f"USER {before:#x} {after:#x}"
+    assert bypass == 0b0110, f"BYPASS {bypass:#b}"  # one clock of delay
+    seen = [(t.ir_val, t.dr_cnt, t.tdi, t.tdo) for t in monitor.queue_txn]
+    assert seen == [
+        (0x0, 32, 0, JTAG_IDCODE),
+        (0x8, 32, 0xCAFEF00D, 0),
+        (0x8, 32, 0x12345678, 0xCAFEF00D),
+        (0xF, 4, 0b1011, 0b0110),
+    ], f"monitor saw {seen}"

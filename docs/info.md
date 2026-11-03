@@ -86,6 +86,13 @@ I2C read on thread 0 and each byte read comes out over SPI with no further
 host involvement, one SPI transfer per I2C read. `test/test.py`
 (`test_bridge`) has the full register setup.
 
+JTAG controller: `test/jtag.hex` (11 words) drives TCK on P0 (side-set),
+TMS on P1 and TDI on P2, and samples TDO on P3 (SIDESET 0x10, OUT 0x21, IN
+base 3, THRESHOLD 16; P0-P2 push-pull). Each scan is one word holding the
+number of clocks minus one, then one word per 8 clocks of (TMS, TDI) bit
+pairs; TDO comes back 8 bits per word. The board driver's `JtagController`
+wraps this as `reset()`, `shift_ir()` and `shift_dr()`.
+
 ## External hardware
 
 None required. A logic analyser or USB-serial adapter on the protocol pins

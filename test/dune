@@ -96,3 +96,11 @@
   (with-stdout-to
    spi_target.hex
    (run %{dep:../bin/firmware_hex.exe} spi_target))))
+
+(rule
+ (targets jtag.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   jtag.hex
+   (run %{dep:../bin/firmware_hex.exe} jtag))))
