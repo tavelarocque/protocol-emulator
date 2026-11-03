@@ -37,6 +37,41 @@ jobs:
       - name: GL test
         uses: TinyTapeout/tt-gds-action/gl_test@ihp-cmos5l
 
+  gl_equiv:
+    # Formal equivalence of this build's gate netlist and the RTL
+    # (gl_equiv/check.py), plus four netlist bugs that must each break it.
+    needs: gds
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v6
+
+      - name: Download the gate netlist
+        uses: actions/download-artifact@v7
+        with:
+          name: tt_submission
+          path: gl
+
+      - name: Cell library from the PDK revision the layout used
+        run: |
+          rev=$(jq -r .PDK_VERSION gl/tt_submission/pdk.json)
+          lib=ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/lib
+          git init -q pdk && cd pdk
+          git remote add origin https://github.com/IHP-GmbH/IHP-Open-PDK.git
+          git sparse-checkout set --no-cone "$lib/sg13cmos5l_stdcell_typ_1p20V_25C.lib"
+          git fetch -q --depth 1 --filter=blob:none origin "$rev"
+          git checkout -q FETCH_HEAD
+          echo "LIB=$PWD/$lib/sg13cmos5l_stdcell_typ_1p20V_25C.lib" >> "$GITHUB_ENV"
+
+      - name: Install Yosys
+        run: pip install yowasp-yosys==0.70.0.0.post1259
+
+      - name: Prove the netlist equal to the RTL
+        run: |
+          python3 gl_equiv/check.py --mutants --yosys yowasp-yosys \
+            --lib "$LIB" --netlist gl/tt_submission/tt_um_tavelarocque_protocol_emulator.v \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
   viewer:
     needs: gds
     runs-on: ubuntu-24.04

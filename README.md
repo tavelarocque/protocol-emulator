@@ -23,7 +23,8 @@ repeated START, and clock stretching; as an SPI device it answers an outside
 mode-0 controller (cocotbext-spi's, at 500 kHz) full duplex. The whole chip, from the Tiny Tapeout
 pins in to the pins out (SPI host port, register file, both threads and the
 logic joining them), is formally proven equivalent to an independent
-specification.
+specification, and after every layout the post-layout gate netlist is
+formally proven equal to the RTL.
 
 ## Architecture
 
@@ -105,12 +106,13 @@ independent protocol oracles.
 | SWD | the clock engine and the driver's framing | an SWD target written from Arm's ADIv5 (`test/swd_dp.v`), in cocotb on the RTL and the gate-level netlist: silent until the JTAG-to-SWD switch, then DPIDR, a power-up request acknowledged, an AP's IDR through a posted read and RDBUFF, an AP register written and read back; on the model, 300 random sequences checked against the engine's contract |
 | Third-party devices | the chip against device models written by other people from real datasheets | picosoc's Verilog SPI flash (wake, then a 0x03 read at a 24-bit address), cocotbext-i2c's I2C EEPROM (write, pointer set, read back), cocotbext-uart's UART sender and receiver, and, with the roles reversed, cocotbext-i2c's I2C controller driving the chip as a device at 400 kHz (probe, a write that makes it stretch the clock, a register read through a repeated START), cocotbext-spi's SPI controller reading the chip as a device (a JEDEC ID read and a command), and cocotbext-jtag's monitor decoding every scan while the chip, as a JTAG controller, reads an IEEE 1149.1 device's IDCODE, writes and reads back a register and goes through BYPASS; on the RTL and the gate-level netlist |
 | Silicon netlist | post-layout gates | the same chip-level tests in cocotb, with separate Python protocol models, on RTL and gate-level netlist |
+| **Formal, RTL to gates** | the post-layout netlist against the generated Verilog | **Yosys equivalence proof** in CI after every layout ([`gl_equiv/`](gl_equiv)): 1,840 signals paired by name (every output pin and all 1,796 flip-flops), a base case from any state through one reset cycle, and an induction step, so the netlist and the RTL agree on every pin from the first cycle after reset; cells modelled from IHP's Liberty file. Four bugs planted in the netlist each break it |
 | **Formal** | the whole chip RTL against an independent spec | **SAT equivalence proof** (Hardcaml_verify + Z3): one clock of the chip's top level equals one clock of [`sim/spec_top.ml`](sim/spec_top.ml), for every state of every register and every input on the pins. The spec is a second description of everything: the SPI host port and register file (written from the protocol and register map in `hw/top.ml`'s header, with the map as a table and reads as one-hot terms), around [`sim/spec_core.ml`](sim/spec_core.ml) (program memory, input synchronisers, pin levels, clock dividers, FIFOs, CHAIN, pin priority, pads, from the ISA document and the reference model), with [`sim/spec_step.ml`](sim/spec_step.ml) as each thread's datapath, which itself matches the reference model on all 65,536 instruction words. The two sides share only register names, widths, reset values and the FIFO's state encoding, which the checker needs to pair registers. Bugs planted on the spec's side break the proof, so it is not vacuous |
 
 Three practices run through all of it.
 
 **Mutation testing, kept in the repo.** Every layer has deliberately planted
-bugs, 43 in all, kept as code, and the suite fails if any survives. A test
+bugs, 47 in all, kept as code, and the suite fails if any survives. A test
 suite that has never failed has not been shown to work.
 
 | Layer | Planted bugs | Caught |
@@ -127,6 +129,7 @@ suite that has never failed has not been shown to work.
 | SPI device firmware | 5: MOSI sampled after SCK falls, no wait for SCK to fall, deselect never seen, reply bits lost to the poll, deselect dropping the queued reply | all 5 |
 | SPI firmware | MOSI moved after SCK rises | caught by the mode-0 checker |
 | Host driver | pin modes packed one bit per pin | caught. All four driver bugs (this one, the JTAG swap and the two SWD ones) are planted by one cocotb test, which also checks each scenario passes with the real driver |
+| Gate netlist | 4: a NAND turned NOR, a flip-flop stuck in reset, two flip-flops' inputs crossed, a wrong reset value | all 4, by the RTL-to-netlist proof (the first three break its induction step, the last its base case) |
 
 Two oracles exist because each misses things alone. A start bit one clock
 short decodes fine at a real receiver in all 300 test cases and is caught
@@ -165,6 +168,7 @@ bin/     Verilog generator, firmware hex generator
 host/    MicroPython driver for the demo board's RP2040 (tested in cocotb, unchanged)
 src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v
 test/    cocotb testbench (RTL and gate-level) + generated firmware .hex
+gl_equiv/ Yosys proof that the post-layout netlist equals the RTL (run in CI)
 docs/    design-and-verification.md (the report), isa.md (instruction set),
          info.md (datasheet), coverage-closure.md, related-work.md
 ```
@@ -185,7 +189,10 @@ dune promote    # accept expect-test output after checking the diff
 ```
 
 The cocotb tests need Icarus Verilog and `pip install -r test/requirements.txt`,
-then `cd test && make`.
+then `cd test && make`. The RTL-to-netlist proof needs Yosys
+(`pip install yowasp-yosys`), the netlist from a layout build's
+`tt_submission` artifact and IHP's standard-cell Liberty file:
+`python3 gl_equiv/check.py --netlist <netlist.v> --lib <cells.lib> --mutants --yosys yowasp-yosys`.
 
 ## Metrics
 

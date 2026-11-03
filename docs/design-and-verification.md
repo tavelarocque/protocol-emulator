@@ -14,7 +14,7 @@ AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
 |---|---|---|---|
 | C1 | The RTL does what the instruction set and register map say, in every state, including states no test reaches | SAT equivalence proof of the whole chip against an independent spec; the spec checked against the reference model | Proof, for the RTL. The spec's agreement with the reference model is tested, not proven (section 3) |
 | C2 | The firmware implements each protocol correctly at the pins | Protocol oracles on the model and the RTL; device models written by other people from real datasheets and standards | Tests, judged by independent oracles |
-| C3 | The gate-level netlist behaves like the RTL | The cocotb suite rerun on the post-layout netlist; LVS; Tiny Tapeout precheck | Tests plus layout checks; no formal RTL-to-gates check (section 7) |
+| C3 | The gate-level netlist behaves like the RTL | Formal equivalence of the post-layout netlist and the generated Verilog (Yosys, in CI after every layout); the cocotb suite rerun on the netlist; LVS | Proof, from the first cycle after a reset, on every output pin; Hardcaml's Verilog generation itself is trusted (section 7) |
 | C4 | The chip meets timing at its rated 10 MHz | Static timing analysis at 50 MHz, slow corner | About 80 ns of slack at 10 MHz; 50 MHz missed by 0.14 ns at the slow corner only |
 | C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb | Tests in simulation; not yet run on hardware |
 
@@ -95,7 +95,7 @@ flowchart TB
     stop -- "PROVED: one clock equal<br/>from every state (SAT)" --> rtl
     model -- "tested: lockstep, 400 random<br/>programs + 10 directed" --> rtl
     rtl -- "Hardcaml generator;<br/>CI checks it is current" --> v
-    v -- "synthesis and layout:<br/>gate-level tests, LVS" --> gl
+    v -- "PROVED: equal on every pin<br/>after reset (Yosys)" --> gl
     fw -- "run on model, RTL<br/>and gates" --> oracles
 ```
 
@@ -167,6 +167,30 @@ fits: the JTAG device (`test/jtag_tap.v`, IEEE 1149.1) and the SWD target
 check on the wire protocol; SWD has nothing third-party, so its tests share
 an author with the driver, which is a weaker check.
 
+**From the RTL to the gates.** After every layout, CI proves the
+post-layout netlist equal to the generated Verilog (`gl_equiv/`, Yosys).
+Every flip-flop in the netlist keeps its RTL register's name, so the two
+sides are paired by name: 1,840 pairs, every output pin and every one of the
+netlist's 1,796 flip-flops. A pairing is only a candidate invariant; a wrong
+one makes the proof fail, never pass. Two proofs then cover every run from
+reset:
+
+- base case: from any state, after one clock with `rst_n` low, every pair
+  agrees, for any inputs (a SAT proof over two cycles);
+- induction step: if every pair agrees in one cycle, every pair agrees in
+  the next, for any state and any inputs (`equiv_induct`).
+
+So from the first cycle after a reset, the netlist and the RTL drive the same
+value on every output pin, whatever the inputs. The base case can rest on one
+reset cycle because every register in the generated Verilog has a
+synchronous clear: all 151 register blocks begin with it. Four bugs planted
+in the netlist must each break the proof: a NAND turned into a NOR, a
+flip-flop held in reset, two flip-flops' inputs crossed (all three break the
+induction step), and a flip-flop that comes out of reset with the wrong
+value (breaks the base case). Tiny Tapeout's own action set has an `eqy`
+check of this kind for its Sky130 process only; this one is adapted to IHP's
+cells.
+
 ## 4. Which layer catches which bug
 
 | Bug class | Example | Caught by | Cannot be caught by |
@@ -178,7 +202,7 @@ an author with the driver, which is a weaker check.
 | Firmware timing | a stop bit one clock short; SDA moved before SCL falls | cycle-exact oracles; bus checkers | a forgiving receiver: a real UART receiver caught the bring-up's short stop bit in 13 of 300 cases, and the firmware's short start bit in none (`sim/test_uart_tx.ml`, `sim/test_isa.ml`) |
 | Firmware and project oracles share a misreading of a protocol | (none found) | third-party device models | the project's own oracles |
 | Corner cases a typical controller never produces | an I2C controller with zero data hold time | spec-derived reference controllers swept across speed and hold time | any controller with ordinary data hold time |
-| Synthesis or layout | a mis-synthesised mux | gate-level cocotb suite; LVS | every OCaml test (they see only the RTL) |
+| Synthesis or layout | a mis-synthesised mux; a flip-flop stuck in reset | the RTL-to-netlist proof; gate-level cocotb suite; LVS | every OCaml test (they see only the RTL) |
 | Timing | a long path at the slow corner | static timing analysis | all simulation |
 | Metastability on asynchronous inputs | an unsynchronised pin read | design review; synchronisers by construction | all simulation, and the proof (the model is synchronous) |
 | Host driver | pin modes packed one bit per pin | the driver run unchanged against the chip in cocotb | every test that drives the chip with its own code |
@@ -191,7 +215,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 43 in all:
+fails if any survives. There are 47 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -207,6 +231,7 @@ fails if any survives. There are 43 in all:
 | JTAG firmware | 3 | `sim/test_jtag.ml` |
 | SWD firmware | 3 | `sim/test_swd.ml` |
 | JTAG, SWD and host drivers | 4 | `test_driver_planted_bugs` in `test/test.py` |
+| gate netlist | 4 | `gl_equiv/check.py`: the RTL-to-netlist proof |
 
 The driver bugs are planted by replacing one driver method for one
 scenario. The same test first runs each scenario with the real driver and
@@ -215,7 +240,7 @@ count as a catch. The SPI host-port bug is a parameter of `hw/top.ml`, off
 by default, following `hw/pe_core.ml`; the generated Verilog is
 byte-identical with or without the parameter in the source.
 
-All 43 are caught. Two candidates turned out not to be bugs, and the
+All 47 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -274,13 +299,15 @@ answer it.
 
 ## 7. What is not covered
 
-- **RTL to gates is tested, not proven.** The proof is on the Hardcaml
-  circuit. The generated Verilog is produced by Hardcaml and checked to be
-  current, but not proven equal to it. Synthesis and layout are checked by
-  rerunning the cocotb suite on the post-layout netlist and by LVS, which
-  checks layout against netlist, not netlist against RTL. A formal
-  equivalence check of the generated Verilog against the synthesised netlist
-  (for example with Yosys) would close this.
+- **Hardcaml's Verilog generator is trusted.** The core proofs are on the
+  Hardcaml circuit and the netlist proof starts from the generated Verilog;
+  the step between them is Hardcaml's own, checked only by CI regenerating
+  the Verilog and failing if the committed copy differs, and by every
+  simulation running on that Verilog.
+- **Below the netlist, the PDK is trusted.** The netlist proof takes each
+  cell's logic from IHP's Liberty file. LVS checks the layout against the
+  netlist; that each cell's transistors compute its Liberty function is
+  IHP's to guarantee.
 - **The spec against the reference model** is tested over all instruction
   words but sampled over states (section 3).
 - **Metastability** is handled by design: two-flip-flop synchronisers on
@@ -311,9 +338,12 @@ dune build      # regenerate the Verilog and the firmware images
 dune runtest    # OCaml suite: ISA, lockstep, coverage closure, formal proofs,
                 # firmware, chip-level tests (the proofs need z3)
 cd test && make # cocotb suite on the RTL (Icarus Verilog)
+python3 gl_equiv/check.py --netlist <netlist.v> --lib <cells.lib> --mutants
+                # RTL-to-netlist proof (Yosys), on a layout build's netlist
 ```
 
 The setup is in the [README](../README.md). In recent GitHub Actions runs
 the OCaml suite took about 16 minutes and the cocotb suite under 2. The
 layout itself takes 4 to 5 hours; the whole workflow, with the precheck and
-the gate-level rerun, took 6 to 7.
+the gate-level rerun, took 6 to 7. The RTL-to-netlist proof with its four
+planted bugs takes about 7 minutes on two cores.

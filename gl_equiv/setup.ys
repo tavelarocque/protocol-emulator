@@ -1,0 +1,32 @@
+# Shared by step.ys and base.ys. Run from a directory holding project.v and
+# protocol_emulator.v (the RTL, from src/), gate.v (the post-layout netlist)
+# and cells.lib (the PDK's standard-cell Liberty file).
+
+# Gold: the RTL. splitnets names every register bit "name[i]", the way the
+# netlist names each flip-flop's output, so the two can be paired by name.
+read_verilog project.v protocol_emulator.v
+hierarchy -top tt_um_tavelarocque_protocol_emulator
+proc; flatten; opt_clean; splitnets
+rename tt_um_tavelarocque_protocol_emulator gold
+design -stash gold
+
+# Gate: the netlist, with each cell's logic taken from its Liberty function.
+# Only fill, decap and antenna cells have no function, and none has an output.
+read_liberty -ignore_miss_func cells.lib
+read_verilog gate.v
+hierarchy -top tt_um_tavelarocque_protocol_emulator
+flatten
+# Every flip-flop's asynchronous reset is tied inactive (a tie-high cell);
+# reset is the synchronous clear in the logic, as in the RTL.
+opt_expr; opt_clean; opt_dff; opt_clean
+rename tt_um_tavelarocque_protocol_emulator gate
+design -stash gate
+
+design -copy-from gold -as gold gold
+design -copy-from gate -as gate gate
+# Pair the ports and every signal with the same name on both sides. Pairing
+# is only a guess at an invariant: a wrong pair makes the proof fail, never
+# pass.
+equiv_make gold gate equiv
+hierarchy -top equiv
+async2sync

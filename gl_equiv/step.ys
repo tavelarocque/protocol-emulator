@@ -1,0 +1,5 @@
+# Induction step: if every paired signal agrees in one cycle, it agrees in
+# the next, for every state and every input.
+script setup.ys
+equiv_induct -seq 1
+equiv_status -assert
