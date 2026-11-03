@@ -182,3 +182,29 @@ module Receiver = struct
               if pid lsr 4 <> lnot pid land 0xF then Error (Pid_check pid) else Ok bytes))))
   ;;
 end
+
+(* The bytes after SYNC from line levels sampled once per bit, as a receiver
+   that has recovered the clock records them: from the first K (any part of
+   SYNC may be missing before it), NRZI from idle J undone, stuffing undone,
+   SYNC dropped through its final 1. *)
+let decode_levels (levels : line list) =
+  let raw = List.folding_map levels ~init:J ~f:(fun prev l -> l, equal_line prev l) in
+  let rec unstuff run = function
+    | [] -> Ok []
+    | b :: rest ->
+      if run = 6
+      then if b then Error "stuffing violation" else unstuff 0 rest
+      else Result.map (unstuff (if b then run + 1 else 0) rest) ~f:(fun tl -> b :: tl)
+  in
+  Result.bind (unstuff 0 raw) ~f:(fun bits ->
+    match List.drop_while bits ~f:not with
+    | [] -> Error "no SYNC"
+    | _end_of_sync :: rest ->
+      if List.length rest % 8 <> 0 || List.is_empty rest
+      then Error (sprintf "%d bits after SYNC" (List.length rest))
+      else
+        Ok
+          (List.chunks_of rest ~length:8
+           |> List.map ~f:(List.foldi ~init:0 ~f:(fun i acc b ->
+             acc lor (Bool.to_int b lsl i)))))
+;;

@@ -20,7 +20,10 @@ and a UART run side by side from one memory image. The chip can also be the
 device rather than the controller: as an I2C target it answers an outside
 controller (cocotbext-i2c's, at 400 kHz) with writes, register reads through a
 repeated START, and clock stretching; as an SPI device it answers an outside
-mode-0 controller (cocotbext-spi's, at 500 kHz) full duplex. The whole chip, from the Tiny Tapeout
+mode-0 controller (cocotbext-spi's, at 500 kHz) full duplex. It is also a
+low-speed USB host (the competition's stretch goal): at a 12 MHz core clock
+it reads a device descriptor from a third-party USB device core with a full
+control transfer, receiving with its own clock recovery. The whole chip, from the Tiny Tapeout
 pins in to the pins out (SPI host port, register file, both threads and the
 logic joining them), is formally proven equivalent to an independent
 specification, and after every layout the post-layout gate netlist is
@@ -64,7 +67,10 @@ host), SPI device in 23 (mode 0 up to 625 kHz at 10 MHz, deselect seen
 even mid-byte), JTAG controller in 11 (any TMS/TDI sequence the host asks
 for, TDO back, TCK at 2 MHz), and an Arm SWD clock engine in 11 (the board
 driver adds the SWD framing: line reset, the JTAG-to-SWD switch, parity, ACK,
-turnaround, posted AP reads); program memory is 64 words. The assembler places a program at any origin, so
+turnaround, posted AP reads), and a low-speed USB engine in 49 (send a packet
+at exactly 8 clocks per bit with EOP, or receive one with clock recovery
+that re-aligns on every edge and detects EOP; the board driver builds and
+checks packets, CRCs and the control-transfer logic); program memory is 64 words. The assembler places a program at any origin, so
 two fit in one image: full-duplex UART (TX and RX on the two threads),
 side-set SPI beside UART, and the bridge, divider I2C
 beside side-set SPI with CHAIN carrying every byte read over I2C out over SPI.
@@ -104,6 +110,7 @@ independent protocol oracles.
 | Device mode | the I2C and SPI device firmware, on the model and the chip | the spec-derived reference controller (with one clock of data hold time and with none, 7 to 62 clocks of SCL low) writing, reading and register-reading through a repeated START, judged by the bus checker; a shared bus where the chip must ignore a model device at another address; the host late on both FIFOs so the chip must stretch; two model chips talking, the controller firmware on one and the target on the other; the whole chip over SPI. For SPI, the same with a spec-derived mode-0 controller, with and without gaps between bytes, a transfer abandoned mid-byte, and two chips (controller and device firmware) on four wires |
 | Host driver | `host/protocol_emulator.py`, the MicroPython code the demo board runs | the same file, unchanged, run against the chip in cocotb (on the RTL and the gate-level netlist): it loads firmware and configures threads over the bit-banged host port, sends UART to cocotbext-uart's receiver, reads picosoc's SPI flash, and serves cocotbext-i2c's and cocotbext-spi's controllers as an I2C and an SPI device |
 | SWD | the clock engine and the driver's framing | an SWD target written from Arm's ADIv5 (`test/swd_dp.v`), in cocotb on the RTL and the gate-level netlist: silent until the JTAG-to-SWD switch, then DPIDR, a power-up request acknowledged, an AP's IDR through a posted read and RDBUFF, an AP register written and read back; on the model, 300 random sequences checked against the engine's contract |
+| USB | the low-speed engine and the driver's packets | on the model: the encoder reproduces captured USB packets; 150 random batches of sent packets decode at a reference receiver written from the USB 1.1 spec and match the ideal waveform to the clock; 300 received packets from a device whose clock is up to 1.5% off either way; whole IN transactions with the ACK 2 to 7.5 bit times after the data, as the spec requires. In cocotb, against usbhostslave's USB device (third-party, LGPL, test only): SETUP acknowledged, a corrupted CRC16 ignored, and a full GET_DESCRIPTOR control transfer whose 18 bytes match the device's ROM |
 | Third-party devices | the chip against device models written by other people from real datasheets | picosoc's Verilog SPI flash (wake, then a 0x03 read at a 24-bit address), cocotbext-i2c's I2C EEPROM (write, pointer set, read back), cocotbext-uart's UART sender and receiver, and, with the roles reversed, cocotbext-i2c's I2C controller driving the chip as a device at 400 kHz (probe, a write that makes it stretch the clock, a register read through a repeated START), cocotbext-spi's SPI controller reading the chip as a device (a JEDEC ID read and a command), and cocotbext-jtag's monitor decoding every scan while the chip, as a JTAG controller, reads an IEEE 1149.1 device's IDCODE, writes and reads back a register and goes through BYPASS; on the RTL and the gate-level netlist |
 | Silicon netlist | post-layout gates | the same chip-level tests in cocotb, with separate Python protocol models, on RTL and gate-level netlist |
 | **Formal, RTL to gates** | the post-layout netlist against the generated Verilog | **Yosys equivalence proof** in CI after every layout ([`gl_equiv/`](gl_equiv)): 1,840 signals paired by name (every output pin and all 1,796 flip-flops), a base case from any state through one reset cycle, and an induction step, so the netlist and the RTL agree on every pin from the first cycle after reset; cells modelled from IHP's Liberty file. Four bugs planted in the netlist each break it |
@@ -112,7 +119,7 @@ independent protocol oracles.
 Three practices run through all of it.
 
 **Mutation testing, kept in the repo.** Every layer has deliberately planted
-bugs, 47 in all, kept as code, and the suite fails if any survives. A test
+bugs, 56 in all, kept as code, and the suite fails if any survives. A test
 suite that has never failed has not been shown to work.
 
 | Layer | Planted bugs | Caught |
@@ -129,6 +136,7 @@ suite that has never failed has not been shown to work.
 | SPI device firmware | 5: MOSI sampled after SCK falls, no wait for SCK to fall, deselect never seen, reply bits lost to the poll, deselect dropping the queued reply | all 5 |
 | SPI firmware | MOSI moved after SCK rises | caught by the mode-0 checker |
 | Host driver | pin modes packed one bit per pin | caught. All four driver bugs (this one, the JTAG swap and the two SWD ones) are planted by one cocotb test, which also checks each scenario passes with the real driver |
+| USB | 7 in the firmware (4 sending: a word boundary one clock short, SE0 one bit time, drivers released during EOP's J, no idle gap between packets; 3 receiving: waiting on the wrong pin, no end marker, sampling late after an edge), 2 in the driver (CRC16 not inverted, received levels read inverted) | all 9; the short word boundary only by the cycle-exact check, the released drivers and missing gap only by the timing checks, since a receiver forgives them |
 | Gate netlist | 4: a NAND turned NOR, a flip-flop stuck in reset, two flip-flops' inputs crossed, a wrong reset value | all 4, by the RTL-to-netlist proof (the first three break its induction step, the last its base case) |
 
 Two oracles exist because each misses things alone. A start bit one clock
@@ -167,7 +175,8 @@ sim/     OCaml tests: ISA, lockstep harness, random and directed differential te
 bin/     Verilog generator, firmware hex generator
 host/    MicroPython driver for the demo board's RP2040 (tested in cocotb, unchanged)
 src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v
-test/    cocotb testbench (RTL and gate-level) + generated firmware .hex
+test/    cocotb testbench (RTL and gate-level) + generated firmware .hex;
+         usbhostslave/ is a third-party USB device core (LGPL, test only)
 gl_equiv/ Yosys proof that the post-layout netlist equals the RTL (run in CI)
 docs/    design-and-verification.md (the report), isa.md (instruction set),
          info.md (datasheet), coverage-closure.md, related-work.md

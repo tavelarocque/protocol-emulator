@@ -101,7 +101,22 @@ releases the line); the samples come back 16 per word. The board driver's
 `SwdController` builds SWD on top: `connect()` (line reset, JTAG-to-SWD,
 DPIDR), `read_dp`, `write_dp`, `read_ap`, `write_ap`.
 
+Low-speed USB host: `test/usb_host.hex` holds the USB engine (49 words, at
+5) and the echo program (at 0), which relays to it through CHAIN so the two
+threads' FIFOs buffer a whole transaction. The core clock must be 12 MHz
+(8 clocks per bit at 1.5 Mbit/s). The chip drives a USB 1.1 transceiver in
+VO/FSE0 mode, since firmware cannot release a push-pull pin: VP on P0 and
+VM on P1 (the transceiver's single-ended receivers), VO on P2, FSE0 on P3
+and OE_N on P4 (push-pull). The board driver's `UsbHost` sets it up and
+offers `transaction()` (packets to send and one receive, with the engine
+doing EOP, turnaround and clock recovery) and `control_read()` (SETUP, IN
+data stages, OUT status). Commands go to thread 0 and results come from
+thread 1, whichever thread the engine runs on.
+
 ## External hardware
 
 None required. A logic analyser or USB-serial adapter on the protocol pins
-shows what the firmware is doing.
+shows what the firmware is doing. USB needs a USB 1.1 transceiver (VO/FSE0
+mode, such as a TUSB1106 or MAX3349E) between the protocol pins and the USB
+connector, the host's 15 kohm pull-downs on D+ and D-, and 5 V for the
+device.

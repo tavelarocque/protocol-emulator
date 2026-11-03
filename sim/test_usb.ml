@@ -1,4 +1,4 @@
-(* Low-speed USB transmit ([Firmware.usb_tx]) on the model chip, through a
+(* The low-speed USB engine ([Firmware.usb]) on the model chip, through a
    model of a USB 1.1 transceiver in VO/FSE0 mode, judged two ways:
    - the reference receiver ([Usb_model.Receiver], written from the USB 1.1
      spec) must decode every packet back to the bytes that were sent;
@@ -6,7 +6,11 @@
      exactly 8 clocks, the drivers on from the first bit of SYNC to the end
      of EOP's J and off otherwise. The receiver alone would forgive some
      timing faults (a bus idles at J, so drivers released one bit early
-     look the same to it); this check does not. *)
+     look the same to it); this check does not.
+   Receiving is judged against a device model whose clock is up to 1.5% off
+   either way (the low-speed tolerance), from a random phase: the recorded
+   levels must decode to the bytes sent, and in a whole IN transaction the
+   engine's ACK must start 2 to 7.5 bit times after the data's EOP. *)
 
 open! Core
 module Isa = Pe_model.Isa
@@ -89,18 +93,18 @@ type trace =
 
 (* Sends [packets] (each a list of bytes after SYNC) back to back, the host
    keeping the TX FIFO topped up, and records the bus. *)
-let run ?(source = Firmware.usb_tx) packets =
+let run ?(source = Firmware.usb) packets =
   let m =
     Isa.create
       ~program:(Asm.assemble source)
       ~pin_modes:modes
-      ~threads:[ Firmware.usb_tx_config ]
+      ~threads:[ Firmware.usb_config ~origin:0 ]
   in
   let pending =
     Queue.of_list
       (List.concat_map packets ~f:(fun bytes ->
          let lines = Usb.packet_lines bytes in
-         Firmware.usb_tx_words (List.take lines (List.length lines - 3))))
+         Firmware.usb_send_words (List.take lines (List.length lines - 3))))
   in
   let total_bits =
     List.sum (module Int) packets ~f:(fun b -> List.length (Usb.packet_lines b))
@@ -108,7 +112,7 @@ let run ?(source = Firmware.usb_tx) packets =
   let lines = Queue.create ()
   and driven = Queue.create ()
   and line = ref Usb.J in
-  for _ = 1 to (total_bits * 8) + (List.length packets * 40) + 200 do
+  for _ = 1 to (total_bits * 8) + (List.length packets * 60) + 200 do
     (match Queue.peek pending with
      | Some v -> if Isa.push_tx m ~thread:0 v then ignore (Queue.dequeue pending : int option)
      | None -> ());
@@ -171,7 +175,7 @@ let judge packets trace =
 ;;
 
 let%test_unit "program size" =
-  [%test_result: int] (Array.length (Asm.assemble Firmware.usb_tx)) ~expect:17
+  [%test_result: int] (Array.length (Asm.assemble Firmware.usb)) ~expect:49
 ;;
 
 let gen_packet =
@@ -210,8 +214,8 @@ let%test_unit "a long run of 1s is stuffed and still exact" =
 
 let%expect_test "planted firmware bugs: each is caught" =
   let mutate ~pattern ~with_ =
-    let m = String.substr_replace_first Firmware.usb_tx ~pattern ~with_ in
-    assert (not (String.equal m Firmware.usb_tx));
+    let m = String.substr_replace_first Firmware.usb ~pattern ~with_ in
+    assert (not (String.equal m Firmware.usb));
     m
   in
   let packets =
@@ -230,7 +234,7 @@ let%expect_test "planted firmware bugs: each is caught" =
           ~pattern:"set pins, 0         side 0 [3]"
           ~with_:"set pins, 0         side 2 [3]" )
     ; ( "no idle gap between packets"
-      , mutate ~pattern:"set x, 4            side 2" ~with_:"set x, 0            side 2" )
+      , mutate ~pattern:"set y, 9            side 2" ~with_:"set y, 0            side 2" )
     ]
     ~f:(fun (name, source) ->
       printf
@@ -243,13 +247,13 @@ let%expect_test "planted firmware bugs: each is caught" =
     word boundary one clock short      caught: waveform differs from the ideal, cycle for cycle
     SE0 one bit time, not two          caught: (Bad_eop"SE0 is not two bit times followed by J")
     drivers released during EOP's J    caught: only 4 idle clocks between packets
-    no idle gap between packets        caught: only 9 idle clocks between packets
+    no idle gap between packets        caught: only 11 idle clocks between packets
     |}]
 ;;
 
 (* --- As the board uses it: a slow host, a whole transaction buffered ---- *)
 
-let%test_unit "a slow host loads a transaction with thread 1 stopped; it goes out exact" =
+let%test_unit "a slow host loads a transaction with the engine stopped; it goes out exact" =
   let module H = Firmware.Usb_host in
   let packets =
     [ Usb.token ~pid:Usb.Pid.setup ~addr:0 ~endp:0
@@ -259,17 +263,14 @@ let%test_unit "a slow host loads a transaction with thread 1 stopped; it goes ou
   let words =
     List.concat_map packets ~f:(fun bytes ->
       let lines = Usb.packet_lines bytes in
-      Firmware.usb_tx_words (List.take lines (List.length lines - 3)))
+      Firmware.usb_send_words (List.take lines (List.length lines - 3)))
   in
   [%test_result: int] (List.length words) ~expect:10;
   let m =
-    Isa.create
-      ~program:H.image
-      ~pin_modes:modes
-      ~threads:[ H.relay_config; H.tx_config ]
+    Isa.create ~program:H.image ~pin_modes:modes ~threads:(H.configs Tx_buffered)
   in
   Isa.set_chain m true;
-  Isa.set_enabled m ~thread:1 false;
+  Isa.set_enabled m ~thread:(H.engine_thread Tx_buffered) false;
   let lines = Queue.create ()
   and driven = Queue.create ()
   and line = ref Usb.J
@@ -291,11 +292,230 @@ let%test_unit "a slow host loads a transaction with thread 1 stopped; it goes ou
     done
   done;
   [%test_result: bool] (Queue.exists driven ~f:Fn.id) ~expect:false;
-  Isa.set_enabled m ~thread:1 true;
+  Isa.set_enabled m ~thread:(H.engine_thread Tx_buffered) true;
   for _ = 1 to 2000 do
     step ()
   done;
   [%test_result: string option]
     (judge packets { lines = Queue.to_list lines; driven = Queue.to_list driven })
     ~expect:None
+;;
+
+(* --- Receiving ------------------------------------------------------------- *)
+
+let%test_unit "the engine's constants match its program" =
+  let p = Asm.assemble Firmware.usb in
+  [%test_result: Isa.Instruction.op]
+    p.(Firmware.usb_tmo).op
+    ~expect:(Mov { dst = Osr; src = Pins });
+  [%test_result: Isa.Instruction.op] p.(Firmware.usb_idle).op ~expect:Pull;
+  [%test_result: int] Firmware.Usb_host.engine_origin ~expect:5
+;;
+
+(* A device on the bus: once [start] clocks have passed it sends [bytes],
+   each bit [period] clocks long (8 is exact; USB low speed allows 1.5% either
+   way), then idles at J. *)
+let device_line ~start ~period bytes =
+  let lines = Array.of_list (Usb.packet_lines bytes) in
+  fun cycle ->
+    if Float.(of_int cycle < start)
+    then Usb.J
+    else (
+      let k = Float.iround_down_exn ((Float.of_int cycle -. start) /. period) in
+      if k < Array.length lines then lines.(k) else Usb.J)
+;;
+
+(* The engine alone, given one receive command, against [device]; returns
+   the words it pushed once it is idle again. *)
+let receive ?(source = Firmware.usb) device =
+  let m =
+    Isa.create
+      ~program:(Asm.assemble source)
+      ~pin_modes:modes
+      ~threads:[ Firmware.usb_config ~origin:0 ]
+  in
+  assert (Isa.push_tx m ~thread:0 Firmware.usb_receive);
+  let rx = Queue.create () in
+  let cycle = ref 0 in
+  let idle () = (Isa.thread m 0).pc = Firmware.usb_idle && !cycle > 10 in
+  while (not (idle ())) && !cycle < 3000 do
+    Isa.step m ~inputs:(inputs (device !cycle));
+    Option.iter (Isa.pop_rx m ~thread:0) ~f:(Queue.enqueue rx);
+    incr cycle
+  done;
+  Queue.to_list rx
+;;
+
+let gen_device_packet =
+  let open Quickcheck.Generator.Let_syntax in
+  match%bind Int.gen_incl 0 1 with
+  | 0 ->
+    let%map pid = Quickcheck.Generator.of_list Usb.Pid.[ data0; data1 ]
+    and n = Int.gen_incl 0 8
+    and payload = Quickcheck.Generator.list_with_length 8 (Int.gen_incl 0 255) in
+    Usb.data ~pid (List.take payload n)
+  | _ ->
+    let%map pid = Quickcheck.Generator.of_list Usb.Pid.[ ack; nak; stall ] in
+    Usb.handshake ~pid
+;;
+
+let%test_unit "receive: random packets, the sender's clock up to 1.5% off either way" =
+  Quickcheck.test
+    (Quickcheck.Generator.tuple3
+       gen_device_packet
+       (Float.gen_incl (-0.015) 0.015)
+       (Float.gen_incl 20. 120.))
+    ~trials:300
+    ~sexp_of:[%sexp_of: int list * float * float]
+    ~f:(fun (bytes, err, start) ->
+      let words = receive (device_line ~start ~period:(8. *. (1. +. err)) bytes) in
+      [%test_result: (int list, string) Result.t]
+        (Usb.decode_levels (Firmware.usb_levels words))
+        ~expect:(Ok bytes))
+;;
+
+let%test_unit "receive: every 1-bit long run, at both clock extremes" =
+  (* Eight 0xFF bytes: the longest runs without a transition the stuffing
+     allows, where the receiver must hold its timing on timeouts alone. *)
+  let bytes = Usb.data ~pid:Usb.Pid.data1 (List.init 8 ~f:(Fn.const 0xFF)) in
+  List.iter [ -0.015; 0.; 0.015 ] ~f:(fun err ->
+    List.iter [ 20.; 20.3; 20.6; 20.9 ] ~f:(fun start ->
+      let words = receive (device_line ~start ~period:(8. *. (1. +. err)) bytes) in
+      [%test_result: (int list, string) Result.t]
+        (Usb.decode_levels (Firmware.usb_levels words))
+        ~expect:(Ok bytes)))
+;;
+
+(* A whole IN transaction on the engine: send IN, receive, send ACK. The
+   device answers [delay] bit times after the IN token's EOP. The ACK must
+   start 2 to 7.5 bit times after the data packet's EOP (USB 1.1, 7.1.18). *)
+let in_transaction ~delay ~err data =
+  let m =
+    Isa.create
+      ~program:(Asm.assemble Firmware.usb)
+      ~pin_modes:modes
+      ~threads:[ Firmware.usb_config ~origin:0 ]
+  in
+  let send bytes =
+    let lines = Usb.packet_lines bytes in
+    Firmware.usb_send_words (List.take lines (List.length lines - 3))
+  in
+  let pending =
+    Queue.of_list
+      (send (Usb.token ~pid:Usb.Pid.in_ ~addr:3 ~endp:1)
+       @ [ Firmware.usb_receive ]
+       @ send (Usb.handshake ~pid:Usb.Pid.ack))
+  in
+  let device = ref (fun _ -> Usb.J) in
+  let host_driving = ref false
+  and last_host_end = ref None
+  and device_eop_end = ref None
+  and ack_start = ref None
+  and line = ref Usb.J
+  and lines = Queue.create ()
+  and rx = Queue.create () in
+  for cycle = 0 to 4000 do
+    (match Queue.peek pending with
+     | Some v -> if Isa.push_tx m ~thread:0 v then ignore (Queue.dequeue pending : int option)
+     | None -> ());
+    let dev = !device cycle in
+    Isa.step m ~inputs:(inputs !line);
+    Option.iter (Isa.pop_rx m ~thread:0) ~f:(Queue.enqueue rx);
+    let d, l = bus (Isa.pin_out m) in
+    (* The host's first release: the IN token is done; the device answers. *)
+    if !host_driving && (not d) && Option.is_none !last_host_end
+    then (
+      last_host_end := Some cycle;
+      let start = Float.of_int cycle +. (float delay *. 8. *. (1. +. err)) in
+      device := device_line ~start ~period:(8. *. (1. +. err)) data;
+      let n = List.length (Usb.packet_lines data) in
+      device_eop_end
+      := Some (Float.iround_up_exn (start +. (float n *. 8. *. (1. +. err)))));
+    if d && (not !host_driving) && Option.is_some !last_host_end && Option.is_none !ack_start
+    then ack_start := Some cycle;
+    host_driving := d;
+    line := if d then l else dev;
+    Queue.enqueue lines (d, !line)
+  done;
+  let received = Usb.decode_levels (Firmware.usb_levels (Queue.to_list rx)) in
+  let turnaround =
+    match !ack_start, !device_eop_end with
+    | Some a, Some e -> Some (a - e)
+    | _ -> None
+  in
+  let host_packets =
+    packets_of
+      { driven = Queue.to_list lines |> List.map ~f:fst
+      ; lines = Queue.to_list lines |> List.map ~f:snd
+      }
+    |> List.map ~f:(fun seg ->
+      Usb.Receiver.decode ~bit_cycles:8 (Usb.J :: List.map seg ~f:snd @ [ Usb.J; Usb.J ]))
+  in
+  received, turnaround, host_packets
+;;
+
+let%test_unit "an IN transaction: data received, ACK sent 2 to 7.5 bit times later" =
+  Quickcheck.test
+    (Quickcheck.Generator.tuple3
+       gen_device_packet
+       (Int.gen_incl 2 7)
+       (Float.gen_incl (-0.015) 0.015))
+    ~trials:60
+    ~sexp_of:[%sexp_of: int list * int * float]
+    ~f:(fun (data, delay, err) ->
+      let received, turnaround, host_packets = in_transaction ~delay ~err data in
+      [%test_result: (int list, string) Result.t] received ~expect:(Ok data);
+      [%test_result: (int list, Usb.Receiver.error) Result.t list]
+        host_packets
+        ~expect:
+          [ Ok (Usb.token ~pid:Usb.Pid.in_ ~addr:3 ~endp:1)
+          ; Ok (Usb.handshake ~pid:Usb.Pid.ack)
+          ];
+      match turnaround with
+      | None -> failwith "no ACK"
+      | Some t ->
+        if t < 16 || t > 60
+        then raise_s [%message "ACK outside 2 to 7.5 bit times" (t : int)])
+;;
+
+let%expect_test "planted receive bugs: each is caught" =
+  let mutate ~pattern ~with_ =
+    let m = String.substr_replace_first Firmware.usb ~pattern ~with_ in
+    assert (not (String.equal m Firmware.usb));
+    m
+  in
+  let cases =
+    List.concat_map [ -0.015; 0.; 0.015 ] ~f:(fun err ->
+      List.map
+        [ Usb.data ~pid:Usb.Pid.data1 (List.init 8 ~f:(fun i -> (i * 37) land 0xFF))
+        ; Usb.data ~pid:Usb.Pid.data0 (List.init 8 ~f:(Fn.const 0xFF))
+        ; Usb.handshake ~pid:Usb.Pid.nak
+        ]
+        ~f:(fun bytes -> bytes, err))
+  in
+  List.iter
+    [ ( "K waits on the wrong pin"
+      , mutate
+          ~pattern:"kw:     wait 0 pin 0 timeout"
+          ~with_:"kw:     wait 0 pin 1 timeout" )
+    ; "no end marker", mutate ~pattern:"set x, 1            side 2" ~with_:"set x, 0            side 2"
+    ; ( "sampled late after a fall to J"
+      , mutate ~pattern:"jmp toj             side 2" ~with_:"jmp toj             side 2 [3]" )
+    ]
+    ~f:(fun (name, source) ->
+      let failures =
+        List.count cases ~f:(fun (bytes, err) ->
+          let words = receive ~source (device_line ~start:30. ~period:(8. *. (1. +. err)) bytes) in
+          not ([%equal: (int list, string) Result.t]
+                 (Usb.decode_levels (Firmware.usb_levels words))
+                 (Ok bytes)))
+      in
+      printf "%-34s %s\n" name
+        (if failures = 0 then "MISSED" else sprintf "caught in %d of %d" failures (List.length cases)));
+  [%expect
+    {|
+    K waits on the wrong pin           caught in 9 of 9
+    no end marker                      caught in 9 of 9
+    sampled late after a fall to J     caught in 9 of 9
+    |}]
 ;;

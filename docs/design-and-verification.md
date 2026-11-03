@@ -64,15 +64,17 @@ The freeze put that claim to the test. Since v1.4, with no hardware change:
 | SPI device, mode 0 | 23 words | a zero-timeout wait on the select line every bit, used as a branch, so a transfer cut mid-byte is noticed |
 | JTAG controller (any TMS/TDI sequence, TDO back) | 11 words | `out pins, 2`, side-set for TCK |
 | Arm SWD clock engine, with the framing in the host driver | 11 words | open-drain SWDIO, side-set for SWCLK |
-| Host driver for the demo board | 482 lines of MicroPython | the register map only |
+| Low-speed USB host engine (the competition's stretch goal): sends packets with EOP and turnaround, receives with clock recovery | 49 words, plus the 5-word echo as a relay | timed waits on the edge that would leave the current level, the timeout vector as "no edge this bit"; CHAIN to buffer a whole transaction on either side of the engine; side-set for the transceiver's FSE0 and OE_N |
+| Host driver for the demo board | 724 lines of MicroPython | the register map only |
 
 None of these is mentioned in the ISA's design or its revisions, which were
 driven by the controllers. That they fit is the strongest evidence that the
 instruction set is general enough. The I2C target and SPI device are driven
 by controllers written by other people (cocotbext-i2c, cocotbext-spi); the
 JTAG controller's scans are decoded by a third-party monitor
-(cocotbext-jtag); SWD is checked only against a target written for this
-project.
+(cocotbext-jtag); the USB host reads a descriptor from a third-party USB
+device core (usbhostslave); SWD is checked only against a target written for
+this project.
 
 ## 3. How the evidence chains
 
@@ -159,7 +161,11 @@ firmware and those oracles:
 - cocotbext-i2c's EEPROM and I2C controller;
 - cocotbext-uart;
 - cocotbext-spi's controller;
-- cocotbext-jtag's monitor, which decodes every scan on the wires.
+- cocotbext-jtag's monitor, which decodes every scan on the wires;
+- usbhostslave's USB device (an emulated mouse with its own endpoint-0
+  logic), which checks every packet's PID, stuffing and CRC before it
+  answers. Five lines are changed, each marked: three make it connect at
+  low speed, and two fix a bug the chip's host found in it (section 5).
 
 Two device models were written for this project because no third-party one
 fits: the JTAG device (`test/jtag_tap.v`, IEEE 1149.1) and the SWD target
@@ -215,7 +221,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 47 in all:
+fails if any survives. There are 56 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -230,7 +236,9 @@ fails if any survives. There are 47 in all:
 | I2C target firmware | 6 | `sim/test_i2c_target.ml` |
 | JTAG firmware | 3 | `sim/test_jtag.ml` |
 | SWD firmware | 3 | `sim/test_swd.ml` |
+| USB firmware (4 sending, 3 receiving) | 7 | `sim/test_usb.ml` |
 | JTAG, SWD and host drivers | 4 | `test_driver_planted_bugs` in `test/test.py` |
+| USB driver | 2 | `test_usb_driver_planted_bugs` in `test/test.py` |
 | gate netlist | 4 | `gl_equiv/check.py`: the RTL-to-netlist proof |
 
 The driver bugs are planted by replacing one driver method for one
@@ -240,7 +248,7 @@ count as a catch. The SPI host-port bug is a parameter of `hw/top.ml`, off
 by default, following `hw/pe_core.ml`; the generated Verilog is
 byte-identical with or without the parameter in the source.
 
-All 47 are caught. Two candidates turned out not to be bugs, and the
+All 56 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -270,6 +278,10 @@ specification allows. The firmware now reads SDA first.
 | No directed scenario caught a synchroniser bug | the closure check (requires every planted bug caught) |
 | The project's SPI slave model dropped a preloaded response on deselect; the I2C checker was too strict about the edge before STOP | the oracles disagreeing with the firmware, with the oracle at fault |
 | The first v1.4 build missed 50 MHz by 0.14 ns at the slow corner | static timing analysis |
+| A third-party USB device (usbhostslave's usbDevice example) never toggled DATA0/DATA1 on IN packets, so the second packet of a descriptor repeated DATA1 | the chip's host driver, which checks the toggle as USB 1.1 (8.6) requires; at full speed, as published, the descriptor fits one packet, so it never showed. Fixed in the vendored copy, marked and documented |
+| The USB receive engine's "still J" path was one clock longer than its "still K" path, so long runs of J drifted out of the bit | random received packets on the model, in long runs of 1s; fixed by reordering so both fall into their wait |
+| The driver stopped collecting a received packet if the engine finished between two status reads | cocotb against the USB device; the driver now drains the FIFO after it sees the engine idle |
+| A stale firmware image (built before a fix) made the driver's timeout-vector constant point at the wrong instruction | a PC trace of the receive in cocotb; the test now checks the image against the driver's constants before every USB test |
 
 ## 6. AI-assisted verification, and independence
 
@@ -326,9 +338,18 @@ answer it.
 - **Speed limits** are measured in simulation. The I2C target keeps up with
   SCL low for 7 core clocks; the SPI device with 8 clocks per SCK phase
   (625 kHz at 10 MHz).
-- **Protocols not done.** CAN, low-speed USB and 10 Mbit Ethernet. A USB
-  low-speed bit is about 6.7 core clocks at 10 MHz, which side-set makes
-  conceivable but untried.
+- **USB is a host engine, at 12 MHz, through a transceiver.** Low-speed
+  USB needs 8 clocks per bit, so the chip runs at 12 MHz for it (about 60 ns
+  of slack). Firmware cannot release a push-pull pin, so it drives a USB 1.1
+  transceiver rather than the wires. The chip cannot be a USB device a PC
+  enumerates: the board's bit-banged host port is far too slow to answer
+  within USB's turnaround, so the host role was chosen, with the engine
+  owning every timing-critical step. Two known limits: after a NAK the
+  engine still sends the ACK queued behind it, which a device ignores but
+  the spec does not allow; and only simulation has shown the driver keeping
+  up, so real MicroPython speed is untested.
+- **Protocols not done.** CAN and 10 Mbit Ethernet; Ethernet needs a clock
+  well above what the timing margin supports.
 - **SWD's target model** was written for this project, from ADIv5, so it does
   not give the independence a third-party model would.
 

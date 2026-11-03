@@ -658,10 +658,12 @@ begin
       else if (updateUSBAddress == 1'b1)
       begin
         NextState_EP0St <= `IN_WT_GNT;
+        next_dataSeq <= ~dataSeq;  // protocol-emulator: toggle DATA0/DATA1 on an ACKed IN (USB 1.1, 8.6)
       end
       else
       begin
         NextState_EP0St <= `IN_SET_PTR;
+        next_dataSeq <= ~dataSeq;  // protocol-emulator: toggle DATA0/DATA1 on an ACKed IN (USB 1.1, 8.6)
       end
     end
     `IN_SET_PTR:

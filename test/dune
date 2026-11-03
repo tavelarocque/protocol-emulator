@@ -114,12 +114,12 @@
    (run %{dep:../bin/firmware_hex.exe} swd))))
 
 (rule
- (targets usb_tx.hex)
+ (targets usb.hex)
  (mode promote)
  (action
   (with-stdout-to
-   usb_tx.hex
-   (run %{dep:../bin/firmware_hex.exe} usb_tx))))
+   usb.hex
+   (run %{dep:../bin/firmware_hex.exe} usb))))
 
 (rule
  (targets usb_host.hex)

@@ -559,14 +559,16 @@ def usb_line_states(packet):
     return states
 
 
-USB_TX_ORIGIN = 5  # Firmware.Usb_host.tx_origin (the OCaml tests check it)
-USB_TX_IDLE = USB_TX_ORIGIN + 2  # the engine's pull, where it waits between packets
+USB_ENGINE_ORIGIN = 5  # Firmware.Usb_host.engine_origin (the OCaml tests check these)
+USB_TMO = 22  # Firmware.usb_tmo: the receive timeout vector, from the origin
+USB_RECEIVE = 0x8000  # Firmware.usb_receive: the receive command
 USB_BUFFER_WORDS = 13  # both threads' FIFOs, chained
+RECEIVE = "receive"  # in a transaction's command list
 
 
 def usb_words(packet):
-    """The chip's words for one packet: its line-state count less one, then
-    the line states 16 to a word, first in bit 0."""
+    """The engine's send command for one packet: its line-state count less
+    one, then the line states 16 to a word, first in bit 0."""
     states = usb_line_states(packet)
     words = [len(states) - 1]
     for start in range(0, len(states), 16):
@@ -577,40 +579,146 @@ def usb_words(packet):
     return words
 
 
+def usb_decode(words):
+    """The bytes after SYNC of a received packet, from the engine's words
+    (line levels, 1 = K, 16 to a word; a 1 after the last), or None if they
+    do not decode: from the first K, NRZI and stuffing undone, SYNC dropped
+    through its final 1."""
+    if not words:
+        return None
+    levels = []
+    for w in words[:-1]:
+        levels += [(w >> k) & 1 for k in range(16)]
+    last = words[-1]
+    if last == 0:
+        return None
+    top = last.bit_length() - 1
+    levels += [(last >> k) & 1 for k in range(top)]
+    bits, prev, run = [], 0, 0
+    for lv in levels:
+        b = 1 if lv == prev else 0
+        prev = lv
+        if run == 6:
+            if b:
+                return None
+            run = 0
+            continue
+        run = run + 1 if b else 0
+        bits.append(b)
+    if 1 not in bits:
+        return None
+    bits = bits[bits.index(1) + 1:]
+    if not bits or len(bits) % 8:
+        return None
+    return [sum(bits[8 * n + i] << i for i in range(8)) for n in range(len(bits) // 8)]
+
+
+class UsbError(Exception):
+    pass
+
+
 class UsbHost:
     """Low-speed USB host (usb_host.hex) through a USB 1.1 transceiver in
     VO/FSE0 mode: P0 VP, P1 VM (inputs); P2 VO, P3 FSE0, P4 OE_N. The core
     clock must be 12 MHz (8 clocks per bit at 1.5 Mbit/s).
 
-    Thread 1 is the transmit engine; thread 0 relays to it through CHAIN, so
-    both threads' FIFOs hold one transaction. Each transaction is loaded
-    with the engine stopped and then started with one CTRL write, so the
-    packets go out at full speed however slowly this code runs."""
+    The engine (Firmware.usb) runs on one thread and echo on the other,
+    relaying through CHAIN, so both threads' FIFOs are one buffer on
+    whichever side of the engine a transaction needs it: before it for
+    sending (the transaction is loaded with the engine stopped, then started
+    with one CTRL write), after it for receiving. Commands always go to
+    thread 0 and results come from thread 1. The engine owns the bit timing,
+    clock recovery and turnaround; this code owns packets, CRCs and the
+    transfer logic, and can be as slow as it likes."""
 
     def __init__(self, chip, image):
         self.chip = chip
         chip.stop()
         chip.load(image)
-        chip.configure(thread=0)  # the relay (echo) at 0
-        chip.configure(thread=1, start=USB_TX_ORIGIN, out_base=2, out_count=1,
-                       set_base=2, set_count=1, sideset_base=3, sideset_count=2,
-                       threshold=16)
         chip.set_pin_modes({2: PUSH_PULL, 3: PUSH_PULL, 4: PUSH_PULL})
-        chip.run(threads=(0,), chain=True)
+        self.engine = None
 
-    def transaction(self, packets):
-        """Sends [packets] (each its bytes after SYNC) back to back, two bit
-        times apart, and returns when the last has gone out."""
+    def _layout(self, rx_buffered):
+        engine = 0 if rx_buffered else 1
+        relay = 1 - engine
+        self.chip.stop()
+        self.chip.configure(thread=relay)  # echo, at 0
+        self.chip.configure(thread=engine, start=USB_ENGINE_ORIGIN, in_base=0,
+                            out_base=2, out_count=1, set_base=2, set_count=1,
+                            sideset_base=3, sideset_count=2, threshold=16,
+                            timeout=2, timeout_vector=USB_ENGINE_ORIGIN + USB_TMO)
+        self.chip.run(threads=(relay,), chain=True)  # the engine stays stopped
+        self.engine = engine
+
+    def _idle(self):
+        e = self.chip.status(thread=self.engine)
+        r = self.chip.status(thread=1 - self.engine)
+        return (e["pc"] == USB_ENGINE_ORIGIN and e["tx_level"] == 0
+                and r["pc"] == 0 and r["tx_level"] == 0
+                and self.chip.status(thread=0)["rx_level"] == 0)
+
+    def transaction(self, commands, rx_buffered=False, polls=400):
+        """Runs [commands] in order: packets (their bytes after SYNC) to
+        send, and at most one RECEIVE. Returns the received packet's bytes
+        (None if it did not decode, or nothing came: after [polls] status
+        reads the engine is stopped)."""
         words = []
-        for p in packets:
-            words += usb_words(p)
+        for c in commands:
+            words += [USB_RECEIVE] if c == RECEIVE else usb_words(c)
         if len(words) > USB_BUFFER_WORDS:
             raise ValueError("transaction too long for the chip's buffers")
-        for w in words:
+        self._layout(rx_buffered)
+        preload = FIFO_DEPTH if rx_buffered else USB_BUFFER_WORDS
+        for w in words[:preload]:
             self.chip.push(w)
         self.chip.run(threads=(0, 1), chain=True)
-        while True:
-            s = self.chip.status(thread=1)
-            if s["tx_level"] == 0 and s["pc"] == USB_TX_IDLE:
+        for w in words[preload:]:
+            self.chip.push(w)
+        got = []
+        for _ in range(polls):
+            w = self.chip.try_pop(thread=1)
+            if w is not None:
+                got.append(w)
+            elif self._idle():
+                # The engine may have finished between the two checks:
+                # collect what it pushed meanwhile.
+                while True:
+                    w = self.chip.try_pop(thread=1)
+                    if w is None:
+                        break
+                    got.append(w)
                 break
-        self.chip.run(threads=(0,), chain=True)
+        else:
+            self.chip.run(threads=(1 - self.engine,), chain=True)  # stop the engine
+            return None
+        if RECEIVE not in commands:
+            return []
+        return usb_decode(got)
+
+    def control_read(self, addr, setup, length):
+        """A control read (USB 1.1, 8.5.2): SETUP stage, IN data stage until
+        [length] bytes or a short packet, OUT status stage. [setup] is the
+        8-byte request. Returns the data."""
+        ack = [usb_pid(USB_ACK)]
+        got = self.transaction([usb_token(USB_SETUP, addr, 0),
+                                usb_data(USB_DATA0, setup), RECEIVE])
+        if got != ack:
+            raise UsbError("SETUP not acknowledged: %r" % (got,))
+        data, toggle = [], USB_DATA1
+        while len(data) < length:
+            got = self.transaction([usb_token(USB_IN, addr, 0), RECEIVE,
+                                    usb_handshake(USB_ACK)], rx_buffered=True)
+            if got == [usb_pid(USB_NAK)]:
+                continue  # not ready yet (the ACK that followed it is ignored)
+            if not got or got[0] != usb_pid(toggle) or usb_crc16(got[1:-2]) != (
+                    got[-2] | (got[-1] << 8)):
+                raise UsbError("bad data packet: %r" % (got,))
+            data += got[1:-2]
+            toggle ^= USB_DATA0 ^ USB_DATA1
+            if len(got) - 3 < 8:
+                break
+        got = self.transaction([usb_token(USB_OUT, addr, 0),
+                                usb_data(USB_DATA1, []), RECEIVE])
+        if got != ack:
+            raise UsbError("status stage not acknowledged: %r" % (got,))
+        return data[:length]

@@ -1363,9 +1363,19 @@ def usb_packets(trace):
     return packets
 
 
+def check_usb_image():
+    """The driver's constants must match the image: at the timeout vector is
+    the engine's [mov osr, pins] (opcode 5, dst OSR = 4, src PINS = 2), and
+    at its origin its first [pull]."""
+    image = firmware("usb_host")
+    assert image[pe.USB_ENGINE_ORIGIN + pe.USB_TMO] & 0xE1F8 == 0xA110, "USB_TMO"
+    assert image[pe.USB_ENGINE_ORIGIN] & 0xE1FF == 0x8100, "USB_ENGINE_ORIGIN"
+
+
 async def usb_start(dut):
     """Chip at 12 MHz, the device at 48 MHz on the bus; returns once the
     device has connected (its pull-up on D-)."""
+    check_usb_image()
     await reset(dut, period_ps=USB_CLK_PS)
     cocotb.start_soon(Clock(dut.usb_clk, USB_DEV_CLK_PS, unit="ps").start())
     dut.dev_mode.value = 7
@@ -1379,31 +1389,101 @@ async def usb_start(dut):
     raise AssertionError("the USB device never connected")
 
 
-@cocotb.test(timeout_time=60, timeout_unit="ms")
+USB_DEVICE_DESCRIPTOR = [  # usbhostslave/usbROM.v, bMaxPacketSize0 8 at low speed
+    0x12, 0x01, 0x10, 0x01, 0x00, 0x00, 0x00, 0x08, 0xC7, 0x05,
+    0x13, 0x01, 0x01, 0x00, 0x01, 0x02, 0x03, 0x01]
+GET_DEVICE_DESCRIPTOR = [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00]
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
 async def test_usb_device_acks_setup(dut):
     """The chip, as a low-speed USB host driven by the board driver, sends a
     SETUP token and GET_DESCRIPTOR's DATA0 to usbhostslave's USB device,
-    which checks PID, bit stuffing, CRC5 and CRC16 before it answers ACK.
-    The same transaction with one CRC16 bit flipped must get no answer."""
+    which checks PID, bit stuffing, CRC5 and CRC16 before it answers; the
+    chip receives its ACK. With one CRC16 bit flipped there is no answer."""
     await usb_start(dut)
     trace = []
     cocotb.start_soon(usb_monitor(dut, trace))
     chip = pe.Chip(sim_port(dut))
     setup = pe.usb_token(pe.USB_SETUP, 0, 0)
-    get_descriptor = pe.usb_data(pe.USB_DATA0, [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00])
-    corrupt = get_descriptor[:-1] + [get_descriptor[-1] ^ 0x01]
+    request = pe.usb_data(pe.USB_DATA0, GET_DEVICE_DESCRIPTOR)
+    corrupt = request[:-1] + [request[-1] ^ 0x01]
 
     @bridge
     def send(packets):
         usb = pe.UsbHost(chip, firmware("usb_host"))
-        usb.transaction(packets)
+        return usb.transaction(packets + [pe.RECEIVE], polls=60)
 
-    await send([setup, corrupt])
-    await ClockCycles(dut.clk, 2000)
+    silent = await send([setup, corrupt])
     bad = usb_packets(trace)
     trace.clear()
-    await send([setup, get_descriptor])
-    await ClockCycles(dut.clk, 2000)
+    answer = await send([setup, request])
     good = usb_packets(trace)
+    assert silent is None, f"an answer to a corrupted packet: {silent}"
     assert bad == [("host", setup), ("host", corrupt)], f"corrupted CRC: {bad}"
-    assert good == [("host", setup), ("host", get_descriptor), ("dev", [0xD2])], f"bus saw {good}"
+    assert good == [("host", setup), ("host", request), ("dev", [0xD2])], f"bus saw {good}"
+    assert answer == [0xD2], f"the chip received {answer}"
+
+
+@cocotb.test(timeout_time=300, timeout_unit="ms")
+async def test_usb_get_descriptor(dut):
+    """A whole USB control transfer, GET_DESCRIPTOR (device), between the
+    chip as a low-speed host and usbhostslave's USB device: SETUP stage, IN
+    data stages (the chip receives each data packet with its own clock
+    recovery and ACKs it in time), OUT status stage. The descriptor read
+    must be the one in the device's ROM, and every packet on the bus must
+    decode."""
+    await usb_start(dut)
+    trace = []
+    cocotb.start_soon(usb_monitor(dut, trace))
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def read():
+        usb = pe.UsbHost(chip, firmware("usb_host"))
+        return usb.control_read(0, GET_DEVICE_DESCRIPTOR, 18)
+
+    descriptor = await read()
+    assert descriptor == USB_DEVICE_DESCRIPTOR, f"descriptor {descriptor}"
+    packets = usb_packets(trace)
+    assert all(isinstance(b, list) for _, b in packets), f"undecodable: {packets}"
+    pids = [(who, b[0]) for who, b in packets]
+    dev_data = [b for who, b in packets if who == "dev" and b[0] in (0xC3, 0x4B)]
+    assert [len(b) - 3 for b in dev_data] == [8, 8, 2], f"data packets {dev_data}"
+    assert ("host", 0xD2) in pids and pids[-1] == ("dev", 0xD2), f"PIDs {pids}"
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_usb_driver_planted_bugs(dut):
+    """Planted bugs in the driver's USB code must each break a SETUP
+    transaction with usbhostslave's device; the real driver must not."""
+    await usb_start(dut)
+    chip = pe.Chip(sim_port(dut))
+    crc16, decode = pe.usb_crc16, pe.usb_decode
+    bugs = [
+        ("CRC16 sent uninverted", "usb_crc16", lambda data: ~crc16(data) & 0xFFFF),
+        ("received levels read inverted", "usb_decode",
+         lambda words: decode([~w & 0xFFFF for w in words[:-1]] + words[-1:])),
+    ]
+
+    @bridge
+    def setup_acked():
+        usb = pe.UsbHost(chip, firmware("usb_host"))
+        got = usb.transaction([pe.usb_token(pe.USB_SETUP, 0, 0),
+                               pe.usb_data(pe.USB_DATA0, GET_DEVICE_DESCRIPTOR),
+                               pe.RECEIVE], polls=60)
+        return got == [pe.usb_pid(pe.USB_ACK)]
+
+    assert await setup_acked(), "the real driver's SETUP was not acknowledged"
+    missed = []
+    for name, attr, bug in bugs:
+        original = getattr(pe, attr)
+        setattr(pe, attr, bug)
+        try:
+            caught = not await setup_acked()
+        finally:
+            setattr(pe, attr, original)
+        dut._log.info("%-32s %s", name, "caught" if caught else "MISSED")
+        if not caught:
+            missed.append(name)
+    assert not missed, f"planted USB driver bugs not caught: {missed}"

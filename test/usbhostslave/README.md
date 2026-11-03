@@ -19,9 +19,9 @@ CRC5/CRC16) before it answers.
 
 ## Changes
 
-Three lines, so the device connects at low speed (1.5 Mbit/s), which the
-core supports, instead of the example's full speed. Each is marked
-`protocol-emulator:` in the source.
+Each is marked `protocol-emulator:` in the source. Three lines make the
+device connect at low speed (1.5 Mbit/s), which the core supports, instead
+of the example's full speed:
 
 - `EP0.v`: the control register write `8'h71` (enable, connect, full-speed
   rate and polarity) becomes `8'h41` (enable, connect, low speed).
@@ -29,3 +29,14 @@ core supports, instead of the example's full speed. Each is marked
 - `include/usbDevice_define.v`: `MAX_RESP_SIZE` (the device descriptor's
   bMaxPacketSize0, and its control-read packet size) is 8, the low-speed
   maximum, instead of 64.
+
+And one bug fix, found by the chip's host driver:
+
+- `EP0.v`: after the host ACKs an IN data packet, the endpoint advanced to
+  the next data but never toggled DATA0/DATA1 (it toggled only on OUT), so
+  every IN packet of a control read was DATA1. USB 1.1 (8.6) requires the
+  toggle, and a host must treat a repeated PID as a retransmission. At full
+  speed the example's descriptors fit one 64-byte packet, so it never
+  showed; at low speed, with 8-byte packets, the second packet of the device
+  descriptor was DATA1 again, and the driver rejected it. Two lines toggle
+  the sequence bit on an ACKed IN.
