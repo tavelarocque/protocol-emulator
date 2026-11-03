@@ -104,3 +104,11 @@
   (with-stdout-to
    jtag.hex
    (run %{dep:../bin/firmware_hex.exe} jtag))))
+
+(rule
+ (targets swd.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   swd.hex
+   (run %{dep:../bin/firmware_hex.exe} swd))))

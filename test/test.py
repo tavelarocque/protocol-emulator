@@ -1108,3 +1108,49 @@ async def test_thirdparty_jtag(dut):
         (0x8, 32, 0x12345678, 0xCAFEF00D),
         (0xF, 4, 0b1011, 0b0110),
     ], f"monitor saw {seen}"
+
+
+
+# --- SWD: the chip as an Arm Serial Wire Debug host ---------------------------
+
+SWD_DPIDR = 0x2BA01477  # swd_dp.v's DPIDR
+SWD_AP_IDR = 0x24770011
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_swd(dut):
+    """The SWD clock engine with the board driver's framing, against an SWD
+    target written from Arm's ADIv5 (test/swd_dp.v): no answer before the
+    JTAG-to-SWD switch, then DPIDR, a power-up request acknowledged in
+    CTRL/STAT, an AP's IDR through a posted read and RDBUFF, and an AP
+    register written and read back."""
+    await reset(dut)
+    dut.dev_mode.value = 6
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        swd = pe.SwdController(chip, firmware("swd"))
+        try:
+            swd.read_dp(swd.DPIDR)
+            silent = False
+        except pe.SwdError:
+            silent = True  # still in JTAG mode: nobody answers
+        dpidr = swd.connect()
+        swd.write_dp(swd.CTRL_STAT, 0x50000000)  # CSYSPWRUPREQ, CDBGPWRUPREQ
+        ctrl = swd.read_dp(swd.CTRL_STAT)
+        swd.write_dp(swd.SELECT, 0x000000F0)  # AP 0, bank 0xF
+        idr = swd.read_ap_now(0xC)
+        swd.write_dp(swd.SELECT, 0x00000000)
+        swd.write_ap(0x4, 0xDEADBEEF)
+        posted = swd.read_ap(0x4)  # returns the previous AP read: the IDR
+        tar = swd.read_dp(swd.RDBUFF)
+        return silent, dpidr, ctrl, idr, posted, tar
+
+    silent, dpidr, ctrl, idr, posted, tar = await session()
+    assert silent, "the target answered before the JTAG-to-SWD switch"
+    assert dpidr == SWD_DPIDR, f"DPIDR {dpidr:#x}"
+    assert ctrl == 0xF0000000, f"CTRL/STAT {ctrl:#x}"  # both requests acknowledged
+    assert idr == SWD_AP_IDR, f"AP IDR {idr:#x}"
+    assert (posted, tar) == (SWD_AP_IDR, 0xDEADBEEF), f"posted {posted:#x}, RDBUFF {tar:#x}"
+    assert int(dut.dp.parity_errors.value) == 0

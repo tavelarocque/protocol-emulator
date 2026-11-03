@@ -347,6 +347,104 @@ class JtagController:
         return self._shift([1, 0, 0], value, n)
 
 
+class SwdError(Exception):
+    pass
+
+
+class SwdController:
+    """Arm Serial Wire Debug host (swd.hex does the clocking): P0 SWCLK, P1
+    SWDIO, open-drain, which needs a pull-up (most targets have one). The SWD
+    framing is here: line reset, the JTAG-to-SWD switch, requests, parity,
+    ACK and turnaround. Register addresses are byte addresses 0x0, 0x4, 0x8,
+    0xC, as in Arm's documentation."""
+
+    DPIDR, CTRL_STAT, SELECT, RDBUFF = 0x0, 0x4, 0x8, 0xC
+
+    def __init__(self, chip, image, clkdiv=0):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(sideset_base=0, sideset_count=1, out_base=1, out_count=1,
+                       in_base=1, threshold=16, clkdiv=clkdiv)
+        chip.set_pin_modes({0: PUSH_PULL, 1: OPEN_DRAIN})
+        chip.run()
+
+    def clock(self, bits):
+        """One clock per bit (1 releases SWDIO); returns SWDIO as sampled
+        just before each rising edge."""
+        n = len(bits)
+        words = []
+        for start in range(0, n, 16):
+            w = 0
+            for k in range(min(16, n - start)):
+                w |= (bits[start + k] & 1) << k
+            words.append(w)
+        got = []
+        self.chip.push(n - 1)
+        for w in words:
+            self.chip.push(w)
+            r = self.chip.try_pop()
+            if r is not None:
+                got.append(r)
+        while len(got) < len(words):
+            got.append(self.chip.pop())
+        out = []
+        for i, w in enumerate(got):
+            for k in range(min(16, n - 16 * i)):
+                out.append((w >> k) & 1)
+        return out
+
+    def connect(self):
+        """Line reset, the JTAG-to-SWD select sequence 0xE79E, line reset,
+        idle, then read DPIDR (which ADIv5 requires first). Returns DPIDR."""
+        select = [(0xE79E >> i) & 1 for i in range(16)]
+        self.clock([1] * 56 + select + [1] * 56 + [0] * 4)
+        return self.read_dp(self.DPIDR)
+
+    @staticmethod
+    def _request(apndp, rnw, addr):
+        a2, a3 = (addr >> 2) & 1, (addr >> 3) & 1
+        return [1, apndp, rnw, a2, a3, apndp ^ rnw ^ a2 ^ a3, 0, 1]
+
+    def _transfer(self, apndp, rnw, addr, value=0):
+        req = self._request(apndp, rnw, addr)
+        if rnw:  # request, turnaround, ACK, data and parity, turnaround, idle
+            bits = req + [1] + [1] * 3 + [1] * 33 + [1] + [0, 0]
+        else:  # request, turnaround, ACK, turnaround, data and parity, idle
+            data = [(value >> i) & 1 for i in range(32)]
+            parity = sum(data) & 1
+            bits = req + [1] + [1] * 3 + [1] + data + [parity] + [0, 0]
+        s = self.clock(bits)
+        ack = s[9] | (s[10] << 1) | (s[11] << 2)
+        if ack != 0b001:
+            raise SwdError("ACK %s (%s)" % (format(ack, "03b"),
+                           {0b010: "WAIT", 0b100: "FAULT", 0b111: "no response"}.get(ack, "?")))
+        if not rnw:
+            return None
+        v = sum(s[12 + i] << i for i in range(32))
+        if (sum(s[12:44]) & 1) != s[44]:
+            raise SwdError("read data parity error")
+        return v
+
+    def read_dp(self, addr):
+        return self._transfer(0, 1, addr)
+
+    def write_dp(self, addr, value):
+        self._transfer(0, 0, addr, value)
+
+    def read_ap(self, addr):
+        """Posted, as in ADIv5: returns the previous AP read's result; this
+        read's result is in RDBUFF (see read_ap_now)."""
+        return self._transfer(1, 1, addr)
+
+    def write_ap(self, addr, value):
+        self._transfer(1, 0, addr, value)
+
+    def read_ap_now(self, addr):
+        self.read_ap(addr)
+        return self.read_dp(self.RDBUFF)
+
+
 class SpiDevice:
     """The chip as a mode-0 SPI device (spi_target.hex): P0 SCK, P1 MOSI,
     P2 MISO, P3 CS_N. The host must keep replies queued ahead of the

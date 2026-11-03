@@ -93,6 +93,14 @@ number of clocks minus one, then one word per 8 clocks of (TMS, TDI) bit
 pairs; TDO comes back 8 bits per word. The board driver's `JtagController`
 wraps this as `reset()`, `shift_ir()` and `shift_dr()`.
 
+SWD: `test/swd.hex` (11 words) clocks SWCLK on P0 (side-set) and drives and
+samples SWDIO on P1, which must be open-drain with a pull-up (SIDESET 0x10,
+OUT 0x11, IN base 1, THRESHOLD 16). Each batch is one word holding the
+number of clocks minus one, then one word per 16 clocks of SWDIO bits (1
+releases the line); the samples come back 16 per word. The board driver's
+`SwdController` builds SWD on top: `connect()` (line reset, JTAG-to-SWD,
+DPIDR), `read_dp`, `write_dp`, `read_ap`, `write_ap`.
+
 ## External hardware
 
 None required. A logic analyser or USB-serial adapter on the protocol pins
