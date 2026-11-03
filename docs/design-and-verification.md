@@ -38,8 +38,8 @@ anyone likes.
 | Waits with a timeout and a jump vector | PIO's wait, which blocks forever | A wedged bus (a device holding SCL low) must not hang the chip. I2C devices may stretch for milliseconds, so the timeout has its own 16-bit counter rather than borrowing X or Y (ISA v1, found by writing the I2C controller) |
 | Open-drain as a per-pin mode | PIO's trick of toggling pin direction | I2C, SWD and any shared line need it, and a mode bit is cheaper in instructions and harder to get wrong |
 | Every 16-bit word decodes to a defined instruction | Reserved encodings that trap or are undefined | Makes uniformly random program memory a valid test input and the decoder exhaustively checkable (65,536 words). There are no X states to reason about |
-| Integer clock divider per thread | PIO's fractional divider | Area and timing. Fractional baud rates use X/Y loops instead, and UART RX tolerates a sender about 5% off rate |
-| Two threads sharing a 64-word memory | Four threads, as in PIO | Two cover the useful pairings (TX+RX, controller+bridge). Layout time was a binding constraint: two-thread layouts take 4 to 5 hours of a 6-hour CI limit, and the one-thread v1.1 took 91 minutes |
+| Integer clock divider per thread | PIO's fractional divider | Simpler hardware. Fractional baud rates use X/Y loops instead; UART RX tolerates a sender about 5% off rate on isolated frames, and back-to-back frames are tested to 2% |
+| Two threads sharing a 64-word memory (the model always had two) | Four, as PIO has | Two cover the useful pairings (TX+RX, controller+bridge). Layout time is already tight: two-thread layouts take 4 to 5 hours against GitHub's 6-hour job limit, where the one-thread v1.1 took 91 minutes, and one two-thread build ran out of time in routing |
 | SPI host port, 24-bit transactions | A UART or a parallel bus | Any microcontroller can drive SPI, and the demo board's RP2040 can bit-bang it from MicroPython |
 | Two-flip-flop synchronisers on every protocol input, bypassable per pin | No synchronisers | Found in a review for silicon, which simulation cannot find (ISA v1.3). The bypass exists because side-set SPI samples MISO one clock after SCK falls, and a test shows it fails with the extra two cycles |
 | Shift direction per thread | Bit-reversal in the host | MSB-first protocols (SPI, I2C) take and return plain bytes, and one thread can bridge an MSB-first protocol into an LSB-first one |
@@ -61,14 +61,18 @@ The freeze put that claim to the test. Since v1.4, with no hardware change:
 | Added after the freeze | Size | What it needed from the ISA |
 |---|---|---|
 | I2C target (the chip as a 7-bit-address device, with clock stretching and repeated START) | 63 words | open-drain; side-set holding SCL low while a FIFO stalls (clock stretching for free); waits with a zero timeout used as branches on a pin |
-| SPI device, mode 0 | 23 words | a timed wait on the select line every bit, so a transfer cut mid-byte is noticed |
+| SPI device, mode 0 | 23 words | a zero-timeout wait on the select line every bit, used as a branch, so a transfer cut mid-byte is noticed |
 | JTAG controller (any TMS/TDI sequence, TDO back) | 11 words | `out pins, 2`, side-set for TCK |
 | Arm SWD clock engine, with the framing in the host driver | 11 words | open-drain SWDIO, side-set for SWCLK |
 | Host driver for the demo board | 482 lines of MicroPython | the register map only |
 
-None of these was planned when the ISA was designed. That they fit, and pass
-against device models written by other people, is the strongest evidence
-that the instruction set is general enough.
+None of these is mentioned in the ISA's design or its revisions, which were
+driven by the controllers. That they fit is the strongest evidence that the
+instruction set is general enough. The I2C target and SPI device are driven
+by controllers written by other people (cocotbext-i2c, cocotbext-spi); the
+JTAG controller's scans are decoded by a third-party monitor
+(cocotbext-jtag); SWD is checked only against a target written for this
+project.
 
 ## 3. How the evidence chains
 
@@ -86,7 +90,7 @@ flowchart TB
     oracles["protocol oracles and<br/>third-party device models"]
 
     doc --> model
-    model -- "tested: all 65,536 words,<br/>random state each" --> sstep
+    model -- "tested: all 65,536 words,<br/>two random states each" --> sstep
     sstep --> score --> stop
     stop -- "PROVED: one clock equal<br/>from every state (SAT)" --> rtl
     model -- "tested: lockstep, 400 random<br/>programs + 10 directed" --> rtl
@@ -98,18 +102,24 @@ flowchart TB
 **The proof.** Hardcaml_verify cuts both circuits at their registers, pairs
 the registers by name, and asks Z3 whether any state and any input make the
 next state or an output differ. UNSAT means that one clock of the RTL equals
-one clock of the spec from every state, reachable or not. Both sides also
-reset to the same values, so by induction every run from reset is identical
-on every pin, for any length and any input. That is stronger than any
+one clock of the spec from every state, reachable or not. For each pair of
+registers the checker also compares the clear, clear value, reset value and
+enable (Hardcaml_verify's `sec.ml`), so the two sides provably reset to the
+same state. By induction, every run from reset is identical on every pin,
+for any length and any input. That is stronger than any
 amount of simulation, but only as strong as the spec.
 
-**Why the spec is independent.** The spec circuits were written from the
-documentation and the reference model, not from the RTL, and in a different
+**How independent the spec is.** The spec logic is written separately from
+the RTL logic, from `docs/isa.md`, the reference model, and the protocol and
+register map documented in `hw/top.ml`'s header comment, and in a different
 style. The register map is a table that drives both writes and reads. Reads
 are an OR of one-hot terms rather than an indexed multiplexer, and next
-states are plain equations rather than an `Always` block. What the two sides
-share is what the checker needs to pair them: register names, widths, reset
-values and the FIFO's state encoding.
+states are plain equations rather than an `Always` block. The two sides do
+share more than logic-free facts: the checker needs register names, widths,
+reset values and the FIFO's state encoding to pair them, the SPI port's
+state is held in the same form, and the specs import the RTL's interface
+types and constants (port records, the thread state record, the pin count).
+A bug in a shared interface definition would be on both sides.
 
 **Why the proof is not vacuous.** A proof that cannot fail proves nothing,
 so the suite plants bugs and requires each to break it. All 10 planted RTL
@@ -124,7 +134,7 @@ software, not a circuit, so the solver cannot reason about it. Two links
 therefore rest on testing:
 
 - The spec datapath against the model: every one of the 65,536 instruction
-  words, each from one random state with random inputs and configuration.
+  words, each from two random states with random inputs and configuration.
   Exhaustive over instructions, sampled over states.
 - The composed spec against the model: covered indirectly. The lockstep test
   compares the RTL with the model every cycle, and the RTL is proven equal to
@@ -149,23 +159,25 @@ firmware and those oracles:
 - cocotbext-i2c's EEPROM and I2C controller;
 - cocotbext-uart;
 - cocotbext-spi's controller;
-- cocotbext-jtag's monitor.
+- cocotbext-jtag's monitor, which decodes every scan on the wires.
 
-SWD has no third-party model, so its target was written from Arm's ADIv5 for
-the testbench (`test/swd_dp.v`). It shares an author with the driver, which
-is a weaker check.
+Two device models were written for this project because no third-party one
+fits: the JTAG device (`test/jtag_tap.v`, IEEE 1149.1) and the SWD target
+(`test/swd_dp.v`, Arm ADIv5). JTAG still has the third-party monitor as a
+check on the wire protocol; SWD has nothing third-party, so its tests share
+an author with the driver, which is a weaker check.
 
 ## 4. Which layer catches which bug
 
 | Bug class | Example | Caught by | Cannot be caught by |
 |---|---|---|---|
 | Wrong instruction semantics in the RTL | X never decrements | the proof (every state); lockstep (within 16 programs) | protocol tests, unless the firmware happens to use that path |
-| Two threads interacting wrongly | pin priority inverted; CHAIN into a full FIFO | the whole-core proof; lockstep with cross bins | the datapath-only proof, which shares the composition on both sides |
+| Two threads interacting wrongly | pin priority inverted; CHAIN into a full FIFO | the whole-core proof; lockstep with cross bins | the datapath-only proof in general: it shares the composition logic on both sides, so it refutes the planted composition bugs only because they are planted on one side |
 | Host port or register map | STATUS bits swapped | the whole-chip proof; cocotb register tests | the core proof |
 | RTL and spec agree, both misread the ISA document | (none found) | lockstep against the reference model, which was written separately | the proof |
-| Firmware timing | start bit one cycle short; SDA moved before SCL falls | cycle-exact oracles; bus checkers | a forgiving receiver: the short start bit decodes fine |
+| Firmware timing | a stop bit one clock short; SDA moved before SCL falls | cycle-exact oracles; bus checkers | a forgiving receiver: a real UART receiver caught the short stop bit in only 13 of 300 cases (`sim/test_uart_tx.ml`) |
 | Firmware and project oracles share a misreading of a protocol | (none found) | third-party device models | the project's own oracles |
-| Corner cases a typical controller never produces | an I2C controller with zero data hold time | spec-derived reference controllers swept across speed and hold time | third-party controllers (cocotbext-i2c holds data, so it never exposed the bug) |
+| Corner cases a typical controller never produces | an I2C controller with zero data hold time | spec-derived reference controllers swept across speed and hold time | any controller with ordinary data hold time |
 | Synthesis or layout | a mis-synthesised mux | gate-level cocotb suite; LVS | every OCaml test (they see only the RTL) |
 | Timing | a long path at the slow corner | static timing analysis | all simulation |
 | Metastability on asynchronous inputs | an unsynchronised pin read | design review; synchronisers by construction | all simulation, and the proof (the model is synchronous) |
@@ -178,26 +190,32 @@ with planted bugs. Section 5 lists the layers that found real ones.
 
 ### Planted bugs
 
-Every layer keeps its planted bugs in the repository, and the suite fails if
-any survives. There are 43 in all:
+There are 43 planted bugs in all. 36 are kept in the repository as code and
+run in every build, and the suite fails if any survives. The other 7 were
+planted by hand, seen to fail the tests, and reverted. They are recorded in
+the README and commit messages, but nothing re-checks them, so a later change
+could quietly blind those tests.
 
-| Layer | Planted bugs |
-|---|---|
-| core RTL | 10 |
-| specs | 3 |
-| UART bring-up | 3 |
-| UART firmware | 2 |
-| SPI host port | 1 |
-| SPI controller firmware | 1 |
-| SPI device firmware | 5 |
-| I2C controller firmware | 2 |
-| I2C target firmware | 6 |
-| JTAG | 4 |
-| SWD | 5 |
-| host driver | 1 |
+| Layer | Kept as code, run every build | Checked once by hand |
+|---|---:|---:|
+| core RTL | 10 | |
+| specs | 3 | |
+| UART bring-up | 3 | |
+| UART firmware | | 2 |
+| SPI host port | | 1 |
+| SPI controller firmware | 1 | |
+| SPI device firmware | 5 | |
+| I2C controller firmware | 2 | |
+| I2C target firmware | 6 | |
+| JTAG firmware | 3 | |
+| JTAG driver | | 1 |
+| SWD firmware | 3 | |
+| SWD driver | | 2 |
+| host driver | | 1 |
+| **total** | **36** | **7** |
 
-All 43 are caught. Two candidates turned out not to be bugs, and the reasons
-are informative:
+All 43 were caught. Two candidates turned out not to be bugs, and the
+reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
 - SWCLK left high a clock longer: SWD targets act only after rising edges,
@@ -224,7 +242,6 @@ specification allows. The firmware now reads SDA first.
 | "PUSH stalls on a full RX FIFO" never happened in random testing | functional coverage failing the build |
 | An AI-written scenario ran phase-locked and never hit the bins it claimed | the closure check |
 | No directed scenario caught a synchroniser bug | the closure check (requires every planted bug caught) |
-| A one-stage synchroniser attempt left a register unreachable | the equivalence checker, which refused to pair it |
 | The project's SPI slave model dropped a preloaded response on deselect; the I2C checker was too strict about the edge before STOP | the oracles disagreeing with the firmware, with the oracle at fault |
 | v1.4 misses 50 MHz by 0.14 ns at the slow corner | static timing analysis |
 
@@ -247,8 +264,8 @@ answer it.
    checked against at least one device model written by someone else, from
    the real datasheet or standard. They are the backstop against a shared
    misreading, and they do not know this project exists.
-4. **Every check is shown to fail.** Planted bugs, kept in the repository,
-   show each layer can fail. One caveat from
+4. **Every check is shown to fail.** Planted bugs show each layer can fail
+   (36 of the 43 are kept as code; section 5). One caveat from
    [`coverage-closure.md`](coverage-closure.md) applies: the bug-targeted
    scenarios were written by the same assistant that planted the bugs. The
    coverage-targeted scenarios are measured by the model's own counts and do
@@ -283,6 +300,8 @@ answer it.
 - **Protocols not done.** CAN, low-speed USB and 10 Mbit Ethernet. A USB
   low-speed bit is about 6.7 core clocks at 10 MHz, which side-set makes
   conceivable but untried.
+- **Seven planted bugs are not kept as code** (section 5): the UART firmware
+  pair, the SPI host port's, and the four in the JTAG, SWD and host drivers.
 - **SWD's target model** was written for this project, from ADIv5, so it does
   not give the independence a third-party model would.
 
@@ -295,6 +314,7 @@ dune runtest    # OCaml suite: ISA, lockstep, coverage closure, formal proofs,
 cd test && make # cocotb suite on the RTL (Icarus Verilog)
 ```
 
-The setup is in the [README](../README.md). On GitHub Actions the OCaml
-suite takes about 16 minutes, the cocotb suite under 2, and the layout with
-the gate-level rerun 4 to 6 hours.
+The setup is in the [README](../README.md). In recent GitHub Actions runs
+the OCaml suite took about 16 minutes and the cocotb suite under 2. The
+layout itself takes 4 to 5 hours; the whole workflow, with the precheck and
+the gate-level rerun, took 6 to 7.

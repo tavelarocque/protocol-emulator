@@ -109,9 +109,11 @@ independent protocol oracles.
 
 Three practices run through all of it.
 
-**Mutation testing, kept in the repo.** Every layer has deliberately planted
-bugs, and the suite fails if any survives. A test suite that has never failed
-has not been shown to work.
+**Mutation testing.** Every layer has deliberately planted bugs, 43 in all.
+36 are kept in the repo as code and the suite fails if any survives; 7 (the
+UART firmware pair, the SPI port's, and the four in the drivers) were checked
+by hand and are not yet re-run. A test suite that has never failed has not
+been shown to work.
 
 | Layer | Planted bugs | Caught |
 |---|---|---|
