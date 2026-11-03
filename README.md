@@ -80,6 +80,12 @@ bytes was an interface wart, so threads got a shift direction.
 
 ## Verification
 
+[`docs/design-and-verification.md`](docs/design-and-verification.md) is the
+report: the design decisions and their alternatives, how the layers of
+evidence chain into a claim about the chip, which layer catches which class
+of bug, the real bugs found, and what is not covered. This section lists
+the layers.
+
 The specification is executable: [`model/isa.ml`](model/isa.ml) is a reference
 model written for clarity, with no dependency on the hardware, so the two
 cannot share a bug. Everything else is checked against it or against
@@ -120,6 +126,7 @@ has not been shown to work.
 | SWD | 3 in the firmware (SWDIO never driven, SWDIO moving in the same clock as SWCLK rises, last samples never pushed), 2 in the driver's framing (request parity inverted, write turnaround missing) | all 5: the firmware ones by random tests against the engine's contract, the driver ones by an ADIv5 target |
 | SPI device firmware | 5: MOSI sampled after SCK falls, no wait for SCK to fall, deselect never seen, reply bits lost to the poll, deselect dropping the queued reply | all 5 |
 | SPI firmware | MOSI moved after SCK rises | caught by the mode-0 checker |
+| Host driver | pin modes packed one bit per pin | fails both driver tests |
 
 Two oracles exist because each misses things alone. A start bit one cycle
 short decodes fine at a real receiver and is caught only by the cycle-exact
@@ -158,7 +165,8 @@ bin/     Verilog generator, firmware hex generator
 host/    MicroPython driver for the demo board's RP2040 (tested in cocotb, unchanged)
 src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v
 test/    cocotb testbench (RTL and gate-level) + generated firmware .hex
-docs/    isa.md (instruction set), info.md (datasheet), coverage-closure.md
+docs/    design-and-verification.md (the report), isa.md (instruction set),
+         info.md (datasheet), coverage-closure.md, related-work.md
 ```
 
 ## Running
