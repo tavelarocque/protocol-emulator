@@ -7,7 +7,7 @@ CPython, where the cocotb testbench (test/test.py, "host driver" tests) runs
 this same file against the RTL and the gate-level netlist. It uses nothing
 beyond the core language, so the code tested is the code that ships;
 test/board_emu runs it in MicroPython on an emulated demo board too, which
-is how an int.bit_length call (CPython only) was found.
+is how two CPython-only calls (int.bit_length, format) were found.
 
 The chip's host port is SPI mode 0 on ui_in[0] (SCK), ui_in[1] (CS_N) and
 ui_in[2] (MOSI), with MISO on uo_out[0]; every transaction is 24 bits:
@@ -506,7 +506,7 @@ class SwdController:
         s = self.clock(bits)
         ack = s[9] | (s[10] << 1) | (s[11] << 2)
         if ack != 0b001:
-            raise SwdError("ACK %s (%s)" % (format(ack, "03b"),
+            raise SwdError("ACK %d%d%d (%s)" % (ack >> 2, (ack >> 1) & 1, ack & 1,
                            {0b010: "WAIT", 0b100: "FAULT", 0b111: "no response"}.get(ack, "?")))
         if not rnw:
             return None

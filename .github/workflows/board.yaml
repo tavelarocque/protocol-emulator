@@ -24,6 +24,14 @@ jobs:
         working-directory: test/board_emu
         run: node run_compat.mjs
 
+      - name: Every protocol class of the driver on the emulated board
+        working-directory: test/board_emu
+        run: node run_board.mjs
+
+      - name: Planted bug, a CPython-only call in the SWD driver, must fail
+        working-directory: test/board_emu
+        run: node run_board.mjs swd --mutant cpython-only-call --expect-fail
+
       - name: USB descriptor read on the emulated board
         working-directory: test/board_emu
         run: node run_usb.mjs

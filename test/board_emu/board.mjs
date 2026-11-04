@@ -3,7 +3,7 @@
 //
 // The Tiny Tapeout demo board (TT06 to TT08 layout, RP2040) in emulation:
 // rp2040js runs Tiny Tapeout's own MicroPython firmware, and its pins are
-// wired to the chip's RTL and a USB device (cosim.node, from usb_board.v).
+// wired to the chip's RTL and its devices (cosim.node, from board.v).
 //
 // Time: rp2040js counts each instruction's ARMv6-M cycles at 125 MHz; the
 // hardware runs on that same time line. Two things are added here that
@@ -16,7 +16,7 @@
 //     the chip sees each input change at the instruction that made it and
 //     the RP2040 reads outputs at most [quantumNs] old.
 
-import { openSync, readSync, closeSync } from 'fs';
+import { openSync, readSync, closeSync, writeFileSync } from 'fs';
 import { createRequire } from 'module';
 import { Simulator, USBCDC, ConsoleLogger, LogLevel } from 'rp2040js';
 import { bootromB1 } from './build/bootrom.mjs';
@@ -47,7 +47,7 @@ function loadUF2(path, mcu) {
 }
 
 export class Board {
-  constructor(uf2, { chipHz = 12e6, usbHz = 48e6, quantumNs = 20, cpuSlowdown = 1, log = false } = {}) {
+  constructor(uf2, { quantumNs = 20, cpuSlowdown = 1, log = false } = {}) {
     this.cpuSlowdown = cpuSlowdown; // >1 makes only the CPU's instructions slower (a margin test)
     this.sim = new Simulator();
     const mcu = (this.mcu = this.sim.rp2040);
@@ -72,19 +72,37 @@ export class Board {
       for (const sm of pio.machines) sm.nextNs = null;
     }
 
-    // The hardware, held in reset until [attach].
+    // The hardware is off until [power].
     this.hwOn = false;
     this.quantumNs = quantumNs;
-    hw.init(chipHz, usbHz, 3333);
+    this.pinsDirty = true;
+    for (const g of UI_IN) mcu.gpio[g].addListener(() => { this.pinsDirty = true; });
+  }
+
+  // Power the hardware afresh, in reset: the chip at [chipHz]; the USB
+  // device's 48 MHz clock only if [usb]; the SPI flash loaded from
+  // [flashHex] ($readmemh format); [device], if given, a JavaScript model on
+  // the protocol pins: { mode, pins, step(nowNs, outputs) -> pins }. From
+  // now on the hardware runs with the CPU.
+  power({ chipHz, devMode = 0, usb = false, flashHex = '', device = null }) {
+    if (!flashHex) {
+      flashHex = new URL('./build/empty.hex', import.meta.url).pathname;
+      writeFileSync(flashHex, '');
+    }
+    hw.init(chipHz, usb ? 48e6 : 0, flashHex, this.nanos * 1000);
     this.rstN = 0;
     this.usbRst = 1;
     this.ui = -1;
     this.uo = -1;
-    this.lastSyncNs = 0;
-    this.pinsDirty = true;
     this.portDone = []; // [time (ns), 24-bit word] of each host-port transaction
     this.portWord = 0;
-    for (const g of UI_IN) mcu.gpio[g].addListener(() => { this.pinsDirty = true; });
+    this.device = device;
+    this.devMode = devMode;
+    this.devPins = device ? device.pins : 0x3f;
+    this.out = hw.setDev(devMode, this.devPins);
+    this.hwOn = true;
+    this.pinsDirty = true;
+    this.syncHw(this.nanos);
   }
 
   get nanos() { return this.sim.clock.nanos; }
@@ -122,7 +140,15 @@ export class Board {
 
   syncHw(now) {
     const ps = now * 1000;
-    let uo = hw.advance(ps);
+    let out = hw.advance(ps);
+    if (this.device) {
+      const pins = this.device.step(now, out);
+      if (pins !== undefined && pins !== this.devPins) {
+        this.devPins = pins;
+        out = hw.setDev(this.devMode, pins);
+      }
+    }
+    let uo = out & 0xff;
     if (this.pinsDirty) {
       this.pinsDirty = false;
       const ui = this.readUi();
@@ -135,9 +161,11 @@ export class Board {
           if (this.ui & 2 && !(ui & 2)) this.portWord = 0;
         }
         this.ui = ui;
-        uo = hw.set(ui, this.rstN, this.usbRst);
+        out = hw.set(ui, this.rstN, this.usbRst);
+        uo = out & 0xff;
       }
     }
+    this.outputs = out;
     if (uo !== this.uo) {
       const changed = uo ^ (this.uo < 0 ? ~uo : this.uo);
       this.uo = uo;
@@ -148,10 +176,13 @@ export class Board {
     this.lastSyncNs = now;
   }
 
-  // Connect the hardware: from now on it runs with the CPU.
-  attach() {
-    this.hwOn = true;
+  // Put a JavaScript device model on the protocol pins (devices.mjs).
+  attachDevice(device) {
     this.syncHw(this.nanos);
+    this.device = device;
+    this.devMode = device.mode;
+    this.devPins = device.pins;
+    this.outputs = hw.setDev(this.devMode, this.devPins);
   }
 
   setResets({ rstN = this.rstN, usbRst = this.usbRst }) {

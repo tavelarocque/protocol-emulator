@@ -69,7 +69,7 @@ if (e) throw new Error(e);
 
 // Power the chip and the device: reset both, then wait for the device's
 // pull-up.
-board.attach();
+board.power({ chipHz: 12e6, devMode: 7, usb: true });
 board.setResets({ rstN: 0, usbRst: 1 });
 board.run(null, 2000);
 board.setResets({ rstN: 1, usbRst: 0 });

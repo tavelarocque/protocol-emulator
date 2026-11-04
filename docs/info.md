@@ -56,9 +56,9 @@ project, clock it at 10 MHz (`tt.clock_project_PWM(10_000_000)`), and
 `pe.Chip(pe.demo_board_port())` gives register access, firmware loading and
 FIFO push/pop, with helpers for UART TX, the SPI controller, and the I2C and
 SPI device modes. The cocotb tests run this same file against the chip. The
-register-level recipes below are what it does underneath. It has also run
-in MicroPython on an emulated demo board wired to the chip's RTL
-(`test/board_emu`), which is the closest thing to the board short of one.
+register-level recipes below are what it does underneath. Every protocol
+class has also run in MicroPython on an emulated demo board wired to the
+chip's RTL (`test/board_emu`), the closest thing to the board short of one.
 
 With the demo board's RP2040 as SPI host: load a firmware image (for
 example the 15-instruction UART transmitter in `test/uart_tx.hex`) into

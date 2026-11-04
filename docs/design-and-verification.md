@@ -16,7 +16,7 @@ AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
 | C2 | The firmware implements each protocol correctly at the pins | Protocol oracles on the model and the RTL; device models written by other people from real datasheets and standards | Tests, judged by independent oracles |
 | C3 | The gate-level netlist behaves like the RTL | Formal equivalence of the post-layout netlist and the generated Verilog (Yosys, in CI after every layout); the cocotb suite rerun on the netlist; LVS | Proof, from the first cycle after a reset, on every output pin; Hardcaml's Verilog generation itself is trusted (section 7) |
 | C4 | The chip meets timing at its rated 10 MHz | Static timing analysis at 50 MHz, slow corner | About 80 ns of slack at 10 MHz. At 50 MHz, the slow corner's slack has varied by 1.3 ns between layout runs of the same logic (−0.14 ns, then +1.19 ns), so 50 MHz is not claimed |
-| C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb, and in MicroPython on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL | Tests in simulation and emulation; not yet run on hardware |
+| C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb, and in MicroPython on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL: every protocol class, against the same devices | Tests in simulation and emulation; not yet run on hardware |
 
 ## 2. Design
 
@@ -221,7 +221,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 57 in all:
+fails if any survives. There are 58 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -239,7 +239,7 @@ fails if any survives. There are 57 in all:
 | USB firmware (4 sending, 3 receiving) | 7 | `sim/test_usb.ml` |
 | JTAG, SWD and host drivers | 4 | `test_driver_planted_bugs` in `test/test.py` |
 | USB driver | 2 | `test_usb_driver_planted_bugs` in `test/test.py` |
-| USB driver on the emulated board | 1 | `test/board_emu/run_usb.mjs --mutant push-after-start` |
+| Driver on the emulated board | 2 | `test/board_emu`: `run_usb.mjs --mutant push-after-start`, `run_board.mjs --mutant cpython-only-call` |
 | gate netlist | 4 | `gl_equiv/check.py`: the RTL-to-netlist proof |
 
 The driver bugs are planted by replacing one driver method for one
@@ -249,7 +249,7 @@ count as a catch. The SPI host-port bug is a parameter of `hw/top.ml`, off
 by default, following `hw/pe_core.ml`; the generated Verilog is
 byte-identical with or without the parameter in the source.
 
-All 57 are caught. Two candidates turned out not to be bugs, and the
+All 58 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -284,6 +284,7 @@ specification allows. The firmware now reads SDA first.
 | The driver stopped collecting a received packet if the engine finished between two status reads | cocotb against the USB device; the driver now drains the FIFO after it sees the engine idle |
 | A stale firmware image (built before a fix) made the driver's timeout-vector constant point at the wrong instruction | a PC trace of the receive in cocotb; the test now checks the image against the driver's constants before every USB test |
 | The driver called `int.bit_length`, which MicroPython does not have, so on the board it could not decode any received packet | running the driver in MicroPython on the emulated board; a comparison of the driver's packet and CRC functions under MicroPython and CPython now runs in CI |
+| The SWD driver's error path called `format`, which MicroPython does not have, so a target that did not answer raised NameError instead of SwdError | running every protocol class on the emulated board (`run_board.mjs`); CI now runs all of them, with this bug planted back as a check |
 | Bit-banged from MicroPython, the USB driver's handshake reached the bus 14.6 ms after the device's data, against the 16 bit times (10.7 us) the device waits; the device, never having seen the handshake, repeated DATA1 and the read failed | the emulated board, timing the real driver. cocotb could not show it: it clocks the port as fast as the chip allows. Fixed with a host port run by an RP2040 PIO state machine |
 | The first PIO port was fed one word at a time by MicroPython, which starved it: a short packet's handshake came 9.95 bit times after the data, and a zero-length packet's would have come after 33 | the emulated board's slack measurement; each batch is now queued with the state machine stopped, then started |
 
@@ -339,7 +340,9 @@ answer it.
 - **Hardware.** Nothing has run on silicon yet. The host driver has run in
   CPython against the simulated chip in cocotb, and in MicroPython on an
   emulated demo board (`test/board_emu`): rp2040js running Tiny Tapeout's
-  own firmware, its pins wired to the RTL and the USB device. The emulator
+  own firmware, its pins wired to the RTL and a device for each protocol
+  (picosoc's SPI flash, the JTAG and SWD targets, usbhostslave's USB
+  device, and UART, I2C and SPI controllers written for the emulation). The emulator
   counts cycles but is not silicon: it treats flash as zero-wait and runs
   MicroPython about 2x slower than published real-Pico figures, so it shows
   timing margins, not exact times. The parts the USB result depends on (the
