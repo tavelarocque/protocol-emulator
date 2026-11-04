@@ -283,6 +283,9 @@ specification allows. The firmware now reads SDA first.
 | The USB receive engine's "still J" path was one clock longer than its "still K" path, so long runs of J drifted out of the bit | random received packets on the model, in long runs of 1s; fixed by reordering so both fall into their wait |
 | The driver stopped collecting a received packet if the engine finished between two status reads | cocotb against the USB device; the driver now drains the FIFO after it sees the engine idle |
 | A stale firmware image (built before a fix) made the driver's timeout-vector constant point at the wrong instruction | a PC trace of the receive in cocotb; the test now checks the image against the driver's constants before every USB test |
+| The driver called `int.bit_length`, which MicroPython does not have, so on the board it could not decode any received packet | running the driver in MicroPython on the emulated board; a comparison of the driver's packet and CRC functions under MicroPython and CPython now runs in CI |
+| Bit-banged from MicroPython, the USB driver's handshake reached the bus 14.6 ms after the device's data, against the 16 bit times (10.7 us) the device waits; the device resent and the read failed | the emulated board, timing the real driver. cocotb could not show it: it clocks the port as fast as the chip allows. Fixed with a host port run by an RP2040 PIO state machine |
+| The first PIO port was fed one word at a time by MicroPython, which starved it: a short packet's handshake came 9.95 bit times after the data, and a zero-length packet's would have come after 33 | the emulated board's slack measurement; each batch is now queued with the state machine stopped, then started |
 
 ## 6. AI-assisted verification, and independence
 
@@ -334,8 +337,14 @@ answer it.
 - **Pads, reset and power** are Tiny Tapeout's and are not modelled beyond
   the gate-level simulation.
 - **Hardware.** Nothing has run on silicon yet. The host driver has run in
-  CPython against the simulated chip, not yet in MicroPython on the demo
-  board's RP2040, where bit-banging will be slower and is unverified.
+  CPython against the simulated chip in cocotb, and in MicroPython on an
+  emulated demo board (`test/board_emu`): rp2040js running Tiny Tapeout's
+  own firmware, its pins wired to the RTL and the USB device. The emulator
+  counts cycles but is not silicon: it treats flash as zero-wait and runs
+  MicroPython about 2x slower than published real-Pico figures, so it shows
+  timing margins, not exact times. The parts the USB result depends on (the
+  PIO port and the chip) are timed to the cycle, and the result holds with
+  the emulated CPU slowed a further 3x.
 - **Speed limits** are measured in simulation. The I2C target keeps up with
   SCL low for 7 core clocks; the SPI device with 8 clocks per SCK phase
   (625 kHz at 10 MHz).
@@ -345,10 +354,13 @@ answer it.
   transceiver rather than the wires. The chip cannot be a USB device a PC
   enumerates: the board's bit-banged host port is far too slow to answer
   within USB's turnaround, so the host role was chosen, with the engine
-  owning every timing-critical step. Two known limits: after a NAK the
-  engine still sends the ACK queued behind it, which a device ignores but
-  the spec does not allow; and only simulation has shown the driver keeping
-  up, so real MicroPython speed is untested.
+  owning the bit timing. One step is left to the board: an IN transaction's
+  handshake must reach the chip within about 100 us of the engine starting.
+  Bit-banged from MicroPython it arrived 14.6 ms late (on the emulated
+  board), so for USB the driver runs the host port from an RP2040 PIO state
+  machine, which lands it 22 to 53 us early, enough for a zero-length packet
+  too. One known limit: after a NAK the engine still sends the ACK queued
+  behind it, which a device ignores but the spec does not allow.
 - **Protocols not done.** CAN and 10 Mbit Ethernet; Ethernet needs a clock
   well above what the timing margin supports.
 - **SWD's target model** was written for this project, from ADIv5, so it does
@@ -363,6 +375,8 @@ dune runtest    # OCaml suite: ISA, lockstep, coverage closure, formal proofs,
 cd test && make # cocotb suite on the RTL (Icarus Verilog)
 python3 gl_equiv/check.py --netlist <netlist.v> --lib <cells.lib> --mutants
                 # RTL-to-netlist proof (Yosys), on a layout build's netlist
+make -C test/board_emu && cd test/board_emu && node run_usb.mjs
+                # the driver in MicroPython on an emulated demo board
 ```
 
 The setup is in the [README](../README.md). In recent GitHub Actions runs
