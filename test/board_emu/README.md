@@ -65,4 +65,47 @@ A run takes a few minutes of wall time.
 
 ## Results
 
-RESULTS
+The emulation is deterministic: CI on GitHub prints the same numbers to the
+tenth of a microsecond.
+
+**The driver as it was (bit-banged port, one push at a time).** It never
+decoded a packet. `int.bit_length` does not exist in MicroPython, so
+`usb_decode` raised on the first data packet. `run_compat.mjs` now catches
+that class of bug in seconds.
+
+With that patched, the read still failed:
+
+- **The writes were too slow.** Each register write took about 3.6 ms, so
+  the handshake reached the bus 14.6 ms after the device's data, against the
+  16 bit times (10.7 µs) a device waits.
+- **The device never saw the handshake.** On the next IN it answered with
+  DATA1 again (an empty packet) instead of advancing to DATA0.
+- **The driver then rejected the packet**, raising "bad data packet".
+
+**The driver now (PioPort, batches queued with the state machine
+stopped).** The 18-byte descriptor reads back correctly.
+
+- **Handshakes come at the engine's own pace.** Every one starts 4.07 bit
+  times after the device's data, so the engine was waiting on nothing.
+- **The handshake's last word has margin.** It reached the chip 52.8 µs
+  before the end of each 8-byte data packet, and 22.1 µs before the end of
+  the 2-byte one. A zero-length packet ends 10.7 µs sooner than that, so it
+  would still be on time.
+- **The CPU's speed doesn't matter.** With the emulated CPU three times
+  slower, every time above is unchanged to within 0.1 µs.
+
+**The planted bug (`--mutant push-after-start`).** This puts the
+handshake's words in one at a time after the engine starts, each after a
+status read, as the driver used to. The run must fail, and it does: MUTANT.
+
+**Two intermediate versions** of `PioPort` were tried and measured on the
+way:
+
+- **One SCK timing for reads and writes.** The handshake had 1.6 µs to spare
+  on the short packet. From that slack, a zero-length packet's handshake
+  would have come after about 17.7 bit times, too late.
+- **Words fed one at a time from MicroPython.** That starved the state
+  machine, so the short packet's handshake came after 9.95 bit times.
+
+The test now fails any version whose zero-length handshake would come after
+16 bit times.
