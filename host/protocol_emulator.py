@@ -5,7 +5,9 @@
 Runs on the Tiny Tapeout demo board's RP2040 under MicroPython, and under
 CPython, where the cocotb testbench (test/test.py, "host driver" tests) runs
 this same file against the RTL and the gate-level netlist. It uses nothing
-beyond the core language, so the code tested is the code that ships.
+beyond the core language, so the code tested is the code that ships;
+test/board_emu runs it in MicroPython on an emulated demo board too, which
+is how an int.bit_length call (CPython only) was found.
 
 The chip's host port is SPI mode 0 on ui_in[0] (SCK), ui_in[1] (CS_N) and
 ui_in[2] (MOSI), with MISO on uo_out[0]; every transaction is 24 bits:
@@ -24,6 +26,11 @@ On the demo board::
     chip = pe.Chip(pe.demo_board_port())
     uart = pe.UartTx(chip, pe.load_hex("uart_tx.hex"), divisor=87)  # 115200 baud
     uart.write(b"hello")
+
+The USB host needs the port driven by PIO instead (see UsbHost)::
+
+    tt.clock_project_PWM(12_000_000)
+    usb = pe.UsbHost(pe.Chip(pe.PioPort()), pe.load_hex("usb_host.hex"))
 """
 
 # --- Register map (hw/top.ml) ------------------------------------------------
@@ -99,10 +106,70 @@ class BitBangPort:
         set_pins(0, 1, 0)
         return got
 
+    def transfer_many(self, words):
+        """Several transactions back to back; returns what each read."""
+        return [self.transfer(w) for w in words]
+
+
+class PioPort:
+    """The host port driven by one of the RP2040's PIO state machines, so a
+    batch of transactions goes out at a fixed pace however slow MicroPython
+    is: SCK, CS_N and MOSI on [sck_pin] and the two pins after it (ui_in[0]
+    to [2]), MISO on [miso_pin] (uo_out[0]). Each SCK phase lasts two PIO
+    cycles, so [freq] / 2 must be at most a quarter of the chip's clock
+    (the default, 4 MHz, gives 6 core clocks a phase at 12 MHz; a
+    transaction then takes about 25 us).
+
+    MicroPython only. On the TT06+ demo board's RP2040, ui_in[0] is GPIO 9
+    and uo_out[0] GPIO 5 (ttboard/pins/gpio_map.py)."""
+
+    def __init__(self, sck_pin=9, miso_pin=5, freq=4_000_000, sm_id=0):
+        import rp2
+        from machine import Pin
+
+        @rp2.asm_pio(out_init=rp2.PIO.OUT_LOW,
+                     sideset_init=(rp2.PIO.OUT_LOW, rp2.PIO.OUT_HIGH),
+                     out_shiftdir=rp2.PIO.SHIFT_LEFT,
+                     in_shiftdir=rp2.PIO.SHIFT_LEFT)
+        def spi24():
+            # side-set bit 0 is SCK, bit 1 CS_N
+            pull()                .side(0b10)      # idle: CS_N high, SCK low
+            set(x, 23)            .side(0b00)      # select
+            label("bit")
+            out(pins, 1)          .side(0b00) [1]  # MOSI changes while SCK is low
+            in_(pins, 1)          .side(0b01)      # SCK rises: both ends sample
+            jmp(x_dec, "bit")     .side(0b01)
+            nop()                 .side(0b00) [1]  # SCK low, then deselect
+            push()                .side(0b10) [3]  # CS_N high for 4 cycles at least
+
+        self.sm = rp2.StateMachine(sm_id, spi24, freq=freq, sideset_base=Pin(sck_pin),
+                                   out_base=Pin(sck_pin + 2), in_base=Pin(miso_pin))
+        self.sm.active(1)
+
+    def transfer(self, word):
+        return self.transfer_many([word])[0]
+
+    def transfer_many(self, words):
+        """Queues the transactions as fast as MicroPython can; the state
+        machine runs them back to back (CS_N high 1 us between them).
+        Returns the 16 bits each read."""
+        sm, got, pending = self.sm, [], 0
+        for w in words:
+            sm.put(w, 8)  # the 24 bits at the top, sent first
+            pending += 1
+            if pending == 4:  # the RX FIFO is full: take one
+                got.append(sm.get() & 0xFFFF)
+                pending -= 1
+        while pending:
+            got.append(sm.get() & 0xFFFF)
+            pending -= 1
+        return got
+
 
 def demo_board_port():
     """The port on the Tiny Tapeout demo board, through the RP2040's direct
-    pin access (the demo board must be in ASIC_RP_CONTROL mode)."""
+    pin access (the demo board must be in ASIC_RP_CONTROL mode). Too slow
+    for the USB host (see UsbHost); PioPort is not."""
     import ttboard.util.platform as platform  # only exists on the board
 
     def set_pins(sck, cs_n, mosi):
@@ -123,6 +190,10 @@ class Chip:
 
     def write(self, addr, data):
         self.port.transfer((1 << 23) | (addr << 16) | (data & 0xFFFF))
+
+    def write_many(self, writes):
+        """[(addr, data), ...] back to back, as one batch on the port."""
+        self.port.transfer_many([(1 << 23) | (a << 16) | (d & 0xFFFF) for a, d in writes])
 
     def read(self, addr):
         return self.port.transfer(addr << 16) & 0xFFFF
@@ -171,12 +242,17 @@ class Chip:
             v |= 1 << pin
         self.write(SYNC_BYPASS, v)
 
-    def run(self, threads=(0,), chain=False):
-        """Enable the given threads together (one CTRL write)."""
+    @staticmethod
+    def ctrl(threads=(0,), chain=False):
+        """The CTRL value that enables [threads] (and CHAIN)."""
         v = 4 if chain else 0
         for t in threads:
             v |= 1 << t
-        self.write(CTRL, v)
+        return v
+
+    def run(self, threads=(0,), chain=False):
+        """Enable the given threads together (one CTRL write)."""
+        self.write(CTRL, self.ctrl(threads, chain))
 
     def status(self, thread=0):
         s = self.read(STATUS + BANK * thread)
@@ -563,6 +639,7 @@ USB_ENGINE_ORIGIN = 5  # Firmware.Usb_host.engine_origin (the OCaml tests check 
 USB_TMO = 22  # Firmware.usb_tmo: the receive timeout vector, from the origin
 USB_RECEIVE = 0x8000  # Firmware.usb_receive: the receive command
 USB_BUFFER_WORDS = 13  # both threads' FIFOs, chained
+USB_LATE_WORDS = 2  # words a transaction may send after the engine starts
 RECEIVE = "receive"  # in a transaction's command list
 
 
@@ -592,7 +669,9 @@ def usb_decode(words):
     last = words[-1]
     if last == 0:
         return None
-    top = last.bit_length() - 1
+    top = 15  # the end marker's position (MicroPython ints have no bit_length)
+    while not (last >> top) & 1:
+        top -= 1
     levels += [(last >> k) & 1 for k in range(top)]
     bits, prev, run = [], 0, 0
     for lv in levels:
@@ -629,7 +708,10 @@ class UsbHost:
     with one CTRL write), after it for receiving. Commands always go to
     thread 0 and results come from thread 1. The engine owns the bit timing,
     clock recovery and turnaround; this code owns packets, CRCs and the
-    transfer logic, and can be as slow as it likes."""
+    transfer logic. Only one step is timed: an IN transaction's handshake
+    goes in after the engine starts, in the same port batch, so the port
+    must run a batch at its own pace. PioPort does; bit-banging from
+    MicroPython is about a hundred times too slow (test/board_emu)."""
 
     def __init__(self, chip, image):
         self.chip = chip
@@ -665,15 +747,22 @@ class UsbHost:
         words = []
         for c in commands:
             words += [USB_RECEIVE] if c == RECEIVE else usb_words(c)
-        if len(words) > USB_BUFFER_WORDS:
+        preload = FIFO_DEPTH if rx_buffered else USB_BUFFER_WORDS
+        if len(words) > preload + (USB_LATE_WORDS if rx_buffered else 0):
             raise ValueError("transaction too long for the chip's buffers")
         self._layout(rx_buffered)
-        preload = FIFO_DEPTH if rx_buffered else USB_BUFFER_WORDS
         for w in words[:preload]:
             self.chip.push(w)
-        self.chip.run(threads=(0, 1), chain=True)
-        for w in words[preload:]:
-            self.chip.push(w)
+        # Start the engine and send the words that did not fit in one batch,
+        # with no status reads between: in an IN transaction the handshake
+        # must follow the device's data within 16 bit times, about 100 us
+        # after the start, far less than one MicroPython register access by
+        # bit-banging (milliseconds). These writes need not check for room:
+        # the engine takes its first two words within a few clocks of
+        # starting, and each write lands a whole port transaction (192 core
+        # clocks at least) after the one before.
+        self.chip.write_many([(CTRL, self.chip.ctrl((0, 1), chain=True))]
+                             + [(TX_FIFO, w) for w in words[preload:]])
         got = []
         for _ in range(polls):
             w = self.chip.try_pop(thread=1)

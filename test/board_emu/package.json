@@ -1,0 +1,9 @@
+{
+  "name": "protocol-emulator-board-emu",
+  "private": true,
+  "type": "module",
+  "description": "The demo board's RP2040 (rp2040js) running MicroPython, co-simulated with the chip's RTL",
+  "dependencies": {
+    "rp2040js": "1.4.1"
+  }
+}
