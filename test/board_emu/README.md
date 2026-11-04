@@ -96,7 +96,9 @@ stopped).** The 18-byte descriptor reads back correctly.
 
 **The planted bug (`--mutant push-after-start`).** This puts the
 handshake's words in one at a time after the engine starts, each after a
-status read, as the driver used to. The run must fail, and it does: MUTANT.
+status read, as the driver used to. The run must fail, and it does. Even on the PIO port, the handshake reached the
+bus 1.1 ms (about 1,650 bit times) after the device's data, and the read
+failed as the old driver's did.
 
 **Two intermediate versions** of `PioPort` were tried and measured on the
 way:

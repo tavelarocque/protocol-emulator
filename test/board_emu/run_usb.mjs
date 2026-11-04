@@ -135,6 +135,6 @@ const got = (o.match(/DATA ([0-9a-f ]+)/) || [])[1];
 const want = DESCRIPTOR.map((b) => b.toString(16).padStart(2, '0')).join(' ');
 const pass = got === want && late === 0 && worstZlp <= 16 && conflicts === 0;
 console.log(`\ndescriptor ${got === want ? 'correct' : 'WRONG or missing'}; late handshakes ${late}; ` +
-  `worst handshake gap ${worst.toFixed(2)} bit times (${worstZlp.toFixed(2)} for a zero-length packet); least slack ${minSlack.toFixed(1)} us; bus conflicts ${conflicts}; ` +
+  `worst handshake gap ${worst.toFixed(2)} bit times (${worstZlp.toFixed(2)} for a zero-length packet); least slack ${isFinite(minSlack) ? minSlack.toFixed(1) + ' us' : 'n/a'}; bus conflicts ${conflicts}; ` +
   `wall ${((Date.now() - wall) / 1000).toFixed(0)} s`);
 process.exit(pass !== expectFail ? 0 : 1);
