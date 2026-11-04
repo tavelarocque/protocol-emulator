@@ -56,7 +56,9 @@ project, clock it at 10 MHz (`tt.clock_project_PWM(10_000_000)`), and
 `pe.Chip(pe.demo_board_port())` gives register access, firmware loading and
 FIFO push/pop, with helpers for UART TX, the SPI controller, and the I2C and
 SPI device modes. The cocotb tests run this same file against the chip. The
-register-level recipes below are what it does underneath.
+register-level recipes below are what it does underneath. It has also run
+in MicroPython on an emulated demo board wired to the chip's RTL
+(`test/board_emu`), which is the closest thing to the board short of one.
 
 With the demo board's RP2040 as SPI host: load a firmware image (for
 example the 15-instruction UART transmitter in `test/uart_tx.hex`) into
@@ -111,7 +113,12 @@ and OE_N on P4 (push-pull). The board driver's `UsbHost` sets it up and
 offers `transaction()` (packets to send and one receive, with the engine
 doing EOP, turnaround and clock recovery) and `control_read()` (SETUP, IN
 data stages, OUT status). Commands go to thread 0 and results come from
-thread 1, whichever thread the engine runs on.
+thread 1, whichever thread the engine runs on. Give it `pe.Chip(pe.PioPort())`,
+not the bit-banged port: an IN transaction's handshake must reach the chip
+within about 100 us of the engine starting, and `PioPort` runs the host
+port from one of the RP2040's PIO state machines (GPIO 9 to 11 and 5) so
+it does. Bit-banged from MicroPython, each register access takes
+milliseconds (`test/board_emu`).
 
 ## External hardware
 

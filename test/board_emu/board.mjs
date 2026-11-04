@@ -82,6 +82,8 @@ export class Board {
     this.uo = -1;
     this.lastSyncNs = 0;
     this.pinsDirty = true;
+    this.portDone = []; // [time (ns), 24-bit word] of each host-port transaction
+    this.portWord = 0;
     for (const g of UI_IN) mcu.gpio[g].addListener(() => { this.pinsDirty = true; });
   }
 
@@ -125,6 +127,13 @@ export class Board {
       this.pinsDirty = false;
       const ui = this.readUi();
       if (ui !== this.ui) {
+        // The host port, decoded: SCK ui_in[0], CS_N [1], MOSI [2]; a
+        // transaction ends where CS_N rises.
+        if (this.ui >= 0) {
+          if (!(this.ui & 1) && ui & 1 && !(ui & 2)) this.portWord = (this.portWord << 1 | (ui >> 2 & 1)) >>> 0;
+          if (!(this.ui & 2) && ui & 2) { this.portDone.push([now, this.portWord & 0xffffff]); }
+          if (this.ui & 2 && !(ui & 2)) this.portWord = 0;
+        }
         this.ui = ui;
         uo = hw.set(ui, this.rstN, this.usbRst);
       }
@@ -181,22 +190,42 @@ export class Board {
 
   send(s) { for (const ch of Buffer.from(s, 'latin1')) this.cdc.sendSerialByte(ch); }
 
-  // Execute code through the raw REPL; returns [stdout, stderr].
+  // Execute code through MicroPython's raw-paste mode, which has flow
+  // control, so a slow CPU loses nothing; returns [stdout, stderr].
   exec(code, maxNs = 60e9) {
     this.out = '';
     this.send('\x01');
     if (!this.run(() => this.out.includes('raw REPL; CTRL-B to exit\r\n>'), 5e9))
       throw new Error('no raw REPL: ' + JSON.stringify(this.out.slice(-300)));
     this.out = '';
-    for (let i = 0; i < code.length; i += 64) {
-      this.send(code.slice(i, i + 64));
-      this.run(null, 2e6); // the CDC endpoint is small: let it drain
+    this.send('\x05A\x01');
+    if (!this.run(() => this.out.length >= 4, 5e9) || !this.out.startsWith('R\x01'))
+      throw new Error('no raw-paste mode: ' + JSON.stringify(this.out));
+    const inc = this.out.charCodeAt(2) | (this.out.charCodeAt(3) << 8);
+    let window = inc, seen = 4, i = 0;
+    while (i < code.length) {
+      // Each 0x01 from the device grants another window of bytes.
+      for (; seen < this.out.length; seen++) {
+        if (this.out.charCodeAt(seen) === 1) window += inc;
+        else if (this.out.charCodeAt(seen) === 4) throw new Error('paste aborted');
+      }
+      if (window > 0) {
+        const n = Math.min(window, code.length - i, 32);
+        this.send(code.slice(i, i + n));
+        i += n;
+        window -= n;
+        this.run(null, 50e3);
+      } else if (!this.run(() => this.out.length > seen, 5e9)) {
+        throw new Error('raw-paste stalled at byte ' + i);
+      }
     }
     this.send('\x04');
-    if (!this.run(() => (this.out.match(/\x04/g) || []).length >= 2, maxNs))
+    // The device acknowledges the end with 0x04, then runs the code: stdout,
+    // 0x04, stderr, 0x04.
+    const ack = () => this.out.indexOf('\x04', seen);
+    if (!this.run(() => ack() >= 0 && (this.out.slice(ack() + 1).match(/\x04/g) || []).length >= 2, maxNs))
       throw new Error('timeout: ' + JSON.stringify(this.out.slice(-500)));
-    const m = this.out.match(/^OK([\s\S]*?)\x04([\s\S]*?)\x04/);
-    if (!m) throw new Error('bad reply: ' + JSON.stringify(this.out));
+    const m = this.out.slice(ack() + 1).match(/^([\s\S]*?)\x04([\s\S]*?)\x04/);
     return [m[1], m[2]];
   }
 

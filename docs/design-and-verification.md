@@ -16,7 +16,7 @@ AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
 | C2 | The firmware implements each protocol correctly at the pins | Protocol oracles on the model and the RTL; device models written by other people from real datasheets and standards | Tests, judged by independent oracles |
 | C3 | The gate-level netlist behaves like the RTL | Formal equivalence of the post-layout netlist and the generated Verilog (Yosys, in CI after every layout); the cocotb suite rerun on the netlist; LVS | Proof, from the first cycle after a reset, on every output pin; Hardcaml's Verilog generation itself is trusted (section 7) |
 | C4 | The chip meets timing at its rated 10 MHz | Static timing analysis at 50 MHz, slow corner | About 80 ns of slack at 10 MHz. At 50 MHz, the slow corner's slack has varied by 1.3 ns between layout runs of the same logic (−0.14 ns, then +1.19 ns), so 50 MHz is not claimed |
-| C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb | Tests in simulation; not yet run on hardware |
+| C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb, and in MicroPython on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL | Tests in simulation and emulation; not yet run on hardware |
 
 ## 2. Design
 
@@ -40,7 +40,7 @@ anyone likes.
 | Every 16-bit word decodes to a defined instruction | Reserved encodings that trap or are undefined | Makes uniformly random program memory a valid test input and the decoder exhaustively checkable (65,536 words). There are no X states to reason about |
 | Integer clock divider per thread | PIO's fractional divider | Simpler hardware. Fractional baud rates use X/Y loops instead; UART RX tolerates a sender about 5% off rate on isolated frames, and back-to-back frames are tested to 2% |
 | Two threads sharing a 64-word memory (the model always had two) | Four, as PIO has | Two cover the useful pairings (TX+RX, controller+bridge). Layout time is already tight: two-thread layouts take 4 to 5 hours against GitHub's 6-hour job limit, where the one-thread v1.1 took 91 minutes, and one two-thread build ran out of time in routing |
-| SPI host port, 24-bit transactions | A UART or a parallel bus | Any microcontroller can drive SPI, and the demo board's RP2040 can bit-bang it from MicroPython |
+| SPI host port, 24-bit transactions | A UART or a parallel bus | Any microcontroller can drive SPI: the demo board's RP2040 can bit-bang it from MicroPython, or run it from PIO where timing matters (USB) |
 | Two-flip-flop synchronisers on every protocol input, bypassable per pin | No synchronisers | Found in a review for silicon, which simulation cannot find (ISA v1.3). The bypass exists because side-set SPI samples MISO one clock after SCK falls, and a test shows it fails with the extra two cycles |
 | Shift direction per thread | Bit-reversal in the host | MSB-first protocols (SPI, I2C) take and return plain bytes, and one thread can bridge an MSB-first protocol into an LSB-first one |
 | Freeze the hardware at v1.4 | Keep adding features | Every later change is firmware, tests or docs, so none of it can put the tapeout at risk |
@@ -65,7 +65,7 @@ The freeze put that claim to the test. Since v1.4, with no hardware change:
 | JTAG controller (any TMS/TDI sequence, TDO back) | 11 words | `out pins, 2`, side-set for TCK |
 | Arm SWD clock engine, with the framing in the host driver | 11 words | open-drain SWDIO, side-set for SWCLK |
 | Low-speed USB host engine (the competition's stretch goal): sends packets with EOP and turnaround, receives with clock recovery | 49 words, plus the 5-word echo as a relay | timed waits on the edge that would leave the current level, the timeout vector as "no edge this bit"; CHAIN to buffer a whole transaction on either side of the engine; side-set for the transceiver's FSE0 and OE_N |
-| Host driver for the demo board | 724 lines of MicroPython | the register map only |
+| Host driver for the demo board | 813 lines of MicroPython | the register map only; for USB, a 7-instruction RP2040 PIO program that runs the host port |
 
 None of these is mentioned in the ISA's design or its revisions, which were
 driven by the controllers. That they fit is the strongest evidence that the
@@ -221,7 +221,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 56 in all:
+fails if any survives. There are 57 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -239,6 +239,7 @@ fails if any survives. There are 56 in all:
 | USB firmware (4 sending, 3 receiving) | 7 | `sim/test_usb.ml` |
 | JTAG, SWD and host drivers | 4 | `test_driver_planted_bugs` in `test/test.py` |
 | USB driver | 2 | `test_usb_driver_planted_bugs` in `test/test.py` |
+| USB driver on the emulated board | 1 | `test/board_emu/run_usb.mjs --mutant push-after-start` |
 | gate netlist | 4 | `gl_equiv/check.py`: the RTL-to-netlist proof |
 
 The driver bugs are planted by replacing one driver method for one
@@ -248,7 +249,7 @@ count as a catch. The SPI host-port bug is a parameter of `hw/top.ml`, off
 by default, following `hw/pe_core.ml`; the generated Verilog is
 byte-identical with or without the parameter in the source.
 
-All 56 are caught. Two candidates turned out not to be bugs, and the
+All 57 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.

@@ -1,0 +1,33 @@
+name: board
+on: [push, workflow_dispatch]
+jobs:
+  # The host driver in MicroPython on an emulated demo board (rp2040js),
+  # co-simulated with the chip's RTL and a USB device (test/board_emu).
+  board_emu:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Install Verilator
+        run: sudo apt-get update && sudo apt-get install -y verilator
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build the co-simulation
+        run: make -C test/board_emu
+
+      - name: The driver computes the same in MicroPython as in CPython
+        working-directory: test/board_emu
+        run: node run_compat.mjs
+
+      - name: USB descriptor read on the emulated board
+        working-directory: test/board_emu
+        run: node run_usb.mjs
+
+      - name: Planted bug, handshake words pushed one at a time, must fail
+        working-directory: test/board_emu
+        run: node run_usb.mjs --mutant push-after-start --expect-fail

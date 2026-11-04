@@ -5,7 +5,7 @@
 // things: runs compat.py after host/protocol_emulator.py in both and
 // compares. No chip is needed, so this takes seconds of emulated time.
 //
-//   node run_compat.mjs [--driver FILE]
+//   node run_compat.mjs [--driver FILE] [--cpu-slowdown K]
 
 import { readFileSync } from 'fs';
 import { execFileSync } from 'child_process';
@@ -21,7 +21,9 @@ const compat = readFileSync(join(HERE, 'compat.py'), 'latin1');
 
 const cpython = execFileSync('python3', ['-c', driver + '\n' + compat], { encoding: 'latin1' }).trim();
 
-const board = new Board(join(HERE, 'build', 'tt-demo-rp2040-v2.0.4.uf2'));
+const j = process.argv.indexOf('--cpu-slowdown');
+const cpuSlowdown = j < 0 ? 1 : Number(process.argv[j + 1]);
+const board = new Board(join(HERE, 'build', 'tt-demo-rp2040-v2.0.4.uf2'), { cpuSlowdown });
 board.boot();
 const [o, e] = board.exec(driver + '\n' + compat);
 const micropython = (o + e).trim();

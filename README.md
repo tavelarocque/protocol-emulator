@@ -119,7 +119,7 @@ independent protocol oracles.
 Three practices run through all of it.
 
 **Mutation testing, kept in the repo.** Every layer has deliberately planted
-bugs, 56 in all, kept as code, and the suite fails if any survives. A test
+bugs, 57 in all, kept as code, and the suite fails if any survives. A test
 suite that has never failed has not been shown to work.
 
 | Layer | Planted bugs | Caught |
@@ -173,7 +173,8 @@ model/   reference model, assembler, firmware, UART oracles (no dependency on hw
 sim/     OCaml tests: ISA, lockstep harness, random and directed differential tests,
          formal proof, firmware, chip-level tests
 bin/     Verilog generator, firmware hex generator
-host/    MicroPython driver for the demo board's RP2040 (tested in cocotb, unchanged)
+host/    MicroPython driver for the demo board's RP2040 (tested in cocotb, unchanged,
+         and in MicroPython on an emulated board: test/board_emu)
 src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v
 test/    cocotb testbench (RTL and gate-level) + generated firmware .hex;
          usbhostslave/ is a third-party USB device core (LGPL, test only)
