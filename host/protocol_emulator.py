@@ -161,20 +161,21 @@ class PioPort:
         return self.transfer_many([word])[0]
 
     def transfer_many(self, words):
-        """Queues the transactions as fast as MicroPython can; the state
-        machine runs them back to back. Returns the 16 bits each read (0
-        for a write)."""
-        sm, got, pending = self.sm, [], 0
-        for w in words:
-            read = 0 if w & (1 << 23) else 1 << 24
-            sm.put(read | w, 7)  # shifted in C: bit 31 is past a small int
-            pending += 1
-            if pending == 4:  # the RX FIFO is full: take one
+        """Runs the transactions back to back at the state machine's pace,
+        not MicroPython's: a batch of up to 4 is queued with the state
+        machine stopped (between transactions, so nothing is cut), then
+        started. Returns the 16 bits each read (0 for a write)."""
+        sm = self.sm
+        vals = [w if w & (1 << 23) else w | (1 << 24) for w in words]  # bit 24: a read
+        got = []
+        for start in range(0, len(vals), 4):
+            batch = vals[start:start + 4]
+            sm.active(0)
+            for v in batch:
+                sm.put(v, 7)  # shifted in C: bit 31 is past a small int
+            sm.active(1)
+            for _ in batch:
                 got.append(sm.get() & 0xFFFF)
-                pending -= 1
-        while pending:
-            got.append(sm.get() & 0xFFFF)
-            pending -= 1
         return got
 
 

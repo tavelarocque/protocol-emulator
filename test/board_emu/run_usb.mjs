@@ -114,17 +114,22 @@ for (let i = 0; i < ps.length; i++) {
   if (!ok) late++;
   else worst = Math.max(worst, gap);
   // Slack: how long before the device's data ended the handshake's last
-  // word (the last TX FIFO write before it) had reached the chip.
-  const TX_WRITE = (1 << 7) | 0x48;
-  const done = board.portDone.filter(([t, w]) => t < p.end && w >> 16 === TX_WRITE);
-  const slack = done.length ? (p.end - done[done.length - 1][0]) / 1000 : NaN;
+  // word reached the chip (negative if after). That word is the last TX
+  // FIFO write after the CTRL write that started this transaction.
+  const CTRL_WRITE = (1 << 7) | 0x40, TX_WRITE = (1 << 7) | 0x48;
+  const pd = board.portDone;
+  let c = -1;
+  for (let q = 0; q < pd.length && pd[q][0] < p.start; q++) if (pd[q][1] >> 16 === CTRL_WRITE) c = q;
+  let last = null;
+  for (let q = c + 1; q < pd.length && pd[q][1] >> 16 !== CTRL_WRITE; q++) if (pd[q][1] >> 16 === TX_WRITE) last = pd[q][0];
+  const slack = c >= 0 && last !== null ? (p.end - last) / 1000 : NaN;
   // A zero-length data packet (SYNC, PID, CRC16: 32 bits, then EOP) would
   // end this much sooner, with the host's words arriving at the same time;
   // the handshake would then start late by however far they missed it.
   const zlpSlack = slack - (p.end - (p.start + 34 * BIT_NS)) / 1000;
-  const zlpGap = gap + Math.max(0, -zlpSlack) * 1000 / BIT_NS;
+  const zlpGap = gap + (Math.max(0, -zlpSlack) - Math.max(0, -slack)) * 1000 / BIT_NS;
   if (ok) { minSlack = Math.min(minSlack, slack); worstZlp = Math.max(worstZlp, zlpGap); }
-  console.log(`  ${pidName(p)} ${p.bytes.length - 3} bytes: next is ${n ? (n.host ? 'host ' : 'device ') + pidName(n) : 'nothing'} after ${gap.toFixed(2)} bit times ${ok ? 'OK' : 'LATE'}; last TX FIFO write ${slack.toFixed(1)} us before the data ended (a zero-length packet's handshake would follow after ${zlpGap.toFixed(2)} bit times)`);
+  console.log(`  ${pidName(p)} ${p.bytes.length - 3} bytes: next is ${n ? (n.host ? 'host ' : 'device ') + pidName(n) : 'nothing'} after ${gap.toFixed(2)} bit times ${ok ? 'OK' : 'LATE'}; handshake's last word in ${slack.toFixed(1)} us before the data ended (a zero-length packet's handshake would follow after ${zlpGap.toFixed(2)} bit times)`);
 }
 const got = (o.match(/DATA ([0-9a-f ]+)/) || [])[1];
 const want = DESCRIPTOR.map((b) => b.toString(16).padStart(2, '0')).join(' ');
