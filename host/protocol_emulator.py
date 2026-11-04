@@ -115,15 +115,18 @@ class PioPort:
     """The host port driven by one of the RP2040's PIO state machines, so a
     batch of transactions goes out at a fixed pace however slow MicroPython
     is: SCK, CS_N and MOSI on [sck_pin] and the two pins after it (ui_in[0]
-    to [2]), MISO on [miso_pin] (uo_out[0]). Each SCK phase lasts two PIO
-    cycles, so [freq] / 2 must be at most a quarter of the chip's clock
-    (the default, 4 MHz, gives 6 core clocks a phase at 12 MHz; a
-    transaction then takes about 25 us).
+    to [2]), MISO on [miso_pin] (uo_out[0]).
+
+    The state machine runs at 12.5 MHz (80 ns a cycle; it divides 125 and
+    150 MHz exactly). At a 12 MHz core clock, every SCK phase lasts at least
+    4.8 core clocks, against the 4 the chip needs; a read's low phases last
+    7 (6.7 clocks) because MISO moves a few clocks after SCK falls, as the
+    cocotb tests give it 6. A write takes 21 us, a read 25 us.
 
     MicroPython only. On the TT06+ demo board's RP2040, ui_in[0] is GPIO 9
     and uo_out[0] GPIO 5 (ttboard/pins/gpio_map.py)."""
 
-    def __init__(self, sck_pin=9, miso_pin=5, freq=4_000_000, sm_id=0):
+    def __init__(self, sck_pin=9, miso_pin=5, sm_id=0):
         import rp2
         from machine import Pin
 
@@ -132,17 +135,25 @@ class PioPort:
                      out_shiftdir=rp2.PIO.SHIFT_LEFT,
                      in_shiftdir=rp2.PIO.SHIFT_LEFT)
         def spi24():
-            # side-set bit 0 is SCK, bit 1 CS_N
+            # Each word: bit 31 set for a read, then the 24 bits to send.
+            # Side-set bit 0 is SCK, bit 1 CS_N.
             pull()                .side(0b10)      # idle: CS_N high, SCK low
-            set(x, 23)            .side(0b00)      # select
-            label("bit")
-            out(pins, 1)          .side(0b00) [1]  # MOSI changes while SCK is low
-            in_(pins, 1)          .side(0b01)      # SCK rises: both ends sample
-            jmp(x_dec, "bit")     .side(0b01)
-            nop()                 .side(0b00) [1]  # SCK low, then deselect
-            push()                .side(0b10) [3]  # CS_N high for 4 cycles at least
+            out(y, 1)             .side(0b10)      # y: a read?
+            set(x, 23)            .side(0b00) [4]  # select
+            jmp(not_y, "wbit")    .side(0b00)
+            label("rbit")                          # a read: 7 cycles low, 5 high
+            out(pins, 1)          .side(0b00) [6]  # MOSI changes while SCK is low
+            in_(pins, 1)          .side(0b01) [3]  # SCK rises: both ends sample
+            jmp(x_dec, "rbit")    .side(0b01)
+            jmp("end")            .side(0b00) [4]
+            label("wbit")                          # a write: 5 cycles low, 5 high
+            out(pins, 1)          .side(0b00) [4]
+            jmp(x_dec, "wbit")    .side(0b01) [4]
+            nop()                 .side(0b00) [4]
+            label("end")
+            push()                .side(0b10) [7]  # deselect: CS_N high 10 cycles
 
-        self.sm = rp2.StateMachine(sm_id, spi24, freq=freq, sideset_base=Pin(sck_pin),
+        self.sm = rp2.StateMachine(sm_id, spi24, freq=12_500_000, sideset_base=Pin(sck_pin),
                                    out_base=Pin(sck_pin + 2), in_base=Pin(miso_pin))
         self.sm.active(1)
 
@@ -151,11 +162,12 @@ class PioPort:
 
     def transfer_many(self, words):
         """Queues the transactions as fast as MicroPython can; the state
-        machine runs them back to back (CS_N high 1 us between them).
-        Returns the 16 bits each read."""
+        machine runs them back to back. Returns the 16 bits each read (0
+        for a write)."""
         sm, got, pending = self.sm, [], 0
         for w in words:
-            sm.put(w, 8)  # the 24 bits at the top, sent first
+            read = 0 if w & (1 << 23) else 1 << 24
+            sm.put(read | w, 7)  # shifted in C: bit 31 is past a small int
             pending += 1
             if pending == 4:  # the RX FIFO is full: take one
                 got.append(sm.get() & 0xFFFF)

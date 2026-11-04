@@ -103,7 +103,7 @@ console.log('MicroPython printed:', (o + e).trim());
 const ps = packets(steps(log));
 console.log('\nbus (time from the device connecting):');
 for (const p of ps) console.log(describe(p, t0));
-let worst = 0, late = 0, minSlack = Infinity;
+let worst = 0, late = 0, minSlack = Infinity, worstZlp = 0;
 console.log('\nhandshakes after the device\'s data (deadline: 16 bit times, ' + (16 * BIT_NS / 1000).toFixed(2) + ' us):');
 for (let i = 0; i < ps.length; i++) {
   const p = ps[i];
@@ -118,13 +118,18 @@ for (let i = 0; i < ps.length; i++) {
   const TX_WRITE = (1 << 7) | 0x48;
   const done = board.portDone.filter(([t, w]) => t < p.end && w >> 16 === TX_WRITE);
   const slack = done.length ? (p.end - done[done.length - 1][0]) / 1000 : NaN;
-  if (ok) minSlack = Math.min(minSlack, slack);
-  console.log(`  ${pidName(p)} ${p.bytes.length - 3} bytes: next is ${n ? (n.host ? 'host ' : 'device ') + pidName(n) : 'nothing'} after ${gap.toFixed(2)} bit times ${ok ? 'OK' : 'LATE'}; last TX FIFO write ${slack.toFixed(1)} us before the data ended`);
+  // A zero-length data packet (SYNC, PID, CRC16: 32 bits, then EOP) would
+  // end this much sooner, with the host's words arriving at the same time;
+  // the handshake would then start late by however far they missed it.
+  const zlpSlack = slack - (p.end - (p.start + 34 * BIT_NS)) / 1000;
+  const zlpGap = gap + Math.max(0, -zlpSlack) * 1000 / BIT_NS;
+  if (ok) { minSlack = Math.min(minSlack, slack); worstZlp = Math.max(worstZlp, zlpGap); }
+  console.log(`  ${pidName(p)} ${p.bytes.length - 3} bytes: next is ${n ? (n.host ? 'host ' : 'device ') + pidName(n) : 'nothing'} after ${gap.toFixed(2)} bit times ${ok ? 'OK' : 'LATE'}; last TX FIFO write ${slack.toFixed(1)} us before the data ended (a zero-length packet's handshake would follow after ${zlpGap.toFixed(2)} bit times)`);
 }
 const got = (o.match(/DATA ([0-9a-f ]+)/) || [])[1];
 const want = DESCRIPTOR.map((b) => b.toString(16).padStart(2, '0')).join(' ');
-const pass = got === want && late === 0 && conflicts === 0;
+const pass = got === want && late === 0 && worstZlp <= 16 && conflicts === 0;
 console.log(`\ndescriptor ${got === want ? 'correct' : 'WRONG or missing'}; late handshakes ${late}; ` +
-  `worst handshake gap ${worst.toFixed(2)} bit times; least slack ${minSlack.toFixed(1)} us; bus conflicts ${conflicts}; ` +
+  `worst handshake gap ${worst.toFixed(2)} bit times (${worstZlp.toFixed(2)} for a zero-length packet); least slack ${minSlack.toFixed(1)} us; bus conflicts ${conflicts}; ` +
   `wall ${((Date.now() - wall) / 1000).toFixed(0)} s`);
 process.exit(pass !== expectFail ? 0 : 1);
