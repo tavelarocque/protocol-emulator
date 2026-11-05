@@ -6,7 +6,7 @@ An open-source protocol emulator ASIC for the
 [Jane Street protocol emulator competition](https://blog.janestreet.com/protocol-emulator-asic-competition/):
 a tiny CPU whose instructions read pins, write pins and count cycles, so UART,
 SPI and I2C are implemented in firmware loaded after fabrication rather than in
-fixed logic. Written in Hardcaml, taped out through
+fixed logic. Written in Hardcaml, designed for tapeout through
 [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (6x4 tiles).
 
 **Status:** a complete two-thread chip running all three required protocols,
