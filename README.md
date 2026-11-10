@@ -208,8 +208,9 @@ then `node run_usb.mjs` there (see `test/board_emu/README.md`).
 
 ## Metrics
 
-From the GDS build reports. Timing is checked at 50 MHz (20 ns), the worst
-(slow, hot) corner; the chip is specified for 10 MHz.
+From the GDS build reports. Timing is checked at the flow's target clock,
+50 MHz (20 ns) for the builds below and 40 MHz (25 ns) from the ttihp27a
+flow on, at the worst (slow, hot) corner; the chip is specified for 10 MHz.
 
 | Design | Std cells | Utilisation (6x4) | Setup slack | Hold slack |
 |--------|-----------|-------------------|-------------|------------|
@@ -226,8 +227,12 @@ registers named for the formal proofs, meets 50 MHz at every corner with
 1.19 ns to spare at the slow one. A 1.3 ns swing with no logic change is
 placement varying from one layout run to the next, so 50 MHz is not claimed:
 the chip is specified for 10 MHz (100 ns, about 80 ns of slack in every
-build). The 20 ns target is left as it is rather than relaxed to make the
-report clean. Every v1.4 build has 0 DRC and 0 LVS errors and passes the
+build). The 20 ns target was left as it was rather than relaxed to make the
+report clean, until Tiny Tapeout's ttihp27a flow, the one the IHP shuttle
+uses: on it the same logic hit routing congestion at the default placement
+density and failed setup at the slow corner, and that flow stops on a setup
+violation. The target is now 25 ns (40 MHz, still more than three times the
+12 MHz USB needs) and the placement density 45% instead of 60%. Every v1.4 build has 0 DRC and 0 LVS errors and passes the
 Tiny Tapeout precheck and the cocotb suite on the gate-level netlist,
 including the third-party controller tests that drive the chip as an I2C and
 an SPI device; from the current build on, the netlist is also formally
