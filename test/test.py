@@ -1156,6 +1156,203 @@ async def test_swd(dut):
     assert int(dut.dp.parity_errors.value) == 0
 
 
+# --- 1-Wire: a protocol added as firmware alone, on the finished chip ----------
+#
+# On the wire (tb.v, dev_mode 8) are three copies of Iztok Jeras's 1-Wire
+# slave model (sockit_owm, LGPL), at the shortest, typical and longest
+# timing the rules allow: each samples the host's bit 15, 30 or 60 us into a
+# slot, holds a 0 that long, and answers a reset after that long. The model
+# is bit level: it sends what dat_r says and reports what it read on dat_w.
+# Above it, OneWireDevice is a DS18B20's ROM and function layers, written
+# here from Maxim's data sheet, driven one slot at a time.
+
+from cocotb.triggers import Timer  # noqa: E402
+from cocotb.utils import get_sim_time  # noqa: E402
+
+ONEWIRE_TS = (15, 30, 60)  # each slave model's time slot, us (tb.v)
+
+
+class OneWireDevice:
+    """A DS18B20 above the bit level: ROM commands (READ, MATCH, SKIP,
+    SEARCH), then CONVERT T (reads 0 for three slots while busy) and READ
+    SCRATCHPAD."""
+
+    def __init__(self, serial, temp_raw):
+        rom = [0x28] + [(serial >> (8 * i)) & 0xFF for i in range(6)]
+        self.rom = bytes(rom + [pe.onewire_crc8(rom)])
+        pad = [temp_raw & 0xFF, (temp_raw >> 8) & 0xFF, 0x4B, 0x46, 0x7F, 0xFF, 0x0C, 0x10]
+        self.scratchpad = bytes(pad + [pe.onewire_crc8(pad)])
+        self.mode = "idle"
+        self.tx, self.rx, self.after = [], [], "idle"
+        self.slots_seen = 0
+
+    @staticmethod
+    def bits(data):
+        return [(b >> k) & 1 for b in data for k in range(8)]
+
+    def reset(self):
+        self.mode, self.rx, self.tx = "rom", [], []
+
+    def send(self, data, after):
+        self.mode, self.tx, self.after = "send", self.bits(data), after
+
+    def to_send(self):
+        if self.mode == "send":
+            return self.tx[0]
+        if self.mode == "search":
+            b = self.rom_bits[self.i]
+            return (b, 1 - b, 1)[self.phase]
+        if self.mode == "busy":
+            return 0 if self.busy else 1
+        return 1
+
+    def slot(self, seen):
+        """After each slot, with the line as the slave model sampled it."""
+        self.slots_seen += 1
+        m = self.mode
+        if m == "send":
+            self.tx.pop(0)
+            if not self.tx:
+                self.mode = self.after
+        elif m in ("rom", "match", "function"):
+            self.rx.append(seen)
+            if len(self.rx) == (64 if m == "match" else 8):
+                v = sum(b << k for k, b in enumerate(self.rx))
+                self.rx = []
+                self.command(m, v)
+        elif m == "search":
+            if self.phase < 2:
+                self.phase += 1
+            elif seen != self.rom_bits[self.i]:
+                self.mode = "idle"  # the host went the other way
+            else:
+                self.i, self.phase = self.i + 1, 0
+                if self.i == 64:
+                    self.mode = "function"
+        elif m == "busy" and self.busy:
+            self.busy -= 1
+
+    def command(self, m, v):
+        if m == "rom":
+            if v == pe.OneWire.READ_ROM:
+                self.send(self.rom, "function")
+            elif v == pe.OneWire.SKIP_ROM:
+                self.mode = "function"
+            elif v == pe.OneWire.MATCH_ROM:
+                self.mode = "match"
+            elif v == pe.OneWire.SEARCH_ROM:
+                self.mode, self.rom_bits, self.i, self.phase = "search", self.bits(self.rom), 0, 0
+            else:
+                self.mode = "idle"
+        elif m == "match":
+            self.mode = "function" if v == int.from_bytes(self.rom, "little") else "idle"
+        elif v == pe.OneWire.CONVERT_T:
+            self.mode, self.busy = "busy", 3
+        elif v == pe.OneWire.READ_SCRATCHPAD:
+            self.send(self.scratchpad, "idle")
+        else:
+            self.mode = "idle"
+
+
+async def onewire_device(dut, k, dev, dat_r):
+    """Feeds slave model k its next bit before each slot and hands what it
+    read to [dev]. [dat_r] is shared by the three, so each write carries the
+    others' bits."""
+    line = dut.onewire
+    while True:
+        dat_r[0] = (dat_r[0] & ~(1 << k)) | (dev.to_send() << k)
+        dut.onewire_dat_r.value = dat_r[0]
+        await FallingEdge(line)
+        t0 = get_sim_time("us")
+        await Timer(ONEWIRE_TS[k] * 1000 + 500, "ns")  # past the model's sample point
+        if not int(line.value):
+            await RisingEdge(line)
+        if get_sim_time("us") - t0 > 300:  # a reset pulse
+            dev.reset()
+            await Timer(330, "us")  # every device's presence pulse is over
+            continue
+        # The model's transfer task hands back what it read when it ends:
+        # at its sample point, or when the line is released, if later.
+        await Timer(100, "ns")
+        dev.slot(int(str(dut.onewire_dat_w.value)[2 - k]))
+
+
+def onewire_celsius(raw):
+    return (raw - 0x10000 if raw & 0x8000 else raw) / 16
+
+
+ONEWIRE_DEVICES = [  # serial number, raw temperature (1/16 degree)
+    (0x00000000A5C1, 0x0191),  # 25.0625
+    (0x00000000A5C3, 0xFF5E),  # -10.125
+    (0x0000004213F0, 0x0550),  # 85.0
+]
+
+
+async def onewire_start(dut, enabled):
+    """Puts the devices numbered in [enabled] on the wire, each running on
+    the slave model of the same index."""
+    dut.dev_mode.value = 8
+    dut.onewire_ena.value = sum(1 << k for k in enabled)
+    dat_r = [0b111]
+    devs, tasks = {}, []
+    for k in enabled:
+        devs[k] = OneWireDevice(*ONEWIRE_DEVICES[k])
+        tasks.append(cocotb.start_soon(onewire_device(dut, k, devs[k], dat_r)))
+    await ClockCycles(dut.clk, 2)
+    return devs, tasks
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_onewire_read_rom(dut):
+    """Each device alone on the wire, at the shortest, typical and longest
+    legal timing: the reset finds it, READ ROM returns its ROM code with a
+    good CRC, and its temperature reads back. With none, no presence."""
+    for k in range(3):
+        await reset(dut)
+        devs, tasks = await onewire_start(dut, [k])
+        chip = pe.Chip(sim_port(dut))
+
+        @bridge
+        def session():
+            ow = pe.OneWire(chip, firmware("onewire"))
+            return ow.read_rom(), ow.ds18b20_temperature()
+
+        rom, temp = await session()
+        for t in tasks:
+            t.cancel()
+        assert rom == devs[k].rom, f"device {k}: ROM {rom.hex()}"
+        assert temp == onewire_celsius(ONEWIRE_DEVICES[k][1]), f"device {k}: {temp} C"
+    await reset(dut)
+    await onewire_start(dut, [])
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def empty():
+        return pe.OneWire(chip, firmware("onewire")).reset()
+
+    assert not await empty(), "presence with no device on the wire"
+
+
+@cocotb.test(timeout_time=1500, timeout_unit="ms")
+async def test_onewire_search(dut):
+    """All three on one wire: SEARCH ROM finds every ROM code, and MATCH ROM
+    reaches each device alone, reading its own temperature."""
+    await reset(dut)
+    devs, _ = await onewire_start(dut, [0, 1, 2])
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        ow = pe.OneWire(chip, firmware("onewire"))
+        roms = ow.search()
+        return roms, {rom: ow.ds18b20_temperature(rom) for rom in roms}
+
+    roms, temps = await session()
+    want = {devs[k].rom: onewire_celsius(ONEWIRE_DEVICES[k][1]) for k in devs}
+    assert sorted(roms) == sorted(want), f"found {[r.hex() for r in roms]}"
+    assert temps == want, f"temperatures {temps}"
+
+
 # --- Planted driver bugs: each must make its test fail ------------------------
 #
 # Each bug is planted by replacing one driver method for the length of one
@@ -1253,6 +1450,61 @@ async def _swd_power_up_ok(dut):
             and int(dut.dp.parity_errors.value) == errors_before)
 
 
+def _onewire_write_msb_first(self, data):
+    bits = []
+    for b in data:
+        for k in range(7, -1, -1):  # the bug: most significant bit first
+            bits.append((b >> k) & 1)
+    self.slots(bits)
+
+
+def _onewire_search_never_revisits(self):
+    roms, rom = [], [0] * 64
+    if not self.reset():
+        return roms
+    self.write([self.SEARCH_ROM])
+    for i in range(64):
+        bit, cmp = self.slots([1, 1])
+        d = bit if bit != cmp else 0  # the bug: one pass, always the 0 branch
+        rom[i] = d
+        self.slots([d])
+    return [bytes([sum(rom[8 * j + k] << k for k in range(8)) for j in range(8)])]
+
+
+async def _onewire_read_rom_ok(dut):
+    devs, tasks = await onewire_start(dut, [1])
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        try:
+            return pe.OneWire(chip, firmware("onewire")).read_rom()
+        except pe.OneWireError:
+            return None
+
+    got = await session()
+    for t in tasks:
+        t.cancel()
+    return got == devs[1].rom
+
+
+async def _onewire_search_two_ok(dut):
+    devs, tasks = await onewire_start(dut, [0, 1])
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        try:
+            return pe.OneWire(chip, firmware("onewire")).search()
+        except pe.OneWireError:
+            return None
+
+    got = await session()
+    for t in tasks:
+        t.cancel()
+    return got is not None and sorted(got) == sorted(d.rom for d in devs.values())
+
+
 DRIVER_BUGS = [
     ("pin modes packed one bit per pin", pe.Chip, "set_pin_modes",
      lambda _: _pin_modes_one_bit_per_pin, _flash_read_ok),
@@ -1262,10 +1514,14 @@ DRIVER_BUGS = [
      lambda _: _make_request_bad_parity(pe.SwdController._request), _swd_power_up_ok),
     ("SWD write turnaround missing", pe.SwdController, "_transfer",
      lambda _: _transfer_no_write_turnaround, _swd_power_up_ok),
+    ("1-Wire bytes sent MSB first", pe.OneWire, "write",
+     lambda _: _onewire_write_msb_first, _onewire_read_rom_ok),
+    ("1-Wire search never revisits a fork", pe.OneWire, "search",
+     lambda _: _onewire_search_never_revisits, _onewire_search_two_ok),
 ]
 
 
-@cocotb.test(timeout_time=300, timeout_unit="ms")
+@cocotb.test(timeout_time=1500, timeout_unit="ms")
 async def test_driver_planted_bugs(dut):
     """Every planted driver bug fails its scenario, and each scenario passes
     with the real driver, so a later change cannot quietly blind the driver

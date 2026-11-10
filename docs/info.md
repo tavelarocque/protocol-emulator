@@ -105,6 +105,16 @@ releases the line); the samples come back 16 per word. The board driver's
 `SwdController` builds SWD on top: `connect()` (line reset, JTAG-to-SWD,
 DPIDR), `read_dp`, `write_dp`, `read_ap`, `write_ap`.
 
+1-Wire (DS18B20 temperature sensors and other 1-Wire devices, standard
+speed): `test/onewire.hex` (25 words) drives DQ on P0, open-drain, with an
+external pull-up (4.7 kohm is usual). Set CLKDIV to the core clock in MHz,
+so the engine counts in microseconds. Each TX word is one exchange: 1 for a
+reset pulse (the RX word's bit 0 reads 0 if a device answered), or N - 1 in
+bits 3:1 and N bits to write in bits 11:4 for N time slots (1 to 8); the RX
+word holds the line as sampled in each slot, so writing 1s reads. The board
+driver's `OneWire` adds the ROM commands, the ROM search and CRC8, and reads
+a DS18B20's temperature.
+
 Low-speed USB host: `test/usb_host.hex` holds the USB engine (49 words, at
 5) and the echo program (at 0), which relays to it through CHAIN so the two
 threads' FIFOs buffer a whole transaction. The core clock must be 12 MHz
@@ -131,4 +141,5 @@ None required. A logic analyser or USB-serial adapter on the protocol pins
 shows what the firmware is doing. USB needs a USB 1.1 transceiver (VO/FSE0
 mode, such as a TUSB1106 or MAX3349E) between the protocol pins and the USB
 connector, the host's 15 kohm pull-downs on D+ and D-, and 5 V for the
-device.
+device. 1-Wire needs a pull-up on P0 (4.7 kohm to 3.3 V); I2C, SWD and the
+other open-drain buses need one per line.

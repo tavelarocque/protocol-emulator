@@ -128,3 +128,11 @@
   (with-stdout-to
    usb_host.hex
    (run %{dep:../bin/firmware_hex.exe} usb_host))))
+
+(rule
+ (targets onewire.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   onewire.hex
+   (run %{dep:../bin/firmware_hex.exe} onewire))))

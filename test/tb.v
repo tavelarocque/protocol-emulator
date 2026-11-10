@@ -3,6 +3,11 @@
 `include "spiflash.v"
 `include "jtag_tap.v"
 `include "swd_dp.v"
+// Iztok Jeras's 1-Wire slave model from sockit_owm (LGPL-3.0, test only;
+// github.com/jeras/sockit_owm, hdl/onewire_slave_model.v, unmodified). It
+// sets its own timescale (1 us), so this file's is set again after it.
+`include "onewire_slave_model.v"
+`timescale 1ns / 1ps
 `default_nettype none
 
 /* This testbench just instantiates the module and makes some convenient wires
@@ -46,7 +51,11 @@ module tb ();
   //      mode (P2 VO, P3 FSE0, P4 OE_N) and reads its VP and VM receivers
   //      (P0, P1); on the other side of the bus is usbhostslave's usbDevice
   //      (test/usbhostslave), clocked at 48 MHz by usb_clk
-  reg [2:0] dev_mode = 0;
+  //   8: 1-Wire on P0 (open-drain, pulled up here), with three of Iztok
+  //      Jeras's slave models on the wire, at the shortest, typical and
+  //      longest timing the 1-Wire rules allow (time slot 15, 30, 60 us);
+  //      onewire_ena connects each, onewire_dat_r is what each sends next
+  reg [3:0] dev_mode = 0;
   reg i2c_sda_dev = 1;  // the device's drives, 1 = released
   reg i2c_scl_dev = 1;
   wire i2c_sda = !uio_oe[0] && i2c_sda_dev;
@@ -120,6 +129,35 @@ module tb ();
       .vBusDetect(1'b1)
   );
 
+  // --- 1-Wire (dev_mode 8) -----------------------------------------------
+  reg [2:0] onewire_ena = 0;
+  reg [2:0] onewire_dat_r = 3'b111;
+  wire [2:0] onewire_dat_w;
+  wire onewire;
+  pullup (onewire);
+  assign onewire = (dev_mode == 4'd8) && uio_oe[0] ? 1'b0 : 1'bz;
+  onewire_slave_model #(.TS(15.0)) onewire_min (
+      .ena(dev_mode == 4'd8 && onewire_ena[0]),
+      .ovd(1'b0),
+      .dat_r(onewire_dat_r[0]),
+      .dat_w(onewire_dat_w[0]),
+      .owr(onewire)
+  );
+  onewire_slave_model #(.TS(30.0)) onewire_typ (
+      .ena(dev_mode == 4'd8 && onewire_ena[1]),
+      .ovd(1'b0),
+      .dat_r(onewire_dat_r[1]),
+      .dat_w(onewire_dat_w[1]),
+      .owr(onewire)
+  );
+  onewire_slave_model #(.TS(60.0)) onewire_max (
+      .ena(dev_mode == 4'd8 && onewire_ena[2]),
+      .ovd(1'b0),
+      .dat_r(onewire_dat_r[2]),
+      .dat_w(onewire_dat_w[2]),
+      .owr(onewire)
+  );
+
   wire [7:0] uio_in_dut =
       dev_mode == 3'd1 ? {6'b111111, i2c_scl, i2c_sda} :
       dev_mode == 3'd2 ? {5'b11111, flash_io1, 2'b11} :
@@ -127,7 +165,8 @@ module tb ();
       dev_mode == 3'd4 ? {4'b1111, spi_cs, 1'b1, spi_mosi, spi_sclk} :
       dev_mode == 3'd5 ? {4'b1111, jtag_tdo, 3'b111} :
       dev_mode == 3'd6 ? {6'b111111, swdio, 1'b1} :
-      dev_mode == 3'd7 ? {6'b111111, usb_dm, usb_dp} : uio_in;
+      dev_mode == 3'd7 ? {6'b111111, usb_dm, usb_dp} :
+      dev_mode == 4'd8 ? {7'b1111111, onewire} : uio_in;
 
   // Replace tt_um_example with your module name:
   tt_um_tavelarocque_protocol_emulator user_project (

@@ -569,6 +569,156 @@ class SwdController:
         return self.read_dp(self.RDBUFF)
 
 
+class OneWireError(Exception):
+    pass
+
+
+def onewire_crc8(data):
+    """The 1-Wire CRC8 (x^8 + x^5 + x^4 + 1, least significant bit first), as
+    in ROM codes and DS18B20 scratchpads. Over data that ends in its own CRC
+    it is 0."""
+    crc = 0
+    for b in data:
+        for _ in range(8):
+            mix = (crc ^ b) & 1
+            crc >>= 1
+            if mix:
+                crc ^= 0x8C
+            b >>= 1
+    return crc
+
+
+class OneWire:
+    """1-Wire bus host at standard speed (onewire.hex does the timing): DQ on
+    P0, open-drain, which needs a pull-up (4.7 kohm is usual). The rest of
+    1-Wire is here: reset and presence, bytes least significant bit first,
+    the ROM commands, the ROM search (Maxim application note 187) and CRC8.
+    [clock_hz] is the core clock; the engine counts in microseconds."""
+
+    READ_ROM, MATCH_ROM, SEARCH_ROM, SKIP_ROM = 0x33, 0x55, 0xF0, 0xCC
+    CONVERT_T, READ_SCRATCHPAD = 0x44, 0xBE  # DS18B20 function commands
+
+    def __init__(self, chip, image, clock_hz=10_000_000):
+        if clock_hz <= 0 or clock_hz % 1_000_000:
+            raise ValueError("the core clock must be a whole number of MHz")
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(set_base=0, out_base=0, in_base=0, threshold=16,
+                       clkdiv=clock_hz // 1_000_000)
+        chip.set_pin_modes({0: OPEN_DRAIN})
+        chip.run()
+
+    def reset(self):
+        """A reset pulse. True if any device answered with a presence pulse."""
+        self.chip.push(1)
+        return (self.chip.pop() & 1) == 0
+
+    def slots(self, bits):
+        """One time slot per bit, writing it (a 1 releases the line, so
+        writing 1s is how the host reads). Returns the line as sampled in
+        each slot: the bit written, ANDed with whatever devices sent."""
+        out = []
+        for start in range(0, len(bits), 8):
+            chunk = bits[start:start + 8]
+            w = (len(chunk) - 1) << 1
+            for k in range(len(chunk)):
+                w |= (chunk[k] & 1) << (4 + k)
+            self.chip.push(w)
+            r = self.chip.pop()
+            for k in range(len(chunk)):
+                out.append((r >> k) & 1)
+        return out
+
+    def write(self, data):
+        bits = []
+        for b in data:
+            for k in range(8):
+                bits.append((b >> k) & 1)
+        self.slots(bits)
+
+    def read(self, n):
+        got = self.slots([1] * (8 * n))
+        return bytes([sum(got[8 * i + k] << k for k in range(8)) for i in range(n)])
+
+    def _reset_or_raise(self):
+        if not self.reset():
+            raise OneWireError("no presence pulse")
+
+    def read_rom(self):
+        """The ROM code of the only device on the bus (READ ROM): family
+        code, 48-bit serial number, CRC8."""
+        self._reset_or_raise()
+        self.write([self.READ_ROM])
+        rom = self.read(8)
+        if onewire_crc8(rom) != 0:
+            raise OneWireError("ROM code CRC error")
+        return rom
+
+    def select(self, rom=None):
+        """Reset, then address one device by its ROM code (MATCH ROM), or
+        every device at once if [rom] is None (SKIP ROM)."""
+        self._reset_or_raise()
+        if rom is None:
+            self.write([self.SKIP_ROM])
+        else:
+            self.write([self.MATCH_ROM] + list(rom))
+
+    def search(self):
+        """The ROM codes of every device on the bus (SEARCH ROM). Each pass
+        walks the 64 bits: every device still in the search sends its bit
+        and then the bit's complement, and the host writes the direction it
+        takes. Two 0s mean the devices disagree there; the host takes 0 on
+        the first pass and revisits the last such bit on the next."""
+        roms = []
+        rom = [0] * 64
+        last = -1  # the bit where the previous pass took 0 at a disagreement
+        while True:
+            if not self.reset():
+                return roms
+            self.write([self.SEARCH_ROM])
+            fork = -1
+            for i in range(64):
+                bit, cmp = self.slots([1, 1])
+                if bit and cmp:
+                    raise OneWireError("no device answered the search at bit %d" % i)
+                if bit != cmp:
+                    d = bit
+                else:
+                    d = rom[i] if i < last else int(i == last)
+                    if d == 0:
+                        fork = i
+                rom[i] = d
+                self.slots([d])
+            code = bytes([sum(rom[8 * j + k] << k for k in range(8)) for j in range(8)])
+            if onewire_crc8(code) != 0:
+                raise OneWireError("ROM code CRC error in the search")
+            roms.append(code)
+            last = fork
+            if last < 0:
+                return roms
+
+    def ds18b20_temperature(self, rom=None, polls=100000):
+        """Start a DS18B20 conversion, wait for it (the device reads 0 while
+        busy), then read the scratchpad. Returns degrees Celsius."""
+        self.select(rom)
+        self.write([self.CONVERT_T])
+        for _ in range(polls):
+            if self.slots([1])[0]:
+                break
+        else:
+            raise OneWireError("conversion never finished")
+        self.select(rom)
+        self.write([self.READ_SCRATCHPAD])
+        pad = self.read(9)
+        if onewire_crc8(pad) != 0:
+            raise OneWireError("scratchpad CRC error")
+        raw = pad[0] | (pad[1] << 8)
+        if raw & 0x8000:
+            raw -= 0x10000
+        return raw / 16
+
+
 class SpiDevice:
     """The chip as a mode-0 SPI device (spi_target.hex): P0 SCK, P1 MOSI,
     P2 MISO, P3 CS_N. The host must keep replies queued ahead of the
