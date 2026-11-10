@@ -173,7 +173,7 @@ model/   reference model, assembler, firmware, UART oracles (no dependency on hw
 sim/     OCaml tests: ISA, lockstep harness, random and directed differential tests,
          formal proof, firmware, chip-level tests
 bin/     Verilog generator, firmware hex generator
-host/    MicroPython driver for the demo board's RP2040 (tested in cocotb, unchanged,
+host/    MicroPython driver for the demo board, RP2040 or RP2350 (tested in cocotb, unchanged,
          and in MicroPython on an emulated board: test/board_emu)
 src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v
 test/    cocotb testbench (RTL and gate-level) + generated firmware .hex;

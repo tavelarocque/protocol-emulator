@@ -260,10 +260,13 @@ export class Board {
     return [m[1], m[2]];
   }
 
-  // Boot, and stop main.py if it is still running.
+  // Boot, and stop main.py if it is still running. Wait for main.py to end
+  // first (here it stops at its first write to the emulated flash, the boot
+  // log): interrupted in the middle of an import, it leaves the SDK's
+  // modules half loaded, and a later import of them fails.
   boot() {
     if (!this.run(() => this.connected, 10e9)) throw new Error('USB never connected');
-    this.run(null, 3e9);
+    this.run(() => this.out.includes('>>> '), 20e9);
     this.send('\x03\x03');
     this.run(() => this.out.includes('>>> '), 5e9);
   }

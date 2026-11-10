@@ -36,6 +36,32 @@ implementation and far slower, and this shows what each of those does.
   The chip runs at 10 MHz (12 MHz for USB, with the device at 48 MHz), on
   the same time line as the CPU.
 
+## Which board
+
+The emulated board is an RP2040 demo board (TT06 to TT08), because
+rp2040js emulates only the RP2040. This chip is for the IHP shuttles, which
+ship on demo board v3, built around an RP2350B and run by Tiny Tapeout's
+SDK v3. Three differences matter to the driver:
+
+- **Pins.** On the RP2350 board, `ui_in` is GPIO 17 to 24 and `uo_out` GPIO
+  33 to 40. The driver reads the host port's pins from the SDK's map of the
+  board it finds (`board_host_pins`), so the emulation runs the same lookup.
+  Here it returns the SDK's default map: the firmware's `main.py` stops at
+  its first write to the emulated flash (its boot log), before it detects
+  the board, and the default map's host-port pins are the TT06 to TT08
+  boards' (GPIO 9 to 11 and 5).
+- **The PIO window.** PIO on the RP2350B reaches 32 GPIOs at a time, so
+  MISO on GPIO 33 needs the window from GPIO 16 to 47. `PioPort` selects it
+  (`rp2.PIO.gpio_base`), a line that cannot run here.
+- **The PIO clock.** For a 10 or 12 MHz project clock the SDK runs the
+  system clock at 120 MHz, where `PioPort` runs at 12 MHz rather than 12.5.
+  `--pio-hz 12000000` runs the emulated port at that rate (results below).
+
+The RP2350's Cortex-M33 is faster than the RP2040's Cortex-M0+, and the USB
+result does not depend on the CPU's speed anyway (`--cpu-slowdown`, below).
+What remains for the first real board: check that `board_host_pins()`
+returns (17, 33), then read a descriptor with `UsbHost`.
+
 ## How time is kept
 
 rp2040js charges each instruction its ARMv6-M cycle count at 125 MHz. It
@@ -63,6 +89,7 @@ one. The CPU's speed is not what decides the USB result, though. With
     node run_board.mjs swd --mutant cpython-only-call --expect-fail
     node run_usb.mjs                          # the USB driver as shipped (PioPort)
     node run_usb.mjs --cpu-slowdown 3         # with a CPU three times slower
+    node run_usb.mjs --pio-hz 12000000        # the port at the RP2350 board's rate
     node run_usb.mjs --mutant push-after-start --expect-fail
     node run_usb.mjs --port bitbang --expect-fail
 
@@ -104,7 +131,7 @@ emulated board:
 | UART | `UartTx` sending 12 bytes | 211 ms |
 | SPI flash | read | 262 ms |
 | JTAG | session | 479 ms |
-| SWD | session | 853 ms |
+| SWD | session | 851 ms |
 
 These are slow but harmless. Each of those protocols is clocked by the chip,
 which simply waits for the board.
@@ -133,14 +160,18 @@ stopped).** The 18-byte descriptor reads back correctly.
 
 - **Handshakes come at the engine's own pace.** Every one starts 4.08 bit
   times after the device's data, so the engine was waiting on nothing.
-- **The handshake's last word has margin.** It reached the chip 52.7 and
-  53.2 µs before the ends of the two 8-byte data packets, and 22.6 µs before
+- **The handshake's last word has margin.** It reached the chip 52.6 and
+  52.9 µs before the ends of the two 8-byte data packets, and 22.2 µs before
   the end of the 2-byte one. A zero-length packet ends 10.7 µs sooner than
   that, so it would still be on time.
 - **The CPU's speed barely matters.** With the emulated CPU three times
-  slower, the margins are 53.2, 53.2 and 22.5 µs, and the handshakes start
-  after 4.02 to 4.03 bit times. The small differences are where the clocks'
+  slower, the margins are 52.7, 52.9 and 21.9 µs, and the handshakes start
+  after 4.10 to 4.12 bit times. The small differences are where the clocks'
   phases happen to fall, not the CPU's pace.
+- **The RP2350 board's port rate holds too.** With the port at 12 MHz, the
+  rate it runs at on the RP2350 board, the margins are 51.2, 51.2 and
+  20.4 µs, so a zero-length packet's handshake would still have 9.7 µs to
+  spare, and the handshakes start after 4.08 bit times.
 
 **The planted bug (`--mutant push-after-start`).** This puts the
 handshake's words in one at a time after the engine starts, each after a

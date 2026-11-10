@@ -5,7 +5,7 @@
 // the emulated demo board, reading a device descriptor from a low-speed
 // device through the chip's RTL.
 //
-//   node run_usb.mjs [--port pio|bitbang] [--driver FILE] [--cpu-slowdown K]
+//   node run_usb.mjs [--port pio|bitbang] [--driver FILE] [--cpu-slowdown K] [--pio-hz HZ]
 //                    [--mutant push-after-start] [--expect-fail]
 //
 // Prints the bus, packet by packet, with the device-side timing that
@@ -36,6 +36,10 @@ const image = readFileSync(join(HERE, '..', 'usb_host.hex'), 'latin1')
 
 const wall = Date.now();
 const cpuSlowdown = Number(arg('cpu-slowdown', '1'));
+// The PIO port's state machine rate. Unset, the driver picks it from the
+// system clock (12.5 MHz here); 12000000 is what it picks on a real board,
+// where the SDK runs the system clock at 120 MHz for a 12 MHz project clock.
+const pioHz = arg('pio-hz', '');
 const board = new Board(firmware, { quantumNs: 40, cpuSlowdown });
 board.boot();
 const bootMs = board.nanos / 1e6;
@@ -79,7 +83,7 @@ const t0 = board.nanos;
 
 [o, e] = board.exec(`
 import time
-port = ${portKind === 'pio' ? 'PioPort()' : 'demo_board_port()'}
+port = ${portKind === 'pio' ? `PioPort(${pioHz ? 'pio_hz=' + pioHz : ''})` : 'demo_board_port()'}
 chip = Chip(port)
 t = time.ticks_us()
 host = UsbHost(chip, ${JSON.stringify(image)})
@@ -96,7 +100,7 @@ const log = hw.takeBusLog();
 const [, , , conflicts] = hw.state();
 
 console.log(`board: TT MicroPython SDK on RP2040 (rp2040js), booted in ${bootMs.toFixed(0)} ms emulated`);
-console.log(`port: ${portKind}, driver: ${driverPath}${mutant ? ' with planted bug ' + mutant : ''}, CPU slowed x${cpuSlowdown}`);
+console.log(`port: ${portKind}, driver: ${driverPath}${mutant ? ' with planted bug ' + mutant : ''}, CPU slowed x${cpuSlowdown}${pioHz ? ', PIO at ' + pioHz + ' Hz' : ''}`);
 console.log('MicroPython printed:', (o + e).trim());
 
 // The bus, and the handshake timing after each data packet from the device.

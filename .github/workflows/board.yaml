@@ -36,6 +36,10 @@ jobs:
         working-directory: test/board_emu
         run: node run_usb.mjs
 
+      - name: USB descriptor read with the port at the RP2350 board's rate
+        working-directory: test/board_emu
+        run: node run_usb.mjs --pio-hz 12000000
+
       - name: Planted bug, handshake words pushed one at a time, must fail
         working-directory: test/board_emu
         run: node run_usb.mjs --mutant push-after-start --expect-fail

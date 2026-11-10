@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Host driver for the protocol emulator chip.
 
-Runs on the Tiny Tapeout demo board's RP2040 under MicroPython, and under
-CPython, where the cocotb testbench (test/test.py, "host driver" tests) runs
-this same file against the RTL and the gate-level netlist. It uses nothing
+Runs on the Tiny Tapeout demo board (RP2040 or RP2350) under MicroPython,
+and under CPython, where the cocotb testbench (test/test.py, "host driver"
+tests) runs this same file against the RTL and the gate-level netlist. It uses nothing
 beyond the core language, so the code tested is the code that ships;
 test/board_emu runs it in MicroPython on an emulated demo board too, which
 is how two CPython-only calls (int.bit_length, format) were found.
@@ -111,24 +111,57 @@ class BitBangPort:
         return [self.transfer(w) for w in words]
 
 
+def board_host_pins():
+    """The GPIOs of the host port on the demo board in use, as (SCK, MISO):
+    ui_in[0] and uo_out[0] in the Tiny Tapeout SDK's pin map, which the SDK
+    sets when it detects the board. CS_N and MOSI are the two GPIOs after
+    SCK on every board.
+
+    - RP2040 boards (TT06 to TT08, SDK v2): SCK on GPIO 9, MISO on GPIO 5.
+    - RP2350 board (demo board v3, for the IHP shuttles, SDK v3): SCK on
+      GPIO 17, MISO on GPIO 33."""
+    import ttboard.pins.gpio_map as gpio_map  # only exists on the board
+    m = gpio_map.GPIOMap
+    if (m.UI_IN1, m.UI_IN2) != (m.UI_IN0 + 1, m.UI_IN0 + 2):
+        raise RuntimeError("ui_in[0] to [2] are not consecutive GPIOs on this board")
+    return m.UI_IN0, m.UO_OUT0
+
+
 class PioPort:
-    """The host port driven by one of the RP2040's PIO state machines, so a
-    batch of transactions goes out at a fixed pace however slow MicroPython
-    is: SCK, CS_N and MOSI on [sck_pin] and the two pins after it (ui_in[0]
-    to [2]), MISO on [miso_pin] (uo_out[0]).
+    """The host port driven by one of the RP2040's or RP2350's PIO state
+    machines, so a batch of transactions goes out at a fixed pace however
+    slow MicroPython is: SCK, CS_N and MOSI on [sck_pin] and the two pins
+    after it (ui_in[0] to [2]), MISO on [miso_pin] (uo_out[0]). By default
+    the pins come from the SDK's map of the board in use (board_host_pins).
 
-    The state machine runs at 12.5 MHz (80 ns a cycle; it divides 125 and
-    150 MHz exactly). At a 12 MHz core clock, every SCK phase lasts at least
-    4.8 core clocks, against the 4 the chip needs; a read's low phases last
-    7 (6.7 clocks) because MISO moves a few clocks after SCK falls, as the
-    cocotb tests give it 6. A write takes 21 us, a read 25 us.
+    The state machine runs at the system clock divided by the whole number
+    nearest 12.5 MHz, so its cycles never jitter: 12.5 MHz at 125 or 150
+    MHz, 12 MHz at the 120 MHz the SDK sets for a 10 or 12 MHz project
+    clock. Create the port after clock_project_PWM, which can change the
+    system clock. At 12.5 MHz and a 12 MHz core clock, every SCK phase lasts
+    at least 4.8 core clocks, against the 4 the chip needs; a read's low
+    phases last 7 (6.7 clocks) because MISO moves a few clocks after SCK
+    falls, as the cocotb tests give it 6. A write takes 21 us, a read 25 us;
+    at 12 MHz everything is 4% longer.
 
-    MicroPython only. On the TT06+ demo board's RP2040, ui_in[0] is GPIO 9
-    and uo_out[0] GPIO 5 (ttboard/pins/gpio_map.py)."""
+    On the RP2350B, PIO reaches 32 GPIOs at a time (0 to 31 or 16 to 47);
+    MISO on GPIO 33 needs the upper window, which this selects for the
+    state machine's PIO block. MicroPython only."""
 
-    def __init__(self, sck_pin=9, miso_pin=5, sm_id=0):
+    def __init__(self, sck_pin=None, miso_pin=None, sm_id=0, pio_hz=None):
+        import machine
         import rp2
         from machine import Pin
+
+        if sck_pin is None or miso_pin is None:
+            sck_pin, miso_pin = board_host_pins()
+        if pio_hz is None:
+            sys_hz = machine.freq()
+            pio_hz = sys_hz // max(1, (sys_hz + 6_250_000) // 12_500_000)
+        if max(sck_pin + 2, miso_pin) >= 32:
+            if min(sck_pin, miso_pin) < 16:
+                raise ValueError("host port pins span more than one PIO window")
+            rp2.PIO(sm_id // 4).gpio_base(Pin(16))
 
         @rp2.asm_pio(out_init=rp2.PIO.OUT_LOW,
                      sideset_init=(rp2.PIO.OUT_LOW, rp2.PIO.OUT_HIGH),
@@ -153,7 +186,8 @@ class PioPort:
             label("end")
             push()                .side(0b10) [7]  # deselect: CS_N high 10 cycles
 
-        self.sm = rp2.StateMachine(sm_id, spi24, freq=12_500_000, sideset_base=Pin(sck_pin),
+        self.pio_hz = pio_hz
+        self.sm = rp2.StateMachine(sm_id, spi24, freq=pio_hz, sideset_base=Pin(sck_pin),
                                    out_base=Pin(sck_pin + 2), in_base=Pin(miso_pin))
         self.sm.active(1)
 
@@ -180,9 +214,10 @@ class PioPort:
 
 
 def demo_board_port():
-    """The port on the Tiny Tapeout demo board, through the RP2040's direct
-    pin access (the demo board must be in ASIC_RP_CONTROL mode). Too slow
-    for the USB host (see UsbHost); PioPort is not."""
+    """The port on the Tiny Tapeout demo board, through the SDK's direct pin
+    access on either board, RP2040 or RP2350 (the demo board must be in
+    ASIC_RP_CONTROL mode). Too slow for the USB host (see UsbHost); PioPort
+    is not."""
     import ttboard.util.platform as platform  # only exists on the board
 
     def set_pins(sck, cs_n, mosi):

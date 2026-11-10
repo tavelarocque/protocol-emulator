@@ -40,7 +40,7 @@ anyone likes.
 | Every 16-bit word decodes to a defined instruction | Reserved encodings that trap or are undefined | Makes uniformly random program memory a valid test input and the decoder exhaustively checkable (65,536 words). There are no X states to reason about |
 | Integer clock divider per thread | PIO's fractional divider | Simpler hardware. Fractional baud rates use X/Y loops instead; UART RX tolerates a sender about 5% off rate on isolated frames, and back-to-back frames are tested to 2% |
 | Two threads sharing a 64-word memory (the model always had two) | Four, as PIO has | Two cover the useful pairings (TX+RX, controller+bridge). Layout time is already tight: two-thread layouts take 4 to 5 hours against GitHub's 6-hour job limit, where the one-thread v1.1 took 91 minutes, and one two-thread build ran out of time in routing |
-| SPI host port, 24-bit transactions | A UART or a parallel bus | Any microcontroller can drive SPI: the demo board's RP2040 can bit-bang it from MicroPython, or run it from PIO where timing matters (USB) |
+| SPI host port, 24-bit transactions | A UART or a parallel bus | Any microcontroller can drive SPI: the demo board's RP2350 (or the older boards' RP2040) can bit-bang it from MicroPython, or run it from PIO where timing matters (USB) |
 | Two-flip-flop synchronisers on every protocol input, bypassable per pin | No synchronisers | Found in a review for silicon, which simulation cannot find (ISA v1.3). The bypass exists because side-set SPI samples MISO one clock after SCK falls, and a test shows it fails with the extra two cycles |
 | Shift direction per thread | Bit-reversal in the host | MSB-first protocols (SPI, I2C) take and return plain bytes, and one thread can bridge an MSB-first protocol into an LSB-first one |
 | Freeze the hardware at v1.4 | Keep adding features | Every later change is firmware, tests or docs, so none of it can put the tapeout at risk |
@@ -65,7 +65,7 @@ The freeze put that claim to the test. Since v1.4, with no hardware change:
 | JTAG controller (any TMS/TDI sequence, TDO back) | 11 words | `out pins, 2`, side-set for TCK |
 | Arm SWD clock engine, with the framing in the host driver | 11 words | open-drain SWDIO, side-set for SWCLK |
 | Low-speed USB host engine (the competition's stretch goal): sends packets with EOP and turnaround, receives with clock recovery | 49 words, plus the 5-word echo as a relay | timed waits on the edge that would leave the current level, the timeout vector as "no edge this bit"; CHAIN to buffer a whole transaction on either side of the engine; side-set for the transceiver's FSE0 and OE_N |
-| Host driver for the demo board | 813 lines of MicroPython | the register map only; for USB, a 7-instruction RP2040 PIO program that runs the host port |
+| Host driver for the demo board | 813 lines of MicroPython | the register map only; for USB, a 7-instruction PIO program (RP2040 or RP2350) that runs the host port |
 
 None of these is mentioned in the ISA's design or its revisions, which were
 driven by the controllers. That they fit is the strongest evidence that the
@@ -360,9 +360,11 @@ answer it.
   owning the bit timing. One step is left to the board: an IN transaction's
   handshake must reach the chip within about 100 us of the engine starting.
   Bit-banged from MicroPython it arrived 14.6 ms late (on the emulated
-  board), so for USB the driver runs the host port from an RP2040 PIO state
-  machine, which lands it 22 to 53 us early, enough for a zero-length packet
-  too. One known limit: after a NAK the engine still sends the ACK queued
+  board), so for USB the driver runs the host port from a PIO state
+  machine, which lands it 22 to 53 us early (20 to 51 us at the RP2350
+  board's port rate), enough for a zero-length packet too. The emulated
+  board is an RP2040 board; the RP2350 board's pins and PIO window are
+  untested until a real board (`test/board_emu/README.md`). One known limit: after a NAK the engine still sends the ACK queued
   behind it, which a device ignores but the spec does not allow.
 - **Protocols not done.** CAN and 10 Mbit Ethernet; Ethernet needs a clock
   well above what the timing margin supports.

@@ -50,8 +50,10 @@ thread 0 TX FIFO full; uo[4]-uo[6] the same for thread 1.
 
 ## How to test
 
-`host/protocol_emulator.py` is a MicroPython driver for the demo board's
-RP2040: copy it and the `.hex` images from `test/` to the board, enable the
+`host/protocol_emulator.py` is a MicroPython driver for the demo board
+(the RP2350 board v3 for the IHP shuttles, or the older RP2040 boards; it
+takes the pins from the Tiny Tapeout SDK's map of whichever board it finds):
+copy it and the `.hex` images from `test/` to the board, enable the
 project, clock it at 10 MHz (`tt.clock_project_PWM(10_000_000)`), and
 `pe.Chip(pe.demo_board_port())` gives register access, firmware loading and
 FIFO push/pop, with helpers for UART TX, the SPI controller, and the I2C and
@@ -60,7 +62,7 @@ register-level recipes below are what it does underneath. Every protocol
 class has also run in MicroPython on an emulated demo board wired to the
 chip's RTL (`test/board_emu`), the closest thing to the board short of one.
 
-With the demo board's RP2040 as SPI host: load a firmware image (for
+With the demo board's microcontroller as SPI host: load a firmware image (for
 example the 15-instruction UART transmitter in `test/uart_tx.hex`) into
 addresses 0x00 upwards, set PIN_MODES to 0x0001 (P0 push-pull), write 1 to
 CTRL (0x40), then write `divisor - 4` and then bytes to the TX FIFO. P0 outputs
@@ -116,8 +118,11 @@ data stages, OUT status). Commands go to thread 0 and results come from
 thread 1, whichever thread the engine runs on. Give it `pe.Chip(pe.PioPort())`,
 not the bit-banged port: an IN transaction's handshake must reach the chip
 within about 100 us of the engine starting, and `PioPort` runs the host
-port from one of the RP2040's PIO state machines (GPIO 9 to 11 and 5) so
-it does. Bit-banged from MicroPython, each register access takes
+port from one of the microcontroller's PIO state machines so it does
+(SCK, CS_N and MOSI on ui_in[0] to [2], MISO on uo_out[0]: GPIO 17 to 19 and
+33 on the RP2350 board, 9 to 11 and 5 on the RP2040 boards). Create it after
+`clock_project_PWM`, which can change the system clock the port's timing
+is derived from. Bit-banged from MicroPython, each register access takes
 milliseconds (`test/board_emu`).
 
 ## External hardware
