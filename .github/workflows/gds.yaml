@@ -17,6 +17,13 @@ jobs:
         uses: TinyTapeout/tt-gds-action@ttihp27a
         with:
           pdk: ihp-sg13cmos5l
+          # LibreLane 3.1.0.dev3, the version every earlier build of this chip
+          # used, not the action's default 3.1.0.dev4. On dev4, synthesis
+          # mapped to buffers and higher-drive cells the dev3 builds never
+          # used (18,426 cells against 14,316, about 2,600 of them buffers),
+          # routing needed nearly three times the wire, and detailed routing ran
+          # past GitHub's 6-hour job limit. README.md, "Layout".
+          librelane-version: 3.1.0.dev3
 
   precheck:
     needs: gds

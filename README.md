@@ -241,11 +241,15 @@ registers named for the formal proofs, meets 50 MHz at every corner with
 placement varying from one layout run to the next, so 50 MHz is not claimed:
 the chip is specified for 10 MHz (100 ns, about 80 ns of slack in every
 build). The 20 ns target was left as it was rather than relaxed to make the
-report clean, until Tiny Tapeout's ttihp27a flow, the one the IHP shuttle
-uses: on it the same logic hit routing congestion at the default placement
-density and failed setup at the slow corner, and that flow stops on a setup
-violation. The target is now 25 ns (40 MHz, still more than three times the
-12 MHz USB needs) and the placement density 45% instead of 60%. Every v1.4 build has 0 DRC and 0 LVS errors and passes the
+report clean, until the move to Tiny Tapeout's ttihp27a flow, the one the
+IHP shuttle uses. Its default LibreLane (3.1.0.dev4) synthesised the same
+RTL into 18,426 cells rather than 14,316, about 2,600 of them buffers the
+earlier builds never used (they had 23), and routed, that needed 4.4 m of
+wire rather than 1.5 m. The first build failed setup at 20 ns; the second,
+with the cells spread out, was still detail-routing when GitHub stopped it
+at 6 hours. Builds now pin LibreLane 3.1.0.dev3, which every earlier build
+used, and the target is 25 ns (40 MHz, still more than three times the
+12 MHz USB needs) for margin. Every v1.4 build has 0 DRC and 0 LVS errors and passes the
 Tiny Tapeout precheck and the cocotb suite on the gate-level netlist,
 including the third-party controller tests that drive the chip as an I2C and
 an SPI device; from the current build on, the netlist is also formally
