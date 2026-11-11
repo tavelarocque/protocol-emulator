@@ -8,9 +8,9 @@ project:
   clock_hz:     10000000       # Clock frequency in Hz (or 0 if not applicable)
 
   # How many tiles your design occupies? A single tile is about 202x155 uM.
-  # The Jane Street protocol emulator competition allows up to 8x4; the design
-  # uses 28% of 6x4, so it stays at 6x4.
-  tiles: "6x4"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2, 8x2, 3x4, 4x4, 5x4, 6x4 or 8x4
+  # The Jane Street protocol emulator competition allows up to 8x4, and asks
+  # entrants to use it: the routing room keeps layouts within GitHub's limits.
+  tiles: "8x4"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2, 8x2, 3x4, 4x4, 5x4, 6x4 or 8x4
 
   # Your top module name must start with "tt_um_". Make it unique by including your github username:
   top_module:  "tt_um_tavelarocque_protocol_emulator"
