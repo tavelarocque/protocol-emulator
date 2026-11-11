@@ -73,7 +73,11 @@ that re-aligns on every edge and detects EOP; the board driver builds and
 checks packets, CRCs and the control-transfer logic), and a 1-Wire bus engine
 in 25 (reset and presence, read and write time slots at standard speed; the
 board driver adds the ROM commands, the ROM search and CRC8; written after
-the hardware was finished, as firmware alone); program memory is 64 words. The assembler places a program at any origin, so
+the hardware was finished, as firmware alone), and a WS2812 LED driver in 16,
+written blind: by a programmer (an AI agent) given only `docs/isa.md` and the
+simulator, which passed a hidden test of the LEDs' data-sheet timing on its
+first submission, in about five minutes (`examples/ws2812`); program memory
+is 64 words. The assembler places a program at any origin, so
 two fit in one image: full-duplex UART (TX and RX on the two threads),
 side-set SPI beside UART, and the bridge, divider I2C
 beside side-set SPI with CHAIN carrying every byte read over I2C out over SPI.
@@ -175,6 +179,9 @@ and documentation, none of which can put the chip at risk.
 ```
 hw/      Hardcaml RTL: pe_core (two threads), tiny_fifo, top (SPI port + registers)
 model/   reference model, assembler, firmware, UART oracles (no dependency on hw/)
+bin/     pe_sim: assemble a .s file, or run it on the reference model and print
+         the pins as they change (`dune exec bin/pe_sim.exe -- run -help`)
+examples/ws2812: the blind firmware test, task, notes and hidden test
 sim/     OCaml tests: ISA, lockstep harness, random and directed differential tests,
          formal proof, firmware, chip-level tests
 bin/     Verilog generator, firmware hex generator

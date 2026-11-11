@@ -13,5 +13,10 @@ jobs:
       - run: opam install -y hardcaml hardcaml_waveterm hardcaml_verify ppx_hardcaml ppx_jane core dune
       - run: opam exec -- dune build
       - run: opam exec -- dune runtest
+      - name: Blind-written WS2812 firmware passes its hidden test (examples/ws2812)
+        run: |
+          for seed in 1 2 3; do
+            PE_SIM=_build/default/bin/pe_sim.exe python3 examples/ws2812/accept.py examples/ws2812 $seed
+          done
       - name: Generated Verilog and firmware images match the committed copies
         run: git diff --exit-code src/ test/

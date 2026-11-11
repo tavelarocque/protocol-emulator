@@ -54,7 +54,7 @@ weakest for this job:
 
 ### Pin levels
 
-| Mode | Output register bit 0 | Output register bit 1 |
+| Mode | Pin's output bit = 0 | Pin's output bit = 1 |
 |---|---|---|
 | input | external level | external level |
 | push-pull | 0 | 1 |
@@ -62,6 +62,12 @@ weakest for this job:
 
 For open-drain, writing 0 drives the line low and writing 1 releases it.
 That is exactly I2C's wired-AND bus.
+
+Because the output register resets to all ones, a push-pull pin is high
+from the moment the host makes it push-pull until the firmware first writes
+it. For a line that idles low (WS2812, for one), enable the thread before
+making the pin push-pull, and have the firmware start by driving it low and
+holding it there long enough to count as a reset.
 
 ### Input synchroniser
 
@@ -149,8 +155,11 @@ top `n` bits of the delay field are written to `n` pins starting at
 including cycles where it stalls, but not delay cycles. If the instruction
 also writes those pins, side-set wins.
 
-In assembly, `.side_set n` before the first instruction turns it on, and
-from then on every instruction must say `side V`:
+In assembly, `.side_set n` before the first instruction makes the
+assembler put side-set values in the delay field, and from then on every
+instruction must say `side V`. The thread only applies them if the host also
+sets SIDESET (`sideset_count = n` and `sideset_base`); without that, the
+thread reads those bits as delay and the pins never change.
 
 ```
         .side_set 1
@@ -172,6 +181,11 @@ exactly v1.
 | 101 | `mov dst, src` | `[8:6]` dst, `[5:3]` src |
 | 110 | `set dst, value` | `[8:7]` dst, `[4:0]` value |
 | 111 | `nop` | |
+
+Operand values: for `in` src and `out` dst, `pins` 0, `x` 1, `y` 2,
+`null` 3; for `set` dst, `pins` 0, `x` 1, `y` 2; for `mov`, `x` 0, `y` 1,
+`pins` 2, `isr` 3, `osr` 4, `null` 5. Conditions are numbered in the `jmp`
+table below.
 
 Unused operand bits are ignored. These reserved encodings decode as `nop`
 (their delay field still applies):
@@ -203,8 +217,9 @@ A loop `l: jmp x-- l` entered with X = n takes exactly n + 1 cycles.
 - With `timeout`, a hidden per-thread counter is the budget. It loads from
   the `timeout` register when the wait starts stalling and counts down each
   stalled cycle; when it is already 0 and the pin is still wrong, the thread
-  jumps to `timeout_vector`. A wait with `timeout = T` therefore stalls at
-  most T cycles. X and Y are untouched, so firmware can keep using them for
+  jumps to `timeout_vector`. A wait with `timeout = T` therefore stalls
+  for T cycles at most, and if the pin is still wrong, jumps on the cycle
+  after (with T = 0, at once). X and Y are untouched, so firmware can keep using them for
   bit timing, and every timed wait starts with a fresh budget.
 
 **`in src, count`** shifts `count` bits right into the ISR. `src` is one of:
@@ -213,10 +228,12 @@ A loop `l: jmp x-- l` entered with X = n takes exactly n + 1 cycles.
 - `x` or `y`
 - `null`: zeros
 
-Bits arrive least significant bit first.
+Bits arrive least significant bit first by default; with `in_msb_first`
+the ISR shifts left instead and new bits enter at the bottom.
 
 **`out dst, count`** shifts `count` bits out of the OSR, least significant
-bit first. `dst` is one of:
+bit first by default; with `out_msb_first` it takes them from the top and
+shifts the OSR left. `dst` is one of:
 
 - `pins`: written from `out_base` up
 - `x` or `y`

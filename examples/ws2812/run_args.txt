@@ -1,0 +1,1 @@
+-config start=5,sideset_base=0,sideset_count=1,threshold=16,out_msb_first=1 -mode 0=pp
