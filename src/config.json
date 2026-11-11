@@ -19,9 +19,12 @@
   "//": "the default; DELAY 4 buffered and duplicated logic into 29% more cells.",
   "SYNTH_STRATEGY": "AREA 0",
 
-  "//": "This design: repair slew and capacitance again after global routing.",
-  "//": "The first 8x4 build left a few slow-corner nets over the cells' slew limit.",
+  "//": "This design: repair slew with 40% margin, and again after global routing.",
+  "//": "The resizer checks the typical corner; with the default margins (20%, 10%)",
+  "//": "9 nets passed there but were up to 33% over the limit at the slow corner.",
   "RUN_POST_GRT_DESIGN_REPAIR": 1,
+  "DESIGN_REPAIR_MAX_SLEW_PCT": 40,
+  "GRT_DESIGN_REPAIR_MAX_SLEW_PCT": 40,
 
   "//": "CLOCK_PERIOD - Increase this in case you are getting setup time violations.",
   "//": "The value is in nanoseconds, so 20ns == 50MHz.",
