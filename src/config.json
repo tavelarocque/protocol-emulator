@@ -15,6 +15,14 @@
   "//": "Users have reported that values up to 80 worked well for them.",
   "PL_TARGET_DENSITY_PCT": 60,
 
+  "//": "This design: AREA 0, as LibreLane had it until 3.1.0.dev4 made DELAY 4",
+  "//": "the default; DELAY 4 buffered and duplicated logic into 29% more cells.",
+  "SYNTH_STRATEGY": "AREA 0",
+
+  "//": "This design: repair slew and capacitance again after global routing.",
+  "//": "The first 8x4 build left a few slow-corner nets over the cells' slew limit.",
+  "RUN_POST_GRT_DESIGN_REPAIR": 1,
+
   "//": "CLOCK_PERIOD - Increase this in case you are getting setup time violations.",
   "//": "The value is in nanoseconds, so 20ns == 50MHz.",
   "//": "This design: 25 ns (40 MHz), not 20. It runs at 10 to 12 MHz; 20 ns had",

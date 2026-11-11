@@ -23,8 +23,8 @@ AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
 ### The problem
 
 The competition asks for a chip that speaks UART, SPI and I2C, with
-low-speed USB and 10 Mbit Ethernet as stretch goals, on 6x4 Tiny Tapeout
-tiles in IHP 130 nm. The approach here: make the protocols firmware rather
+low-speed USB and 10 Mbit Ethernet as stretch goals, on up to 8x4 Tiny
+Tapeout tiles in IHP 130 nm. The approach here: make the protocols firmware rather
 than gates. A fixed-function design has to be right about every protocol at
 tapeout. A programmable one has to be right about one small CPU, after which
 protocols can be added, fixed and tested in simulation for as long as

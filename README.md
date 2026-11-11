@@ -7,7 +7,7 @@ An open-source protocol emulator ASIC for the
 a tiny CPU whose instructions read pins, write pins and count cycles, so UART,
 SPI and I2C are implemented in firmware loaded after fabrication rather than in
 fixed logic. Written in Hardcaml, designed for tapeout through
-[Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (6x4 tiles).
+[Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (8x4 tiles).
 
 **Status:** a complete two-thread chip running all three required protocols,
 two at a time, including an I2C-to-SPI bridge that runs with no host in the
@@ -225,7 +225,7 @@ From the GDS build reports. Timing is checked at the flow's target clock,
 50 MHz (20 ns) for the builds below and 40 MHz (25 ns) from the ttihp27a
 flow on, at the worst (slow, hot) corner; the chip is specified for 10 MHz.
 
-| Design | Std cells | Utilisation (6x4) | Setup slack | Hold slack |
+| Design | Std cells | Utilisation (6x4; last row 8x4) | Setup slack | Hold slack |
 |--------|-----------|-------------------|-------------|------------|
 | UART bring-up | 328 | 0.5% | +12.4 ns | +0.17 ns |
 | Full chip v0 (SPI + 1-thread core, 32 words) | 8,002 | 12.5% | +6.3 ns | +0.14 ns |
@@ -233,6 +233,7 @@ flow on, at the worst (slow, hot) corner; the chip is specified for 10 MHz.
 | Full chip v1.3 (2 threads, divider, CHAIN, input synchronisers) | 17,665 | 27.2% | +0.77 ns | +0.12 ns |
 | Full chip v1.4 (adds shift direction), first build | 18,830 | 28.3% | **−0.14 ns** | +0.12 ns |
 | Full chip v1.4, current build (same logic; registers named for the formal proofs) | 18,817 | 28.3% | +1.19 ns | +0.12 ns |
+| Full chip v1.4 on the ttihp27a flow, 8x4, 25 ns target (the layout submitted) | 17,929 | 18.5% | met | met |
 
 The first v1.4 build missed 50 MHz by 0.14 ns on one path, at the slow
 corner only (1.08 V, 125 °C). The current build, the same logic with its
@@ -242,14 +243,18 @@ placement varying from one layout run to the next, so 50 MHz is not claimed:
 the chip is specified for 10 MHz (100 ns, about 80 ns of slack in every
 build). The 20 ns target was left as it was rather than relaxed to make the
 report clean, until the move to Tiny Tapeout's ttihp27a flow, the one the
-IHP shuttle uses. Its default LibreLane (3.1.0.dev4) synthesised the same
-RTL into 18,426 cells rather than 14,316, about 2,600 of them buffers the
-earlier builds never used (they had 23), and routed, that needed 4.4 m of
-wire rather than 1.5 m. The first build failed setup at 20 ns; the second,
-with the cells spread out, was still detail-routing when GitHub stopped it
-at 6 hours. Builds now pin LibreLane 3.1.0.dev3, which every earlier build
-used, and the target is 25 ns (40 MHz, still more than three times the
-12 MHz USB needs) for margin. Every v1.4 build has 0 DRC and 0 LVS errors and passes the
+IHP shuttle uses. That flow's LibreLane (3.1.0.dev4) changed its default
+synthesis strategy from AREA 0 to DELAY 4, which buffers and duplicates
+logic: the same RTL routed with 4.4 m of wire rather than 1.5 m. On 6x4
+tiles, one such build failed setup, two were still detail-routing when
+GitHub stopped them at 6 hours, and one routed in over 5 hours and then
+failed setup at the slow corner even at 25 ns. The older LibreLane cannot be
+pinned: on this flow it has no CMOS5L support. The layout now sets
+`SYNTH_STRATEGY` back to AREA 0 and takes the 8x4 tiles the competition
+allows: 17,929 cells at 18.5% utilisation, 0.97 m of wire, routed with no
+violations in under 3 hours, no setup or hold violations at any corner. The
+target is 25 ns (40 MHz, still more than three times the 12 MHz USB needs)
+for margin. Every v1.4 build has 0 DRC and 0 LVS errors and passes the
 Tiny Tapeout precheck and the cocotb suite on the gate-level netlist,
 including the third-party controller tests that drive the chip as an I2C and
 an SPI device; from the current build on, the netlist is also formally
