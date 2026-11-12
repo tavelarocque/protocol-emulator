@@ -58,7 +58,7 @@ It departs from PIO where PIO is weakest for protocol emulation:
 
 Firmware ([`model/firmware.ml`](model/firmware.ml)): UART TX in 15
 instructions, UART RX in 15 (tolerates the sender's baud rate off by about
-5%, the limit for a mid-bit sampler), SPI controller in 27 (9 cycles per bit), side-set SPI in 26 (2
+5%, the limit for a mid-bit sampler), SPI controller in 26 (9 cycles per bit), side-set SPI in 26 (2
 cycles per bit, 5 Mbit/s at 10 MHz), I2C controller in 49 (writes only, timed
 by loops), I2C controller with reads in 25 (timed by the clock divider), and
 I2C target in 63 (the chip as a 7-bit-address device: address match, ACK,
@@ -181,7 +181,8 @@ hw/      Hardcaml RTL: pe_core (two threads), tiny_fifo, top (SPI port + registe
 model/   reference model, assembler, firmware, UART oracles (no dependency on hw/)
 bin/     pe_sim: assemble a .s file, or run it on the reference model and print
          the pins as they change (`dune exec bin/pe_sim.exe -- run -help`)
-examples/ws2812: the blind firmware test, task, notes and hidden test
+examples/ one assembly file per protocol, generated from model/firmware.ml;
+         ws2812/: the blind firmware test, task, notes and hidden test
 sim/     OCaml tests: ISA, lockstep harness, random and directed differential tests,
          formal proof, firmware, chip-level tests
 bin/     Verilog generator, firmware hex generator

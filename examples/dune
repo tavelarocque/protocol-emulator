@@ -1,0 +1,106 @@
+; One standalone assembly file per firmware, generated from model/firmware.ml
+; and promoted here, so these cannot drift from what the tests run.
+
+(rule
+ (targets uart_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   uart_tx.s
+   (run %{dep:../bin/firmware_src.exe} uart_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets uart_rx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   uart_rx.s
+   (run %{dep:../bin/firmware_src.exe} uart_rx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets echo.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   echo.s
+   (run %{dep:../bin/firmware_src.exe} echo %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets spi_controller.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   spi_controller.s
+   (run %{dep:../bin/firmware_src.exe} spi_controller %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets spi_fast.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   spi_fast.s
+   (run %{dep:../bin/firmware_src.exe} spi_fast %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets spi_target.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   spi_target.s
+   (run %{dep:../bin/firmware_src.exe} spi_target %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets i2c_controller.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i2c_controller.s
+   (run %{dep:../bin/firmware_src.exe} i2c_controller %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets i2c.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i2c.s
+   (run %{dep:../bin/firmware_src.exe} i2c %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets i2c_target.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i2c_target.s
+   (run %{dep:../bin/firmware_src.exe} i2c_target %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets jtag.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   jtag.s
+   (run %{dep:../bin/firmware_src.exe} jtag %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets swd.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   swd.s
+   (run %{dep:../bin/firmware_src.exe} swd %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets usb.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   usb.s
+   (run %{dep:../bin/firmware_src.exe} usb %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets onewire.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   onewire.s
+   (run %{dep:../bin/firmware_src.exe} onewire %{dep:../model/firmware.ml}))))
