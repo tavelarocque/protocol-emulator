@@ -16,6 +16,8 @@ jobs:
       - name: Every example program assembles (examples/*.s)
         run: |
           for f in examples/*.s; do _build/default/bin/pe_sim.exe asm $f > /dev/null || exit 1; done
+      - name: Timing diagrams match the reference model (docs/img)
+        run: python3 docs/figures.py --check
       - name: Blind-written WS2812 firmware passes its hidden test (examples/ws2812)
         run: |
           for seed in 1 2 3; do

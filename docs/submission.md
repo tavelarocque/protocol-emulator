@@ -6,6 +6,8 @@ full report.
 
 ## The claim: protocols are programs
 
+![Block diagram of the chip](img/architecture.svg)
+
 The chip is a small CPU whose instructions read pins, write pins and count
 clock cycles. A protocol is a program of at most 64 instructions, loaded
 over SPI after fabrication. Nothing in the hardware knows what UART, SPI or
@@ -71,6 +73,8 @@ finding what was missing; the README's "Architecture" tells that story.
 | I2C | controller and target, clock stretching, timeouts | 25, 63 |
 | I2C-to-SPI bridge | both threads, no host in the data path | 25 + 26 |
 | JTAG, SWD, low-speed USB, 1-Wire, PS/2, CAN, WS2812 | as above | 11, 11, 49, 25, 32, 46, 16 |
+
+![SPI controller waveform from the reference model](img/spi.svg)
 
 Each is an assembly file in [`examples/`](../examples), generated from the
 firmware the tests run. The toolchain is the assembler and `pe_sim`, which

@@ -31,6 +31,8 @@ formally proven equal to the RTL.
 
 ## Architecture
 
+![Block diagram: host, SPI port and registers, program memory, two threads with FIFOs, and the pins](docs/img/architecture.svg)
+
 The instruction set ([`docs/isa.md`](docs/isa.md)) follows the RP2040's PIO:
 
 - every instruction takes one cycle, plus a 0-15 cycle delay field
@@ -45,6 +47,16 @@ The instruction set ([`docs/isa.md`](docs/isa.md)) follows the RP2040's PIO:
   pin for protocols too fast for the delay
 - shift direction per thread, so MSB-first protocols (SPI, I2C) take and
   return plain bytes
+
+Three programs as the reference model runs them, drawn from its output by
+[`docs/figures.py`](docs/figures.py), which CI re-runs so the pictures cannot
+drift from the firmware:
+
+![UART transmit waveform](docs/img/uart.svg)
+
+![SPI controller waveform](docs/img/spi.svg)
+
+![WS2812 waveform](docs/img/ws2812.svg)
 
 It departs from PIO where PIO is weakest for protocol emulation:
 
@@ -205,6 +217,7 @@ test/    cocotb testbench (RTL and gate-level) + generated firmware .hex;
          a third-party 1-Wire device model (both LGPL, test only)
 gl_equiv/ Yosys proof that the post-layout netlist equals the RTL (run in CI)
 docs/    submission.md (one-page summary), design-and-verification.md (the report),
+         figures.py and img/ (diagrams drawn from the reference model),
          isa.md (instruction set),
          info.md (datasheet), coverage-closure.md, related-work.md
 ```

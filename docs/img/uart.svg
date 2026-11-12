@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 166" width="820" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">
+<rect width="100%%" height="100%%" fill="#ffffff"/>
+<text x="16" y="22" font-size="14" font-weight="600" fill="#1b1f24">UART transmit: 0xA5, 8N1, 10 cycles a bit (examples/uart_tx.s, 15 instructions)</text>
+<text x="16" y="40" fill="#6e7781">Least significant bit first. Every bit is exactly the divisor the host sent.</text>
+<line x1="136.0" y1="72" x2="136.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="139.0" y="68" fill="#0969da">start</text>
+<line x1="196.0" y1="72" x2="196.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="199.0" y="68" fill="#0969da">1</text>
+<line x1="256.0" y1="72" x2="256.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="259.0" y="68" fill="#0969da">0</text>
+<line x1="316.0" y1="72" x2="316.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="319.0" y="68" fill="#0969da">1</text>
+<line x1="376.0" y1="72" x2="376.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="379.0" y="68" fill="#0969da">0</text>
+<line x1="436.0" y1="72" x2="436.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="439.0" y="68" fill="#0969da">0</text>
+<line x1="496.0" y1="72" x2="496.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="499.0" y="68" fill="#0969da">1</text>
+<line x1="556.0" y1="72" x2="556.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="559.0" y="68" fill="#0969da">0</text>
+<line x1="616.0" y1="72" x2="616.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="619.0" y="68" fill="#0969da">1</text>
+<line x1="676.0" y1="72" x2="676.0" y2="104" stroke="#d0d7de" stroke-dasharray="2 3"/>
+<text x="679.0" y="68" fill="#0969da">stop</text>
+<text x="16" y="94" fill="#1b1f24">P0 TX</text>
+<polyline fill="none" stroke="#1b1f24" stroke-width="1.6" points="76.0,76 136.0,76 136.0,100 196.0,100 196.0,76 256.0,76 256.0,100 316.0,100 316.0,76 376.0,76 376.0,100 496.0,100 496.0,76 556.0,76 556.0,100 616.0,100 616.0,76 796.0,76"/>
+<line x1="76.0" y1="112" x2="76.0" y2="116" stroke="#6e7781"/>
+<text x="76.0" y="130" text-anchor="middle" fill="#6e7781">0</text>
+<line x1="136.0" y1="112" x2="136.0" y2="116" stroke="#6e7781"/>
+<text x="136.0" y="130" text-anchor="middle" fill="#6e7781">10</text>
+<line x1="196.0" y1="112" x2="196.0" y2="116" stroke="#6e7781"/>
+<text x="196.0" y="130" text-anchor="middle" fill="#6e7781">20</text>
+<line x1="256.0" y1="112" x2="256.0" y2="116" stroke="#6e7781"/>
+<text x="256.0" y="130" text-anchor="middle" fill="#6e7781">30</text>
+<line x1="316.0" y1="112" x2="316.0" y2="116" stroke="#6e7781"/>
+<text x="316.0" y="130" text-anchor="middle" fill="#6e7781">40</text>
+<line x1="376.0" y1="112" x2="376.0" y2="116" stroke="#6e7781"/>
+<text x="376.0" y="130" text-anchor="middle" fill="#6e7781">50</text>
+<line x1="436.0" y1="112" x2="436.0" y2="116" stroke="#6e7781"/>
+<text x="436.0" y="130" text-anchor="middle" fill="#6e7781">60</text>
+<line x1="496.0" y1="112" x2="496.0" y2="116" stroke="#6e7781"/>
+<text x="496.0" y="130" text-anchor="middle" fill="#6e7781">70</text>
+<line x1="556.0" y1="112" x2="556.0" y2="116" stroke="#6e7781"/>
+<text x="556.0" y="130" text-anchor="middle" fill="#6e7781">80</text>
+<line x1="616.0" y1="112" x2="616.0" y2="116" stroke="#6e7781"/>
+<text x="616.0" y="130" text-anchor="middle" fill="#6e7781">90</text>
+<line x1="676.0" y1="112" x2="676.0" y2="116" stroke="#6e7781"/>
+<text x="676.0" y="130" text-anchor="middle" fill="#6e7781">100</text>
+<line x1="736.0" y1="112" x2="736.0" y2="116" stroke="#6e7781"/>
+<text x="736.0" y="130" text-anchor="middle" fill="#6e7781">110</text>
+<line x1="796.0" y1="112" x2="796.0" y2="116" stroke="#6e7781"/>
+<text x="796.0" y="130" text-anchor="middle" fill="#6e7781">120</text>
+<text x="16" y="130" fill="#6e7781">cycles</text>
+</svg>
