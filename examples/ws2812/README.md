@@ -4,8 +4,8 @@ How easy is this chip to program for a protocol nobody designed it for?
 This folder is one measurement. A programmer who had never seen the
 project was given only the instruction-set document and the simulator, and
 asked to drive WS2812B addressable LEDs. The programmer was an AI agent
-(Claude, in a fresh session with no access to the conversation that built
-the chip), not a person. A person is the better test, and is still to do.
+(in a fresh session with no access to the conversation that built the
+chip), not a person. A person is the better test, and is still to do.
 
 ## The protocol
 

@@ -293,7 +293,7 @@ specification allows. The firmware now reads SDA first.
 
 ## 6. AI-assisted verification, and independence
 
-This project was built with an AI assistant (Claude), and the commits say
+This project was built with an AI assistant, and the commits say
 so. That raises a fair question: if one author writes the RTL, the spec, the
 firmware and the tests, can one misreading pass every layer? Four rules
 answer it.

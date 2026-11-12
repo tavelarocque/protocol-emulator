@@ -22,7 +22,7 @@ found and closed, and how the result is kept honest.
 
    `sim/test_core.ml` prints both for the random trials.
 
-2. **Generate.** An AI assistant (Claude) read the cross-bin report and
+2. **Generate.** An AI assistant read the cross-bin report and
    wrote one small two-thread scenario per weak bin: two programs, their
    configurations, pin modes, CHAIN, and the stimulus (pin inputs, host
    traffic, an enable script). It also wrote three scenarios aimed at

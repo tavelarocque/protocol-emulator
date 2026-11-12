@@ -1,6 +1,6 @@
 (* Directed scenarios for coverage closure.
 
-   Each scenario here was written by an AI assistant (Claude) from the
+   Each scenario here was written by an AI assistant from the
    cross-coverage report of the random differential test: the report listed
    the bins random programs hit rarely or never, and the assistant wrote a
    small two-thread program and stimulus aimed at each. Nothing here is
