@@ -193,7 +193,8 @@ test/    cocotb testbench (RTL and gate-level) + generated firmware .hex;
          usbhostslave/ is a third-party USB device core and onewire_slave_model.v
          a third-party 1-Wire device model (both LGPL, test only)
 gl_equiv/ Yosys proof that the post-layout netlist equals the RTL (run in CI)
-docs/    design-and-verification.md (the report), isa.md (instruction set),
+docs/    submission.md (one-page summary), design-and-verification.md (the report),
+         isa.md (instruction set),
          info.md (datasheet), coverage-closure.md, related-work.md
 ```
 
