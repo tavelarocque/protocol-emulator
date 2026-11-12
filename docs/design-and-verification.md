@@ -67,7 +67,8 @@ The freeze put that claim to the test. Since v1.4, with no hardware change:
 | Low-speed USB host engine (the competition's stretch goal): sends packets with EOP and turnaround, receives with clock recovery | 49 words, plus the 5-word echo as a relay | timed waits on the edge that would leave the current level, the timeout vector as "no edge this bit"; CHAIN to buffer a whole transaction on either side of the engine; side-set for the transceiver's FSE0 and OE_N |
 | WS2812 LED driver, written blind: by an AI agent given only `docs/isa.md`, the simulator and the LEDs' timing, never the repository; it passed a hidden data-sheet timing test on its first submission (`examples/ws2812`) | 16 words | side-set on P0, 13-cycle bits; the host sends each frame's bit count first so the firmware ends it with a 310 us latch |
 | 1-Wire bus engine (reset and presence, read and write time slots), with the ROM commands, ROM search and CRC8 in the host driver: a protocol the chip was not designed for, added once the hardware was finished | 25 words | open-drain DQ; CLKDIV set to the core clock in MHz so a tick is 1 us, and Y loops of 16 us for the long waits; a slot that writes a 1 and samples is a read, so one 8-instruction slot does both |
-| Host driver for the demo board | 1,011 lines of MicroPython | the register map only; for USB, a 7-instruction PIO program (RP2040 or RP2350) that runs the host port |
+| PS/2 host for keyboards and mice: a receiver that never stops listening on one thread, a transmitter on the other; added after 1-Wire, on the same finished hardware | 11 + 21 words | open-drain DATA and CLK; wait timeouts to abandon a frame the device gave up; a spare pin driven by the receiver's side-set and read by the transmitter's `wait`, so that one thread tells the other a frame is under way |
+| Host driver for the demo board | 1,102 lines of MicroPython | the register map only; for USB, a 7-instruction PIO program (RP2040 or RP2350) that runs the host port |
 
 None of these is mentioned in the ISA's design or its revisions, which were
 driven by the controllers. That they fit is the strongest evidence that the
@@ -75,8 +76,8 @@ instruction set is general enough. The I2C target and SPI device are driven
 by controllers written by other people (cocotbext-i2c, cocotbext-spi); the
 JTAG controller's scans are decoded by a third-party monitor
 (cocotbext-jtag); the USB host reads a descriptor from a third-party USB
-device core (usbhostslave); SWD is checked only against a target written for
-this project.
+device core (usbhostslave); SWD and PS/2 are checked only against devices
+written for this project, from Arm's ADIv5 and the PS/2 protocol's rules.
 
 ## 3. How the evidence chains
 
@@ -223,7 +224,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 66 in all:
+fails if any survives. There are 76 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -240,7 +241,8 @@ fails if any survives. There are 66 in all:
 | SWD firmware | 3 | `sim/test_swd.ml` |
 | USB firmware (4 sending, 3 receiving) | 7 | `sim/test_usb.ml` |
 | 1-Wire firmware | 6 | `sim/test_onewire.ml` |
-| JTAG, SWD, 1-Wire and host drivers | 6 | `test_driver_planted_bugs` in `test/test.py` |
+| PS/2 firmware (3 receiving, 6 sending) | 9 | `sim/test_ps2.ml` |
+| JTAG, SWD, 1-Wire, PS/2 and host drivers | 7 | `test_driver_planted_bugs` in `test/test.py` |
 | USB driver | 2 | `test_usb_driver_planted_bugs` in `test/test.py` |
 | Driver on the emulated board | 2 | `test/board_emu`: `run_usb.mjs --mutant push-after-start`, `run_board.mjs --mutant cpython-only-call` |
 | gate netlist | 4 | `gl_equiv/check.py`: the RTL-to-netlist proof |
@@ -252,7 +254,7 @@ count as a catch. The SPI host-port bug is a parameter of `hw/top.ml`, off
 by default, following `hw/pe_core.ml`; the generated Verilog is
 byte-identical with or without the parameter in the source.
 
-All 66 are caught. Two candidates turned out not to be bugs, and the
+All 76 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -306,8 +308,8 @@ answer it.
 2. **Correctness rests on artefacts written separately.** The reference
    model has no dependency on the hardware. The specs were written from the
    documents in a different style, and share only what the checker needs.
-3. **Device models written by other people.** Every protocol except SWD is
-   checked against at least one device model written by someone else, from
+3. **Device models written by other people.** Every protocol except SWD
+   and PS/2 is checked against at least one device model written by someone else, from
    the real datasheet or standard. They are the backstop against a shared
    misreading, and they do not know this project exists.
 4. **Every check is shown to fail.** Planted bugs, kept in the repository

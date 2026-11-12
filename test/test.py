@@ -1505,6 +1505,198 @@ async def _onewire_search_two_ok(dut):
     return got is not None and sorted(got) == sorted(d.rom for d in devs.values())
 
 
+# --- PS/2: the chip as host, a keyboard written from the protocol's rules ----
+#
+# DATA and CLK are P0 and P1, open-drain, on the same testbench wiring as I2C
+# (dev_mode 1: i2c_sda_dev and i2c_scl_dev are the device's drives). The
+# keyboard makes every clock, 40 us a phase, starts a frame only on an idle
+# bus, gives it up and sends it again if the host holds CLK low before the
+# 11th clock, and takes a host byte after 100 us of CLK low followed by DATA
+# low. Its command layer is a keyboard's: 0xFF reset (ACK, then 0xAA), 0xF2
+# identify (ACK, 0xAB, 0x83), 0xED set LEDs (ACK, then ACK for the argument);
+# a byte with bad parity or no stop bit gets 0xFE, resend.
+
+
+class Ps2Keyboard:
+    def __init__(self):
+        self.queue, self.got, self.aborted, self.leds = [], [], 0, None
+        self._want_leds = False
+
+    def command(self, byte, ok):
+        if not ok:
+            self.queue.append(0xFE)
+        elif self._want_leds:
+            self.leds, self._want_leds = byte, False
+            self.queue.append(0xFA)
+        elif byte == 0xFF:
+            self.queue += [0xFA, 0xAA]
+        elif byte == 0xF2:
+            self.queue += [0xFA, 0xAB, 0x83]
+        elif byte == 0xED:
+            self._want_leds = True
+            self.queue.append(0xFA)
+        else:
+            self.queue.append(0xFA)
+
+
+async def ps2_keyboard(dut, kb):
+    dut.dev_mode.value = 1
+    dut.i2c_sda_dev.value = 1
+    dut.i2c_scl_dev.value = 1
+    data, clk = dut.i2c_sda_dev, dut.i2c_scl_dev
+
+    def lines():
+        return int(dut.i2c_sda.value), int(dut.i2c_scl.value)
+
+    async def released(us):
+        """Waits with CLK released; False if the host pulls it low."""
+        for _ in range(us):
+            await Timer(1, "us")
+            if not lines()[1]:
+                return False
+        return True
+
+    async def send(byte):
+        parity = 1 - bin(byte).count("1") % 2
+        bits = [0] + [(byte >> k) & 1 for k in range(8)] + [parity, 1]
+        for n, b in enumerate(bits):
+            data.value = b
+            if not await released(15):
+                data.value = 1
+                return False
+            clk.value = 0
+            await Timer(40, "us")
+            clk.value = 1
+            if n < 10 and not await released(25):
+                data.value = 1
+                return False
+        return True
+
+    async def receive():
+        await Timer(500, "us")
+        bits = []
+        for _ in range(10):
+            clk.value = 0
+            await Timer(40, "us")
+            bits.append(lines()[0])
+            clk.value = 1
+            await Timer(40, "us")
+        data.value = 0  # the ACK
+        await Timer(15, "us")
+        clk.value = 0
+        await Timer(40, "us")
+        clk.value = 1
+        data.value = 1
+        byte = sum(b << k for k, b in enumerate(bits[:8]))
+        kb.got.append(byte)
+        kb.command(byte, (bin(byte).count("1") + bits[8]) % 2 == 1 and bits[9] == 1)
+
+    clk_low = idle = 0
+    while True:
+        await Timer(1, "us")
+        d, c = lines()
+        inhibited = clk_low >= 100
+        clk_low = 0 if c else clk_low + 1
+        idle = idle + 1 if (c and d) else 0
+        if inhibited and c and not d:
+            await receive()
+            clk_low = idle = 0
+        elif idle >= 50 and kb.queue:
+            if await send(kb.queue[0]):
+                kb.queue.pop(0)
+            else:
+                kb.aborted += 1
+            idle = 0
+
+
+def _ps2_session(chip, kb):
+    """Reset, identify, set the LEDs, then a key pressed and released."""
+    ps2 = pe.Ps2(chip, firmware("ps2"))
+
+    def expect(n):
+        out = []
+        while len(out) < n:
+            b = ps2.read()
+            if b is not None:
+                out.append(b)
+        return out
+
+    ps2.write(0xFF)
+    log = [expect(2)]
+    ps2.write(0xF2)
+    log.append(expect(3))
+    ps2.write(0xED)
+    log.append(expect(1))
+    ps2.write(0x05)
+    log.append(expect(1))
+    kb.queue += [0x1C, 0xF0, 0x1C]  # A down, A up (scan code set 2)
+    log.append(expect(3))
+    return log
+
+
+PS2_EXPECTED = [[0xFA, 0xAA], [0xFA, 0xAB, 0x83], [0xFA], [0xFA], [0x1C, 0xF0, 0x1C]]
+
+
+@cocotb.test(timeout_time=400, timeout_unit="ms")
+async def test_ps2_keyboard(dut):
+    """The driver resets and identifies a keyboard, sets its LEDs and reads a
+    key press and release; the keyboard got each command intact. Then, with
+    no keyboard, a write reports that nothing clocked."""
+    await reset(dut)
+    kb = Ps2Keyboard()
+    task = cocotb.start_soon(ps2_keyboard(dut, kb))
+    chip = pe.Chip(sim_port(dut))
+    log = await bridge(lambda: _ps2_session(chip, kb))()
+    task.cancel()
+    assert log == PS2_EXPECTED, [[hex(b) for b in group] for group in log]
+    assert kb.got == [0xFF, 0xF2, 0xED, 0x05] and kb.leds == 0x05, (kb.got, kb.leds)
+
+    await reset(dut)
+    dut.dev_mode.value = 1
+    dut.i2c_sda_dev.value = 1
+    dut.i2c_scl_dev.value = 1
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def alone():
+        try:
+            pe.Ps2(chip, firmware("ps2")).write(0xFF)
+        except pe.Ps2Error as e:
+            return str(e)
+
+    assert "never clocked" in (await alone() or ""), "no error with no keyboard"
+
+
+def _ps2_even_parity(byte):
+    return bin(byte & 0xFF).count("1") % 2
+
+
+async def _ps2_identify_ok(dut):
+    kb = Ps2Keyboard()
+    task = cocotb.start_soon(ps2_keyboard(dut, kb))
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        try:
+            ps2 = pe.Ps2(chip, firmware("ps2"))
+            ps2.write(0xF2)
+            out = []
+            while len(out) < 3:
+                b = ps2.read()
+                if b is not None:
+                    out.append(b)
+                    if b == 0xFE:
+                        break
+            return out
+        except pe.Ps2Error:
+            return None
+
+    got = await session()
+    task.cancel()
+    return got == [0xFA, 0xAB, 0x83]
+
+
 DRIVER_BUGS = [
     ("pin modes packed one bit per pin", pe.Chip, "set_pin_modes",
      lambda _: _pin_modes_one_bit_per_pin, _flash_read_ok),
@@ -1518,6 +1710,8 @@ DRIVER_BUGS = [
      lambda _: _onewire_write_msb_first, _onewire_read_rom_ok),
     ("1-Wire search never revisits a fork", pe.OneWire, "search",
      lambda _: _onewire_search_never_revisits, _onewire_search_two_ok),
+    ("PS/2 parity even, not odd", pe.Ps2, "_odd_parity",
+     lambda _: staticmethod(_ps2_even_parity), _ps2_identify_ok),
 ]
 
 

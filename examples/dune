@@ -104,3 +104,19 @@
   (with-stdout-to
    onewire.s
    (run %{dep:../bin/firmware_src.exe} onewire %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets ps2_rx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   ps2_rx.s
+   (run %{dep:../bin/firmware_src.exe} ps2_rx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets ps2_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   ps2_tx.s
+   (run %{dep:../bin/firmware_src.exe} ps2_tx %{dep:../model/firmware.ml}))))

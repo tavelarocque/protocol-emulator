@@ -837,6 +837,160 @@ let onewire_slots_word bits =
   lor List.foldi bits ~init:0 ~f:(fun k acc b -> acc lor (Bool.to_int b lsl (4 + k)))
 ;;
 
+(* PS/2 (IBM keyboards and mice): the host side, on both threads. Like
+   1-Wire, a protocol this chip was not designed for, added as firmware alone
+   on the finished hardware.
+
+   Two open-drain lines with pull-ups, DATA and CLK. The device makes every
+   clock pulse, at 10 to 16.7 kHz, in both directions. A frame is 11 bits:
+   start (0), 8 data bits least significant first, odd parity, stop (1).
+     device to host : the device changes DATA while CLK is high; the host
+                      reads it when CLK falls
+     host to device : the host holds CLK low for at least 100 us, pulls DATA
+                      low (the start bit) and releases CLK. The device then
+                      clocks: the host changes DATA while CLK is low, the
+                      device reads it when CLK rises. After the stop bit the
+                      device pulls DATA low for one more clock, the ACK
+   Pins: P0 = DATA, P1 = CLK, both open-drain; P2 push-pull, internal (see
+   below). CLKDIV on both threads is the
+   core clock in MHz, so a tick is 1 us, as for [onewire].
+
+   The receiver, [ps2_rx], runs on thread 0 and never stops listening: it
+   takes DATA at each falling edge of CLK and pushes 11 bits as one word,
+     bit 0 start, bits 8:1 the byte, bit 9 parity, bit 10 stop.
+   Every wait inside a frame has a timeout (TIMEOUT = 150 ticks; a clock
+   phase is 50 us at most), which jumps to [ps2_rx_abandon]: a frame the
+   device gave up, or the host's own 100 us of CLK low, is dropped, never
+   pushed short.
+
+   The transmitter, [ps2_tx], runs on thread 1. One TX word a byte:
+     bits 7:0 the byte, bit 8 its odd parity, bit 9 a 1 (the stop bit, which
+     releases DATA): [ps2_tx_word]; threshold 10.
+   and one RX word back: 0 = the device acknowledged, 1 = it did not,
+   3 = it never clocked (TIMEOUT, 20 ms; both lines released).
+
+   The threads coordinate through a pin. A device counts its frame as sent
+   once CLK has fallen for the 11th bit, and re-sends it if the host
+   inhibits any earlier; so an inhibit that lands late in a frame, after
+   the receiver has its 11 bits but before the device is done, would
+   deliver a byte twice. The receiver therefore holds P2 (push-pull, by
+   side-set, wired to nothing) low from a frame's first falling edge until
+   it has pushed or abandoned it, and the transmitter waits for P2 to be
+   high before it inhibits. A thread reads another's output with no delay,
+   so the inhibit can land no later than a frame's second microsecond,
+   where the device simply starts again.
+
+   The receiver abandons the frame the
+   inhibit looked like, then hears the device clock the host's byte and
+   pushes that too, with the ACK where the stop bit would be: so the host
+   reads back what was on the wire. For that the transmitter changes DATA
+   3 us after CLK falls, after the receiver's sample (1 or 2 us after). *)
+let ps2_rx =
+  {|
+        .side_set 1
+idle:   wait 1 pin 1            side 1 ; CLK high: the bus is free, or a frame is over
+        wait 0 pin 1            side 1 ; CLK falls: a frame begins
+        jmp samp                side 0 ; P2 low from here: a frame is under way
+next:   wait 1 pin 1 timeout    side 0 ; the rest of the clock pulse...
+        wait 0 pin 1 timeout    side 0 ; ...and the next falling edge, or give up
+samp:   in pins, 1              side 0 ; DATA at the falling edge
+        jmp !isrf next          side 0
+        push                    side 0 ; 11 bits
+        jmp idle                side 1
+gone:   mov isr, null           side 1 ; timeout vector: drop what was shifted in
+        jmp idle                side 1
+|}
+;;
+
+let ps2_rx_abandon = 9
+
+(* PS/2: the transmitter, on thread 1. Pins, the TX word, the result word
+   and how it shares the bus with the receiver are described at [ps2_rx]
+   (examples/ps2_rx.s). Config: [Ps2.tx_config]. *)
+let ps2_tx =
+  {|
+next:   pull                    ; [7:0] byte, [8] odd parity, [9] 1
+        wait 1 pin 2            ; not while the receiver is inside a frame
+        set pins, 1             ; CLK low, DATA released: inhibit the device
+        set y, 12
+inh:    jmp y-- inh [15]        ; 13 x 16 us = 208 us
+        set pins, 0 [5]         ; DATA low too: the start bit, 6 us before...
+        set pins, 2             ; ...CLK is released: request to send
+bit:    wait 0 pin 1 timeout [2] ; the device clocks; CLK falls. 3 us on,
+        out pins, 1             ; the next bit, while CLK is low
+        wait 1 pin 1 timeout
+        jmp !osre bit           ; 8 data bits, parity, stop (DATA released)
+        wait 0 pin 1 timeout    ; the device's ACK clock
+        in pins, 1              ; DATA: 0 = acknowledged
+        push
+        wait 1 pin 1 timeout
+        jmp next
+dead:   set pins, 3             ; timeout vector: release both lines
+        set x, 3
+        in x, 2
+        push                    ; 3 = the device never clocked
+        jmp next
+|}
+;;
+
+let ps2_tx_dead = 16
+
+let ps2_tx_word byte =
+  let ones = Int.popcount (byte land 0xFF) in
+  (byte land 0xFF) lor (Bool.to_int (ones % 2 = 0) lsl 8) lor (1 lsl 9)
+;;
+
+(* Both threads in one image: the receiver at 0, the transmitter after it. *)
+module Ps2 = struct
+  let rx_origin = 0
+  let rx = Asm.assemble ~origin:rx_origin ps2_rx
+  let tx_origin = rx_origin + Array.length rx
+  let tx = Asm.assemble ~origin:tx_origin ps2_tx
+  let image = Asm.link [ rx_origin, rx; tx_origin, tx ]
+
+  (* [mhz]: the core clock, so that a tick is 1 us. *)
+  let rx_config ~mhz =
+    { Isa.Thread_config.default with
+      start = rx_origin
+    ; in_base = 0
+    ; sideset_base = 2
+    ; sideset_count = 1
+    ; threshold = 11
+    ; timeout = 150
+    ; timeout_vector = rx_origin + ps2_rx_abandon
+    ; clkdiv = mhz
+    }
+  ;;
+
+  let tx_config ~mhz =
+    { Isa.Thread_config.default with
+      start = tx_origin
+    ; set_base = 0
+    ; set_count = 2
+    ; out_base = 0
+    ; out_count = 1
+    ; in_base = 0
+    ; threshold = 10
+    ; timeout = 20_000
+    ; timeout_vector = tx_origin + ps2_tx_dead
+    ; clkdiv = mhz
+    }
+  ;;
+
+  (* P0 and P1 open-drain, P2 push-pull, the rest inputs. *)
+  let mode_bits = 0b01_10_10
+
+  (* The byte in a word the receiver pushed, if the frame is well formed:
+     start 0, odd parity, stop 1. *)
+  let byte_of_frame w =
+    let byte = (w lsr 1) land 0xFF in
+    let parity = (w lsr 9) land 1 in
+    if w land 1 = 0 && (w lsr 10) land 1 = 1 && (Int.popcount byte + parity) % 2 = 1
+    then Some byte
+    else None
+  ;;
+end
+
 (* Low-speed USB engine (1.5 Mbit/s, so a 12 MHz core clock: 8 clocks per
    bit). It runs commands from its TX FIFO: send a packet, or receive one.
    Everything above the wire (SYNC, PID, CRC5, CRC16, bit stuffing, NRZI)
@@ -1166,4 +1320,6 @@ let all =
   ; "swd", swd
   ; "usb", usb
   ; "onewire", onewire
+  ; "ps2_rx", ps2_rx
+  ; "ps2_tx", ps2_tx
   ]

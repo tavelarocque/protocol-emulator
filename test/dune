@@ -136,3 +136,11 @@
   (with-stdout-to
    onewire.hex
    (run %{dep:../bin/firmware_hex.exe} onewire))))
+
+(rule
+ (targets ps2.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   ps2.hex
+   (run %{dep:../bin/firmware_hex.exe} ps2))))

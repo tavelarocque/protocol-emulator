@@ -115,6 +115,16 @@ word holds the line as sampled in each slot, so writing 1s reads. The board
 driver's `OneWire` adds the ROM commands, the ROM search and CRC8, and reads
 a DS18B20's temperature.
 
+PS/2 (keyboards and mice): `test/ps2.hex` (32 words) is the host on both
+threads, DATA on P0 and CLK on P1, open-drain, each with a pull-up; P2 is
+used between the threads and must be left unconnected. Set CLKDIV on both
+threads to the core clock in MHz. Thread 0 receives: each RX word is one
+11-bit frame, start bit in bit 0, the byte in bits 8:1, odd parity in bit
+9, the stop bit in bit 10. Thread 1 sends: one TX word a byte (the byte,
+its odd parity in bit 8, a 1 in bit 9), and one RX word back, 0 if the
+device acknowledged, 1 if not, 3 if it never clocked. The board driver's
+`Ps2` has `read()` and `write()`.
+
 Low-speed USB host: `test/usb_host.hex` holds the USB engine (49 words, at
 5) and the echo program (at 0), which relays to it through CHAIN so the two
 threads' FIFOs buffer a whole transaction. The core clock must be 12 MHz
@@ -142,4 +152,6 @@ shows what the firmware is doing. USB needs a USB 1.1 transceiver (VO/FSE0
 mode, such as a TUSB1106 or MAX3349E) between the protocol pins and the USB
 connector, the host's 15 kohm pull-downs on D+ and D-, and 5 V for the
 device. 1-Wire needs a pull-up on P0 (4.7 kohm to 3.3 V); I2C, SWD and the
-other open-drain buses need one per line.
+other open-drain buses need one per line. A PS/2 device runs from 5 V: put
+a bidirectional level shifter on DATA and CLK, with pull-ups on its 5 V
+side.

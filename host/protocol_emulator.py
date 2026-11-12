@@ -719,6 +719,97 @@ class OneWire:
         return raw / 16
 
 
+class Ps2Error(Exception):
+    pass
+
+
+class Ps2:
+    """PS/2 host for a keyboard or mouse (ps2.hex: the receiver on thread 0,
+    the transmitter on thread 1): DATA on P0 and CLK on P1, both open-drain,
+    each needing a pull-up to the device's supply through a level shifter if
+    that is 5 V. P2 is used between the threads and must be left unconnected.
+    [clock_hz] is the core clock; the firmware counts in microseconds."""
+
+    RX_WORDS = 11        # the receiver's length: the transmitter follows it
+    RX_ABANDON = 9
+    TX_DEAD = 16
+    ACK, RESEND = 0xFA, 0xFE
+
+    def __init__(self, chip, image, clock_hz=10_000_000):
+        if clock_hz <= 0 or clock_hz % 1_000_000:
+            raise ValueError("the core clock must be a whole number of MHz")
+        mhz = clock_hz // 1_000_000
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(thread=0, start=0, in_base=0, threshold=11, timeout=150,
+                       timeout_vector=self.RX_ABANDON, sideset_base=2,
+                       sideset_count=1, clkdiv=mhz)
+        chip.configure(thread=1, start=self.RX_WORDS, set_base=0, set_count=2,
+                       out_base=0, out_count=1, in_base=0, threshold=10,
+                       timeout=20_000, timeout_vector=self.RX_WORDS + self.TX_DEAD,
+                       clkdiv=mhz)
+        chip.set_pin_modes({0: OPEN_DRAIN, 1: OPEN_DRAIN, 2: PUSH_PULL})
+        chip.run(threads=(0, 1))
+
+    @staticmethod
+    def _odd_parity(byte):
+        ones = 0
+        for k in range(8):
+            ones += (byte >> k) & 1
+        return 1 - (ones & 1)
+
+    @classmethod
+    def decode(cls, word):
+        """The byte in a frame word from the receiver, or None if the start
+        bit, parity or stop bit is wrong."""
+        byte = (word >> 1) & 0xFF
+        if (word & 1) or not (word >> 10) & 1 or (word >> 9) & 1 != cls._odd_parity(byte):
+            return None
+        return byte
+
+    def read(self):
+        """The next byte from the device, or None if none has arrived. A
+        badly framed byte raises Ps2Error."""
+        w = self.chip.try_pop(thread=0)
+        if w is None:
+            return None
+        byte = self.decode(w)
+        if byte is None:
+            raise Ps2Error("bad frame 0x%03x" % w)
+        return byte
+
+    def write(self, byte):
+        """Send one byte to the device and wait for its acknowledge bit.
+        The receiver hears the host's byte too, as the device clocked it:
+        that record is checked against what was sent."""
+        byte &= 0xFF
+        sent = byte | (self._odd_parity(byte) << 8)
+        self.chip.push(sent | (1 << 9), thread=1)
+        r = self.chip.pop(thread=1)
+        if r == 3:
+            raise Ps2Error("no device: it never clocked")
+        # Frames the device completed before the host got the bus come first.
+        held = []
+        while True:
+            w = self.chip.pop(thread=0)
+            if not (w >> 10) & 1:
+                break
+            held.append(w)
+        self._held = held
+        if (w >> 1) & 0x1FF != sent:
+            raise Ps2Error("sent 0x%03x, the bus carried 0x%03x" % (sent, (w >> 1) & 0x1FF))
+        if r != 0:
+            raise Ps2Error("the device did not acknowledge")
+
+    def held(self):
+        """Bytes the device finished sending while the last write() waited
+        for the bus, oldest first."""
+        out = [self.decode(w) for w in getattr(self, "_held", [])]
+        self._held = []
+        return out
+
+
 class SpiDevice:
     """The chip as a mode-0 SPI device (spi_target.hex): P0 SCK, P1 MOSI,
     P2 MISO, P3 CS_N. The host must keep replies queued ahead of the

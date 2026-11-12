@@ -12,7 +12,7 @@ over SPI after fabrication. Nothing in the hardware knows what UART, SPI or
 I2C is.
 
 The evidence that this is general is what happened after the hardware was
-frozen at v1.4. Seven protocol engines were then added, each as firmware alone, with
+frozen at v1.4. Eight protocol engines were then added, each as firmware alone, with
 no change to the RTL:
 
 | Added after the freeze | What it needed from the hardware | Instructions |
@@ -23,6 +23,7 @@ no change to the RTL:
 | Arm SWD host | nothing new | 11 |
 | Low-speed USB host, with clock recovery (a stretch goal) | nothing new; a 12 MHz clock | 49 |
 | 1-Wire, with ROM search | nothing new | 25 |
+| PS/2 host, receiving and sending on the two threads | nothing new | 11 + 21 |
 | WS2812 LEDs | nothing new | 16 |
 
 The last was a blind test. A programmer who had never seen the project (an
@@ -48,6 +49,9 @@ is weakest for emulating protocols:
   recovery are built on it.
 - **Open-drain is a pin mode**, in hardware, not emulated by toggling
   direction.
+- **Threads can signal each other through a pin.** A thread reads another's
+  output with no delay; the PS/2 receiver uses a spare pin to tell the
+  transmitter a frame is under way.
 - **Every 16-bit word is a defined instruction.** No program can put the
   chip in an undefined state.
 - **CHAIN** feeds one thread's output FIFO into the other's input, so the
@@ -65,7 +69,7 @@ finding what was missing; the README's "Architecture" tells that story.
 | SPI | controller (5 Mbit/s at 10 MHz) and device | 26, 23 |
 | I2C | controller and target, clock stretching, timeouts | 25, 63 |
 | I2C-to-SPI bridge | both threads, no host in the data path | 25 + 26 |
-| JTAG, SWD, low-speed USB, 1-Wire, WS2812 | as above | 11, 11, 49, 25, 16 |
+| JTAG, SWD, low-speed USB, 1-Wire, PS/2, WS2812 | as above | 11, 11, 49, 25, 32, 16 |
 
 Each is an assembly file in [`examples/`](../examples), generated from the
 firmware the tests run. The toolchain is the assembler and `pe_sim`, which
@@ -80,15 +84,15 @@ runs a program on the reference model and prints the pins.
    equivalent to an independent specification (SAT, Z3). After every
    layout, the post-layout gate netlist is proven equal to the RTL (Yosys,
    all 1,796 flip-flops).
-3. **Device models written by other people.** Every protocol except SWD is
-   checked against at least one third-party model: picosoc's SPI flash,
+3. **Device models written by other people.** Every protocol except SWD
+   and PS/2 is checked against at least one third-party model: picosoc's SPI flash,
    cocotbext's I2C, SPI, UART and JTAG, usbhostslave's USB device,
    sockit_owm's 1-Wire slave.
-4. **Tests that are themselves tested.** 66 bugs are planted in the RTL,
+4. **Tests that are themselves tested.** 76 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
-5. **The gates, not only the RTL.** All 26 chip-level tests pass on the
+5. **The gates, not only the RTL.** All 27 chip-level tests pass on the
    post-layout netlist.
 6. **The software that will run on the board.** The MicroPython driver is
    tested unchanged in cocotb, and in MicroPython on an emulated demo
