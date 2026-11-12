@@ -144,3 +144,11 @@
   (with-stdout-to
    ps2.hex
    (run %{dep:../bin/firmware_hex.exe} ps2))))
+
+(rule
+ (targets can.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   can.hex
+   (run %{dep:../bin/firmware_hex.exe} can))))

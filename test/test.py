@@ -1697,6 +1697,173 @@ async def _ps2_identify_ok(dut):
     return got == [0xFA, 0xAB, 0x83]
 
 
+# --- CAN: the chip's transmitter and listen-only receiver, and a node ------
+#
+# dev_mode 9: RXD (P0) is the wired-AND of the chip's TXD (P1) and can_dev,
+# the node's drive. The node is written from ISO 11898-1's rules: it hard-
+# synchronises on a start of frame, resynchronises on later falling edges,
+# samples at 70%, removes stuff bits as they come, checks the CRC, drives
+# the ACK slot of a good frame, and can send a frame of its own. Its clock
+# is 1% slow. The driver's encoder is checked against the bits the OCaml
+# suite prints for the same frame (sim/test_can.ml).
+
+CAN_BIT = 160  # core clocks: 62.5 kbit/s at 10 MHz
+CAN_NODE_BIT = 162
+CAN_VECTOR = "01010101010100000110000010000111110111001000010110001111"
+
+
+class CanNode:
+    def __init__(self):
+        self.got, self.to_send, self.sent = [], [], 0
+        self.phase, self.prev, self.idle = -1, 1, 0
+        self.drive = 1
+
+    def _start(self, sending):
+        self.phase, self.raw, self.bits = 0, [], []
+        self.run, self.last, self.state, self.ones = 0, -1, "frame", 0
+        self.sending = list(sending)
+        self.drive = self.sending[0] if self.sending else 1
+
+    def _sample(self, b):
+        self.ones = self.ones + 1 if b else 0
+        if self.state == "frame":
+            if self.run == 5:
+                self.state = "frame" if b != self.last else "bad"
+                self.last, self.run = b, 1
+                return
+            self.run = self.run + 1 if b == self.last else 1
+            self.last = b
+            self.bits.append(b)
+            if len(self.bits) >= 19:
+                n = int("".join(map(str, self.bits[15:19])), 2)
+                if n > 8:
+                    self.state = "bad"
+                elif len(self.bits) == 34 + 8 * n:
+                    body, crc = self.bits[:19 + 8 * n], self.bits[19 + 8 * n:]
+                    ok = int("".join(map(str, crc)), 2) == pe.Can._crc15(body)
+                    self.state = "delim" if ok else "bad"
+                    if ok and not self.sending:
+                        ident = int("".join(map(str, body[1:12])), 2)
+                        data = [int("".join(map(str, body[19 + 8 * k:27 + 8 * k])), 2)
+                                for k in range(n)]
+                        self.got.append((ident, data))
+        elif self.state == "delim":
+            if self.run == 5 and b != self.last:
+                self.run = 0  # the stuff bit after the CRC
+            else:
+                self.state = "ack" if b else "bad"
+        elif self.state == "ack":
+            self.state = "done"
+
+    def tick(self, bus):
+        fell = self.prev and not bus
+        self.prev = bus
+        if self.phase < 0:
+            self.idle = self.idle + 1 if bus else 0
+            if fell:
+                self._start([])
+            elif self.idle >= 11 * CAN_NODE_BIT and self.to_send:
+                self._start(self.to_send[0])
+            return
+        if fell and self.drive:
+            self.phase = 0  # resynchronise
+        self.phase += 1
+        if self.phase == CAN_NODE_BIT * 7 // 10:
+            self._sample(bus)
+        if self.phase >= CAN_NODE_BIT:
+            self.phase = 0
+            if self.sending:
+                self.sending.pop(0)
+                if self.sending:
+                    self.drive = self.sending[0]
+                else:
+                    self.drive, self.sent = 1, self.sent + 1
+                    self.to_send.pop(0)
+            else:
+                self.drive = 0 if self.state == "ack" else 1
+            if self.ones >= 8 and not self.sending:
+                self.phase, self.idle = -1, 0
+
+
+async def can_node(dut, node):
+    dut.dev_mode.value = 9
+    dut.can_dev.value = 1
+    while True:
+        await RisingEdge(dut.clk)
+        node.tick(int(dut.can_bus.value))
+        dut.can_dev.value = node.drive
+
+
+def _can_session(chip, node):
+    can = pe.Can(chip, firmware("can"), bitrate=62_500)
+    acked = can.send(0x123, [1, 2, 3])
+    node.to_send.append(pe.Can.frame_bits(0x321, [0xAA, 0x55, 0x00, 0xFF]))
+    heard = []
+    while len(heard) < 2:
+        f = can.receive()
+        if f is not None:
+            heard.append(f)
+    return acked, heard
+
+
+@cocotb.test(timeout_time=300, timeout_unit="ms")
+async def test_can(dut):
+    """The driver sends a frame that a node receives and acknowledges, then
+    hears the node's own frame; and with no node, its frame goes
+    unacknowledged."""
+    assert "".join(map(str, pe.Can.frame_bits(0x555, [0x00, 0xFF]))) == CAN_VECTOR
+    await reset(dut)
+    node = CanNode()
+    task = cocotb.start_soon(can_node(dut, node))
+    chip = pe.Chip(sim_port(dut))
+    acked, heard = await bridge(lambda: _can_session(chip, node))()
+    task.cancel()
+    assert acked and node.got == [(0x123, [1, 2, 3])], (acked, node.got)
+    assert heard == [(0x123, [1, 2, 3], True), (0x321, [0xAA, 0x55, 0x00, 0xFF], False)], heard
+
+    await reset(dut)
+    dut.dev_mode.value = 9
+    dut.can_dev.value = 1
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def alone():
+        can = pe.Can(chip, firmware("can"), bitrate=62_500)
+        acked = can.send(0x7FF, [])
+        f = None
+        while f is None:
+            f = can.receive()
+        return acked, f
+
+    assert await alone() == (False, (0x7FF, [], False))
+
+
+def _can_stuff_after_six(bits):
+    out, last, run = [], -1, 0
+    for b in bits:
+        run = run + 1 if b == last else 1
+        last = b
+        out.append(b)
+        if run == 6:
+            last, run = 1 - b, 1
+            out.append(last)
+    return out
+
+
+async def _can_send_ok(dut):
+    node = CanNode()
+    task = cocotb.start_soon(can_node(dut, node))
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        return pe.Can(chip, firmware("can"), bitrate=62_500).send(0x100, [0x00, 0xFF, 0x00])
+
+    acked = await session()
+    task.cancel()
+    return acked and node.got == [(0x100, [0x00, 0xFF, 0x00])]
+
+
 DRIVER_BUGS = [
     ("pin modes packed one bit per pin", pe.Chip, "set_pin_modes",
      lambda _: _pin_modes_one_bit_per_pin, _flash_read_ok),
@@ -1712,6 +1879,8 @@ DRIVER_BUGS = [
      lambda _: _onewire_search_never_revisits, _onewire_search_two_ok),
     ("PS/2 parity even, not odd", pe.Ps2, "_odd_parity",
      lambda _: staticmethod(_ps2_even_parity), _ps2_identify_ok),
+    ("CAN stuff bit after six equal bits", pe.Can, "_stuff",
+     lambda _: staticmethod(_can_stuff_after_six), _can_send_ok),
 ]
 
 

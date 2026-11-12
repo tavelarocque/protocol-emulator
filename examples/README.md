@@ -21,12 +21,13 @@ them, so they cannot drift.
 | [`usb.s`](usb.s) | Low-speed USB: send, and receive with clock recovery | 49 |
 | [`onewire.s`](onewire.s) | 1-Wire bus engine | 25 |
 | [`ps2_rx.s`](ps2_rx.s), [`ps2_tx.s`](ps2_tx.s) | PS/2 host: receiver and transmitter, one on each thread | 11 + 21 |
+| [`can_rx.s`](can_rx.s), [`can_tx.s`](can_tx.s) | CAN: listen-only receiver and transmitter, one on each thread | 19 + 27 |
 | [`echo.s`](echo.s) | TX FIFO to RX FIFO, for bring-up | 5 |
 | [`ws2812/`](ws2812) | WS2812 LEDs: the blind firmware test, with its task and hidden test | 16 |
 
 Two-thread images (full-duplex UART, SPI beside UART, the I2C-to-SPI
-bridge, the USB host, PS/2) place two of these in one memory; see
-`Two_protocols`, `Bridge`, `Uart_duplex`, `Usb_host` and `Ps2` in
+bridge, the USB host, PS/2, CAN) place two of these in one memory; see
+`Two_protocols`, `Bridge`, `Uart_duplex`, `Usb_host`, `Ps2` and `Can` in
 `model/firmware.ml`.
 
 ## Try one

@@ -129,6 +129,12 @@ module tb ();
       .vBusDetect(1'b1)
   );
 
+  // --- CAN (dev_mode 9) --------------------------------------------------
+  // The bus as a transceiver presents it: RXD (P0) is the wired-AND of the
+  // chip's TXD (P1) and the other node's drive, can_dev (0 = dominant).
+  reg can_dev = 1;
+  wire can_bus = (uio_oe[1] ? uio_out[1] : 1'b1) & can_dev;
+
   // --- 1-Wire (dev_mode 8) -----------------------------------------------
   reg [2:0] onewire_ena = 0;
   reg [2:0] onewire_dat_r = 3'b111;
@@ -166,7 +172,8 @@ module tb ();
       dev_mode == 3'd5 ? {4'b1111, jtag_tdo, 3'b111} :
       dev_mode == 3'd6 ? {6'b111111, swdio, 1'b1} :
       dev_mode == 3'd7 ? {6'b111111, usb_dm, usb_dp} :
-      dev_mode == 4'd8 ? {7'b1111111, onewire} : uio_in;
+      dev_mode == 4'd8 ? {7'b1111111, onewire} :
+      dev_mode == 4'd9 ? {7'b1111111, can_bus} : uio_in;
 
   // Replace tt_um_example with your module name:
   tt_um_tavelarocque_protocol_emulator user_project (

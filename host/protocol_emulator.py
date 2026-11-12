@@ -810,6 +810,188 @@ class Ps2:
         return out
 
 
+class CanError(Exception):
+    pass
+
+
+class Can:
+    """CAN (classical, 11-bit identifiers) through a transceiver such as an
+    SN65HVD230 (can.hex: the receiver on thread 0, the transmitter on thread
+    1): RXD on P0, TXD on P1. It sends data frames and hears every frame on
+    the bus, its own included. It is not a full node: it does not
+    acknowledge other nodes' frames, so the bus needs at least one node that
+    does, and it sends no error frames.
+
+    The engines own the bit timing, arbitration and the ACK slot; framing,
+    CRC and bit stuffing are here. The host has to keep up: a word of 16
+    bits each way per 16 bit times while a frame is on the bus, so use the
+    PIO port (PioPort) above a few kbit/s."""
+
+    RX_WORDS, RX_SAME, TX_LOST = 19, 14, 19
+    FRAME_END = 0xFFFF
+
+    def __init__(self, chip, image, clock_hz=10_000_000, bitrate=125_000):
+        clkdiv = clock_hz // (10 * bitrate)
+        if clkdiv < 1 or clkdiv * 10 * bitrate != clock_hz:
+            raise ValueError("the core clock must be 10 x bitrate x a whole number")
+        self.chip = chip
+        self._words, self._frames = [], []
+        chip.stop()
+        chip.load(image)
+        chip.configure(thread=0, start=0, in_base=0, threshold=15, timeout=4,
+                       timeout_vector=self.RX_SAME, clkdiv=clkdiv, out_msb_first=True)
+        chip.configure(thread=1, start=self.RX_WORDS, out_base=1, out_count=1,
+                       threshold=16, timeout=0,
+                       timeout_vector=self.RX_WORDS + self.TX_LOST, clkdiv=clkdiv)
+        chip.set_pin_modes({1: PUSH_PULL})
+        chip.run(threads=(0, 1))
+
+    @staticmethod
+    def _crc15(bits):
+        crc = 0
+        for b in bits:
+            top = (crc >> 14) & 1
+            crc = (crc << 1) & 0x7FFF
+            if top ^ b:
+                crc ^= 0x4599
+        return crc
+
+    @staticmethod
+    def _stuff(bits):
+        """A bit of the opposite level after every five equal bits."""
+        out, last, run = [], -1, 0
+        for b in bits:
+            run = run + 1 if b == last else 1
+            last = b
+            out.append(b)
+            if run == 5:
+                last, run = 1 - b, 1
+                out.append(last)
+        return out
+
+    @classmethod
+    def frame_bits(cls, ident, data):
+        """A data frame on the wire (1 = recessive), from its start-of-frame
+        bit to its ACK delimiter."""
+        if not 0 <= ident < 0x800 or len(data) > 8:
+            raise ValueError("11-bit identifier, at most 8 bytes")
+        body = [0] + [(ident >> (10 - k)) & 1 for k in range(11)] + [0, 0, 0]
+        body += [(len(data) >> (3 - k)) & 1 for k in range(4)]
+        for byte in data:
+            body += [(byte >> (7 - k)) & 1 for k in range(8)]
+        crc = cls._crc15(body)
+        body += [(crc >> (14 - k)) & 1 for k in range(15)]
+        return cls._stuff(body) + [1, 1, 1]
+
+    @classmethod
+    def decode(cls, levels):
+        """(identifier, data, acknowledged) from a frame's recorded levels,
+        or None if its stuffing, fixed bits or CRC are wrong."""
+        pos, last, run = 0, -1, 0
+
+        def take(n):
+            nonlocal pos, last, run
+            out = []
+            while len(out) < n:
+                if pos >= len(levels):
+                    return None
+                b = levels[pos]
+                pos += 1
+                if run == 5:
+                    if b == last:
+                        return None
+                    last, run = b, 1
+                else:
+                    run = run + 1 if b == last else 1
+                    last = b
+                    out.append(b)
+            return out
+
+        def value(bits):
+            v = 0
+            for b in bits:
+                v = (v << 1) | b
+            return v
+
+        head = take(19)
+        if head is None or head[0] or value(head[12:15]):
+            return None
+        n = value(head[15:19])
+        if n > 8:
+            return None
+        payload = take(8 * n)
+        crc = take(15) if payload is not None else None
+        if crc is None or value(crc) != cls._crc15(head + payload):
+            return None
+        if run == 5:  # a stuff bit can follow the CRC
+            if pos >= len(levels) or levels[pos] == last:
+                return None
+            pos += 1
+        tail = levels[pos:pos + 3]
+        if len(tail) < 3 or tail[0] != 1 or tail[2] != 1:
+            return None
+        return (value(head[1:12]),
+                [value(payload[8 * k:8 * k + 8]) for k in range(n)], tail[1] == 0)
+
+    def _pump(self):
+        """Moves what the receiver has pushed into frames."""
+        while True:
+            w = self.chip.try_pop(thread=0)
+            if w is None:
+                return
+            if w != self.FRAME_END:
+                self._words.append(w)
+                continue
+            levels = []
+            for k, word in enumerate(self._words):
+                n = 15
+                if k == len(self._words) - 1:
+                    n = 0
+                    while word >> n:
+                        n += 1
+                levels += [(word >> j) & 1 for j in range(n)]
+            self._words = []
+            self._frames.append(self.decode(levels))
+
+    def send(self, ident, data, attempts=8):
+        """Sends a data frame, again each time it loses arbitration. True
+        if a node acknowledged it, False if none did."""
+        bits = self.frame_bits(ident, data)[1:]  # the engine sends the SOF
+        words = [len(bits) - 1]
+        for k in range(0, len(bits), 16):
+            w = 0
+            for j, b in enumerate(bits[k:k + 16]):
+                w |= b << j
+            words.append(w)
+        for _ in range(attempts):
+            for w in words:
+                while self.chip.status(thread=1)["tx_level"] >= FIFO_DEPTH:
+                    self._pump()
+                self.chip.write(TX_FIFO + BANK, w)
+                self._pump()
+            r = None
+            while r is None:
+                self._pump()
+                r = self.chip.try_pop(thread=1)
+            if r == 0:
+                return True
+            if r == self.FRAME_END:
+                return False
+        raise CanError("arbitration lost %d times" % attempts)
+
+    def receive(self):
+        """The oldest frame heard and not yet returned, as (identifier,
+        data, acknowledged), or None if there is none. The chip's own frames
+        are among them. A frame that does not decode raises CanError."""
+        self._pump()
+        if not self._frames:
+            return None
+        frame = self._frames.pop(0)
+        if frame is None:
+            raise CanError("a frame with a stuffing, form or CRC error")
+        return frame
+
+
 class SpiDevice:
     """The chip as a mode-0 SPI device (spi_target.hex): P0 SCK, P1 MOSI,
     P2 MISO, P3 CS_N. The host must keep replies queued ahead of the

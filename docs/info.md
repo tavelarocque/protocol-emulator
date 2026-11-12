@@ -125,6 +125,18 @@ its odd parity in bit 8, a 1 in bit 9), and one RX word back, 0 if the
 device acknowledged, 1 if not, 3 if it never clocked. The board driver's
 `Ps2` has `read()` and `write()`.
 
+CAN (classical, 11-bit identifiers): `test/can.hex` (46 words), RXD on P0
+and TXD on P1 through a 3.3 V transceiver. A bit is 10 ticks: set CLKDIV on
+both threads to the core clock / (10 x bit rate), 8 for 125 kbit/s at
+10 MHz. Thread 1 sends a data frame and reports 0 if a node acknowledged
+it, 0xFFFF if none did, anything else if it lost arbitration and should be
+sent again. Thread 0 records every frame on the bus, 15 bit levels to a
+word, 0xFFFF after each frame. Framing, CRC and bit stuffing are in the
+board driver's `Can` (`send`, `receive`). It is not a full node: it does
+not acknowledge other nodes' frames or send error frames, so the bus needs
+at least one node that acknowledges. While a frame is on the bus the host
+must move a word each way every 16 bit times.
+
 Low-speed USB host: `test/usb_host.hex` holds the USB engine (49 words, at
 5) and the echo program (at 0), which relays to it through CHAIN so the two
 threads' FIFOs buffer a whole transaction. The core clock must be 12 MHz
@@ -154,4 +166,5 @@ connector, the host's 15 kohm pull-downs on D+ and D-, and 5 V for the
 device. 1-Wire needs a pull-up on P0 (4.7 kohm to 3.3 V); I2C, SWD and the
 other open-drain buses need one per line. A PS/2 device runs from 5 V: put
 a bidirectional level shifter on DATA and CLK, with pull-ups on its 5 V
-side.
+side. CAN needs a 3.3 V transceiver (an SN65HVD230, for one) and a
+terminated bus.

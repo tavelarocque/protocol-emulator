@@ -120,3 +120,19 @@
   (with-stdout-to
    ps2_tx.s
    (run %{dep:../bin/firmware_src.exe} ps2_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets can_rx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   can_rx.s
+   (run %{dep:../bin/firmware_src.exe} can_rx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets can_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   can_tx.s
+   (run %{dep:../bin/firmware_src.exe} can_tx %{dep:../model/firmware.ml}))))
