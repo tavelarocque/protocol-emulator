@@ -33,6 +33,13 @@ formally proven equal to the RTL.
 
 ![Block diagram: host, SPI port and registers, program memory, two threads with FIFOs, and the pins](docs/img/architecture.svg)
 
+[`docs/chip.html`](docs/chip.html) is the laid-out chip in 3D: every one of
+the 101,866 cells where the tools placed it, coloured by the block it belongs
+to, with the reference model running real firmware in the page and lighting
+the flip-flops that hold a 1. It is one self-contained file with no network
+access: download it and open it in a browser, or
+[view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/chip.html).
+
 The instruction set ([`docs/isa.md`](docs/isa.md)) follows the RP2040's PIO:
 
 - every instruction takes one cycle, plus a 0-15 cycle delay field
@@ -218,6 +225,7 @@ test/    cocotb testbench (RTL and gate-level) + generated firmware .hex;
 gl_equiv/ Yosys proof that the post-layout netlist equals the RTL (run in CI)
 docs/    submission.md (one-page summary), design-and-verification.md (the report),
          figures.py and img/ (diagrams drawn from the reference model),
+         chip.html (the layout in 3D, one self-contained page),
          isa.md (instruction set),
          info.md (datasheet), coverage-closure.md, related-work.md
 ```

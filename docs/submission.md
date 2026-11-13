@@ -8,6 +8,10 @@ full report.
 
 ![Block diagram of the chip](img/architecture.svg)
 
+The laid-out chip in 3D, with the reference model running firmware on it:
+[`chip.html`](chip.html) (one self-contained file; download and open it, or
+[view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/chip.html)).
+
 The chip is a small CPU whose instructions read pins, write pins and count
 clock cycles. A protocol is a program of at most 64 instructions, loaded
 over SPI after fabrication. Nothing in the hardware knows what UART, SPI or
