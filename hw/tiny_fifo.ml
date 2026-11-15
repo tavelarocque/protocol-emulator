@@ -10,7 +10,7 @@ open! Core
 open! Hardcaml
 open! Signal
 
-let depth = 4
+let depth = 16
 
 type t =
   { head : Signal.t
@@ -21,9 +21,9 @@ type t =
 
 let create ?(name = "fifo") spec ~push ~data ~pop =
   let open Always in
-  let wr = Variable.reg spec ~width:2 in
-  let rd = Variable.reg spec ~width:2 in
-  let level = Variable.reg spec ~width:3 in
+  let wr = Variable.reg spec ~width:4 in
+  let rd = Variable.reg spec ~width:4 in
+  let level = Variable.reg spec ~width:5 in
   ignore (wr.value -- (name ^ "_wr") : Signal.t);
   ignore (rd.value -- (name ^ "_rd") : Signal.t);
   ignore (level.value -- (name ^ "_level") : Signal.t);
@@ -38,7 +38,7 @@ let create ?(name = "fifo") spec ~push ~data ~pop =
   compile
     [ when_ do_push [ wr <-- wr.value +:. 1 ]
     ; when_ do_pop [ rd <-- rd.value +:. 1 ]
-    ; level <-- level.value +: uresize do_push 3 -: uresize do_pop 3
+    ; level <-- level.value +: uresize do_push 5 -: uresize do_pop 5
     ];
   { head = mux rd.value mem; level = level.value; full; empty }
 ;;
