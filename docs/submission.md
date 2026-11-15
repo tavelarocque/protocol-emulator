@@ -76,7 +76,12 @@ finding what was missing; the README's "Architecture" tells that story.
 | SPI | controller (5 Mbit/s at 10 MHz) and device | 26, 23 |
 | I2C | controller and target, clock stretching, timeouts | 25, 63 |
 | I2C-to-SPI bridge | both threads, no host in the data path | 25 + 26 |
-| JTAG, SWD, low-speed USB, 1-Wire, PS/2, CAN, WS2812 | as above | 11, 11, 49, 25, 32, 46, 16 |
+| JTAG and SWD | controller, host | 11, 11 |
+| Low-speed USB | host, with clock recovery | 49 |
+| 1-Wire | bus controller, ROM search | 25 |
+| PS/2 | host, both directions | 11 + 21 |
+| CAN | transmitter and listen-only receiver | 19 + 27 |
+| WS2812 LEDs | driver | 16 |
 
 ![SPI controller waveform from the reference model](img/spi.svg)
 
@@ -94,7 +99,7 @@ runs a program on the reference model and prints the pins.
    layout, the post-layout gate netlist is proven equal to the RTL (Yosys,
    all 1,796 flip-flops).
 3. **Device models written by other people.** Every protocol except SWD,
-   PS/2 and CAN is checked against at least one third-party model: picosoc's SPI flash,
+   PS/2, CAN and WS2812 is checked against at least one third-party model: picosoc's SPI flash,
    cocotbext's I2C, SPI, UART and JTAG, usbhostslave's USB device,
    sockit_owm's 1-Wire slave.
 4. **Tests that are themselves tested.** 86 bugs are planted in the RTL,

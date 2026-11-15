@@ -15,8 +15,8 @@ AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
 | C1 | The RTL does what the instruction set and register map say, in every state, including states no test reaches | SAT equivalence proof of the whole chip against an independent spec; the spec checked against the reference model | Proof, for the RTL. The spec's agreement with the reference model is tested, not proven (section 3) |
 | C2 | The firmware implements each protocol correctly at the pins | Protocol oracles on the model and the RTL; device models written by other people from real datasheets and standards | Tests, judged by independent oracles |
 | C3 | The gate-level netlist behaves like the RTL | Formal equivalence of the post-layout netlist and the generated Verilog (Yosys, in CI after every layout); the cocotb suite rerun on the netlist; LVS | Proof, from the first cycle after a reset, on every output pin; Hardcaml's Verilog generation itself is trusted (section 7) |
-| C4 | The chip meets timing at its rated 10 MHz | Static timing analysis at 50 MHz, slow corner | About 80 ns of slack at 10 MHz. At 50 MHz, the slow corner's slack has varied by 1.3 ns between layout runs of the same logic (−0.14 ns, then +1.19 ns), so 50 MHz is not claimed |
-| C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb, and in MicroPython on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL: every protocol class, against the same devices | Tests in simulation and emulation; not yet run on hardware |
+| C4 | The chip meets timing at its rated 10 MHz (12 MHz for USB) | Static timing analysis of the submitted 8x4 layout at a 25 ns target (40 MHz), three corners | Setup slack +6.85 ns at the slow corner, hold +0.12 ns at the worst: about 80 ns of slack at 10 MHz. One warning stands: 36 pins on 9 nets exceed the slew limit at the slow corner only (section 7) |
+| C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb, and in MicroPython on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL: UART, I2C, SPI, JTAG, SWD and USB against the same devices (1-Wire's driver runs there on a simulated bus; PS/2 and CAN do not run there yet) | Tests in simulation and emulation; not yet run on hardware |
 
 ## 2. Design
 
@@ -39,7 +39,7 @@ anyone likes.
 | Open-drain as a per-pin mode | PIO's trick of toggling pin direction | I2C, SWD and any shared line need it, and a mode bit is cheaper in instructions and harder to get wrong |
 | Every 16-bit word decodes to a defined instruction | Reserved encodings that trap or are undefined | Makes uniformly random program memory a valid test input and the decoder exhaustively checkable (65,536 words). There are no X states to reason about |
 | Integer clock divider per thread | PIO's fractional divider | Simpler hardware. Fractional baud rates use X/Y loops instead; UART RX tolerates a sender about 5% off rate on isolated frames, and back-to-back frames are tested to 2% |
-| Two threads sharing a 64-word memory (the model always had two) | Four, as PIO has | Two cover the useful pairings (TX+RX, controller+bridge). Layout time is already tight: two-thread layouts take 4 to 5 hours against GitHub's 6-hour job limit, where the one-thread v1.1 took 91 minutes, and one two-thread build ran out of time in routing |
+| Two threads sharing a 64-word memory (the model always had two) | Four, as PIO has | Two cover the useful pairings (TX+RX, controller+bridge). Layout time was the constraint when this was decided: two-thread layouts on 6x4 tiles took 4 to 5 hours against GitHub's 6-hour job limit, where the one-thread v1.1 took 91 minutes (the 8x4 layout takes under 3) |
 | SPI host port, 24-bit transactions | A UART or a parallel bus | Any microcontroller can drive SPI: the demo board's RP2350 (or the older boards' RP2040) can bit-bang it from MicroPython, or run it from PIO where timing matters (USB) |
 | Two-flip-flop synchronisers on every protocol input, bypassable per pin | No synchronisers | Found in a review for silicon, which simulation cannot find (ISA v1.3). The bypass exists because side-set SPI samples MISO one clock after SCK falls, and a test shows it fails with the extra two cycles |
 | Shift direction per thread | Bit-reversal in the host | MSB-first protocols (SPI, I2C) take and return plain bytes, and one thread can bridge an MSB-first protocol into an LSB-first one |
@@ -312,7 +312,7 @@ answer it.
    model has no dependency on the hardware. The specs were written from the
    documents in a different style, and share only what the checker needs.
 3. **Device models written by other people.** Every protocol except SWD,
-   PS/2 and CAN is checked against at least one device model written by someone else, from
+   PS/2, CAN and WS2812 is checked against at least one device model written by someone else, from
    the real datasheet or standard. They are the backstop against a shared
    misreading, and they do not know this project exists.
 4. **Every check is shown to fail.** Planted bugs, kept in the repository
@@ -339,10 +339,14 @@ answer it.
   every protocol input and on the host port. A pin with SYNC_BYPASS set is
   the firmware author's responsibility. The host port requires each SCK
   phase to last at least 4 core clocks.
-- **Timing.** The chip is rated at 10 MHz. At 50 MHz, the slow corner
-  (1.08 V, 125 °C) missed by 0.14 ns in the first v1.4 build and met it with
-  1.19 ns to spare in the current one, with no change in logic: placement
-  varies between layout runs, so 50 MHz is not claimed.
+- **Timing.** The chip is rated at 10 MHz (12 MHz for USB). The submitted
+  layout targets 25 ns and meets it at every corner, with 6.85 ns to spare
+  at the slow one (1.08 V, 125 °C). Earlier 6x4 layouts at a 20 ns target
+  missed by 0.14 ns in one build and met it by 1.19 ns in the next with no
+  change in logic, so nothing above 40 MHz is claimed. At the slow corner
+  only, 36 pins on 9 high-fanout nets exceed the cell library's slew limit
+  (3.33 ns at worst against 2.51 ns); two repairs were tried and did not
+  clear it (README, "Metrics").
 - **Pads, reset and power** are Tiny Tapeout's and are not modelled beyond
   the gate-level simulation.
 - **Hardware.** Nothing has run on silicon yet. The host driver has run in
@@ -374,8 +378,16 @@ answer it.
   board is an RP2040 board; the RP2350 board's pins and PIO window are
   untested until a real board (`test/board_emu/README.md`). One known limit: after a NAK the engine still sends the ACK queued
   behind it, which a device ignores but the spec does not allow.
-- **Protocols not done.** CAN and 10 Mbit Ethernet; Ethernet needs a clock
-  well above what the timing margin supports.
+- **What the architecture cannot do.** 10 Mbit Ethernet: a frame is at
+  least 576 bits sent without a pause, and the chip can hold 64 bits in a
+  FIFO and take about 200,000 words a second from the host at 40 MHz, where
+  Ethernet needs about 625,000. It would take a packet buffer in hardware.
+  A full CAN node: acknowledging other nodes' frames means decoding a frame
+  as it arrives, which does not fit beside the rest in 64 instructions; the
+  chip sends, arbitrates and listens. The I2C target uses 63 of the 64
+  words: program memory, not the instruction set, is the limit.
+- **PS/2's and CAN's device models, and WS2812's hidden test,** were
+  written for this project, as SWD's target was.
 - **SWD's target model** was written for this project, from ADIv5, so it does
   not give the independence a third-party model would.
 
@@ -394,6 +406,6 @@ make -C test/board_emu && cd test/board_emu && node run_usb.mjs
 
 The setup is in the [README](../README.md). In recent GitHub Actions runs
 the OCaml suite took about 16 minutes and the cocotb suite under 2. The
-layout itself takes 4 to 5 hours; the whole workflow, with the precheck and
-the gate-level rerun, took 6 to 7. The RTL-to-netlist proof with its four
+layout itself takes about 3 hours; the whole workflow, with the precheck and
+the gate-level rerun, about 4. The RTL-to-netlist proof with its four
 planted bugs takes about 7 minutes on two cores.

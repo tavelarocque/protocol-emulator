@@ -34,8 +34,9 @@ formally proven equal to the RTL.
 ![Block diagram: host, SPI port and registers, program memory, two threads with FIFOs, and the pins](docs/img/architecture.svg)
 
 [`docs/chip.html`](docs/chip.html) is the laid-out chip in 3D: every one of
-the 101,866 cells where the tools placed it, coloured by the block it belongs
-to, with the reference model running real firmware in the page and lighting
+the 101,866 cells where the tools placed it (17,925 of logic; the rest are
+the fill and decoupling cells that pack the empty rows), coloured by its block,
+with the reference model running real firmware in the page and lighting
 the flip-flops that hold a 1. It is one self-contained file with no network
 access: download it and open it in a browser, or
 [view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/chip.html).
@@ -141,7 +142,7 @@ independent protocol oracles.
 | Protocols | UART, I2C, SPI firmware | independent protocol oracles on the pins: UART waveform + receiver, and an off-rate frame generator (fractional bit times) driving the UART receiver; I2C bus checker + target device that ACKs and stretches SCL; SPI mode-0 checker + slave with scripted responses |
 | Coverage closure | 16 cross bins random testing reaches rarely | AI-written directed scenarios, each judged by the same lockstep comparison and required to hit its own targets; they close every cross bin and catch every planted bug ([`docs/coverage-closure.md`](docs/coverage-closure.md)) |
 | Device mode | the I2C and SPI device firmware, on the model and the chip | the spec-derived reference controller (with one clock of data hold time and with none, 7 to 62 clocks of SCL low) writing, reading and register-reading through a repeated START, judged by the bus checker; a shared bus where the chip must ignore a model device at another address; the host late on both FIFOs so the chip must stretch; two model chips talking, the controller firmware on one and the target on the other; the whole chip over SPI. For SPI, the same with a spec-derived mode-0 controller, with and without gaps between bytes, a transfer abandoned mid-byte, and two chips (controller and device firmware) on four wires |
-| Host driver | `host/protocol_emulator.py`, the MicroPython code the demo board runs | the same file, unchanged, run against the chip in cocotb (on the RTL and the gate-level netlist): it loads firmware and configures threads over the bit-banged host port, sends UART to cocotbext-uart's receiver, reads picosoc's SPI flash, and serves cocotbext-i2c's and cocotbext-spi's controllers as an I2C and an SPI device. Then in MicroPython itself, on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL: every protocol class against the same devices, and the USB descriptor read with every handshake timed on the bus (`test/board_emu`) |
+| Host driver | `host/protocol_emulator.py`, the MicroPython code the demo board runs | the same file, unchanged, run against the chip in cocotb (on the RTL and the gate-level netlist): it loads firmware and configures threads over the bit-banged host port, sends UART to cocotbext-uart's receiver, reads picosoc's SPI flash, and serves cocotbext-i2c's and cocotbext-spi's controllers as an I2C and an SPI device. Then in MicroPython itself, on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL: UART, I2C, SPI, JTAG, SWD and USB against the same devices (1-Wire's driver runs there on a simulated bus; PS/2 and CAN do not run there yet), and the USB descriptor read with every handshake timed on the bus (`test/board_emu`) |
 | SWD | the clock engine and the driver's framing | an SWD target written from Arm's ADIv5 (`test/swd_dp.v`), in cocotb on the RTL and the gate-level netlist: silent until the JTAG-to-SWD switch, then DPIDR, a power-up request acknowledged, an AP's IDR through a posted read and RDBUFF, an AP register written and read back; on the model, 300 random sequences checked against the engine's contract |
 | 1-Wire | the bus engine and the driver's ROM layer | on the model: 360 random runs of resets and time slots with zero to three devices, each drawing its timing at random from the range the 1-Wire rules allow (sample point, how long a 0 is held, the presence pulse's delay and length), checking the bits both ways and the host's own pulse timing against the rules. In cocotb, against three copies of Iztok Jeras's 1-Wire slave model (sockit_owm, third-party, LGPL, test only) at the shortest, typical and longest legal timing, with a DS18B20's ROM and function layers above them: each device's ROM code and temperature alone, and with all three on one wire the ROM search finds every device and MATCH ROM reaches each. In MicroPython, the driver's search and CRC on a simulated bus agree with CPython's |
 | PS/2 | the host firmware on both threads, and the driver | on the model: 150 random runs of traffic both ways against a device written from the protocol's rules, with its timing drawn at random from the legal range (clock phases, data setup, the delay before it clocks a host byte) and the host cutting in at the start of the device's frames and in the middle of them; every byte arrives exactly once each way, the receiver's record of the host's own byte matches, and the host's pulses meet the rules (100 us of CLK low to inhibit, DATA changed only while CLK is low). A device that does not acknowledge, and no device at all, are reported. In cocotb, on the RTL and the gate-level netlist, the driver resets and identifies a keyboard, sets its LEDs and reads a key press and release |
@@ -210,12 +211,12 @@ and documentation, none of which can put the chip at risk.
 hw/      Hardcaml RTL: pe_core (two threads), tiny_fifo, top (SPI port + registers)
 model/   reference model, assembler, firmware, UART oracles (no dependency on hw/)
 bin/     pe_sim: assemble a .s file, or run it on the reference model and print
-         the pins as they change (`dune exec bin/pe_sim.exe -- run -help`)
+         the pins as they change (`dune exec bin/pe_sim.exe -- run -help`);
+         the Verilog, firmware-image and example generators
 examples/ one assembly file per protocol, generated from model/firmware.ml;
          ws2812/: the blind firmware test, task, notes and hidden test
 sim/     OCaml tests: ISA, lockstep harness, random and directed differential tests,
          formal proof, firmware, chip-level tests
-bin/     Verilog generator, firmware hex generator
 host/    MicroPython driver for the demo board, RP2040 or RP2350 (tested in cocotb, unchanged,
          and in MicroPython on an emulated board: test/board_emu)
 src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v
@@ -303,5 +304,6 @@ Every v1.4 build has 0 DRC and 0 LVS errors and passes the
 Tiny Tapeout precheck and the cocotb suite on the gate-level netlist,
 including the third-party controller tests that drive the chip as an I2C and
 an SPI device; from the current build on, the netlist is also formally
-proven equal to the RTL. Two-thread layouts take
-about 4 to 5 hours, most of it detailed routing (v1.1 took 91 minutes).
+proven equal to the RTL. On 6x4 tiles a two-thread layout took
+4 to 5 hours, most of it detailed routing (v1.1 took 91 minutes); on 8x4 it
+takes under 3.

@@ -56,11 +56,13 @@ takes the pins from the Tiny Tapeout SDK's map of whichever board it finds):
 copy it and the `.hex` images from `test/` to the board, enable the
 project, clock it at 10 MHz (`tt.clock_project_PWM(10_000_000)`), and
 `pe.Chip(pe.demo_board_port())` gives register access, firmware loading and
-FIFO push/pop, with helpers for UART TX, the SPI controller, and the I2C and
-SPI device modes. The cocotb tests run this same file against the chip. The
-register-level recipes below are what it does underneath. Every protocol
-class has also run in MicroPython on an emulated demo board wired to the
-chip's RTL (`test/board_emu`), the closest thing to the board short of one.
+FIFO push/pop, with a class for each protocol: UART TX, the SPI controller,
+the I2C and SPI device modes, JTAG, SWD, USB host, 1-Wire, PS/2 and CAN. The cocotb tests run this same file against the chip. The
+register-level recipes below are what it does underneath. The UART, I2C,
+SPI, JTAG, SWD and USB classes have also run in MicroPython on an emulated
+demo board wired to the chip's RTL (`test/board_emu`), the closest thing to
+the board short of one; the 1-Wire, PS/2 and CAN classes have run in cocotb
+only.
 
 With the demo board's microcontroller as SPI host: load a firmware image (for
 example the 15-instruction UART transmitter in `test/uart_tx.hex`) into

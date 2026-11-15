@@ -57,4 +57,4 @@ start bit, 0x55 least significant bit first, and the stop bit.
 
 On the chip, `host/protocol_emulator.py` does the loading and the FIFO
 words (`UartTx`, `SpiController`, `SpiDevice`, `I2cDevice`,
-`JtagController`, `SwdController`, `UsbHost`, `OneWire`).
+`JtagController`, `SwdController`, `UsbHost`, `OneWire`, `Ps2`, `Can`).

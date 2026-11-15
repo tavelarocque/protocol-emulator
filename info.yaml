@@ -3,7 +3,7 @@ project:
   title:        "Protocol Emulator"      # Project title
   author:       "Tave La Rocque"      # Your name
   discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  "Programmable bit-banging core (PIO-style) for UART, SPI, I2C; firmware loaded over SPI"      # One line description of what your project does
+  description:  "Protocol emulator: a two-thread PIO-style CPU; UART, SPI, I2C, JTAG, SWD, USB, 1-Wire, PS/2, CAN as firmware over SPI"      # One line description of what your project does
   language:     "Hardcaml (OCaml)" # other examples include SystemVerilog, Amaranth, VHDL, etc
   clock_hz:     10000000       # Clock frequency in Hz (or 0 if not applicable)
 
