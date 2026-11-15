@@ -274,6 +274,8 @@ specification allows. The firmware now reads SDA first.
 
 ### Real bugs found
 
+Seven of these are told in full in [`bug-ledger.md`](bug-ledger.md).
+
 | What was wrong | Found by |
 |---|---|
 | SCK idled high after reset (pins reset high; SPI mode 0 needs it low) | SPI mode-0 checker |
@@ -295,6 +297,8 @@ specification allows. The firmware now reads SDA first.
 | The SWD driver's error path called `format`, which MicroPython does not have, so a target that did not answer raised NameError instead of SwdError | running every protocol class on the emulated board (`run_board.mjs`); CI now runs all of them, with this bug planted back as a check |
 | Bit-banged from MicroPython, the USB driver's handshake reached the bus 14.6 ms after the device's data, against the 16 bit times (10.7 us) the device waits; the device, never having seen the handshake, repeated DATA1 and the read failed | the emulated board, timing the real driver. cocotb could not show it: it clocks the port as fast as the chip allows. Fixed with a host port run by an RP2040 PIO state machine |
 | The first PIO port was fed one word at a time by MicroPython, which starved it: a short packet's handshake came 9.95 bit times after the data, and a zero-length packet's would have come after 33 | the emulated board's slack measurement; each batch is now queued with the state machine stopped, then started |
+| The PS/2 transmitter could inhibit after the device counted its frame as sent, so a byte arrived twice; and it changed DATA in the cycle the receiver sampled it | random runs against a device with its timing drawn from the legal range; fixed in firmware with a busy flag on a spare pin and a 3 us delay |
+| The CAN transmitter left a lost frame's words in the FIFO, corrupting the next frame; its first bit could start misaligned; the receiver resynchronised in one direction only and dropped a bit when it pushed a word | random runs against a node with its clock up to 1.25% off that arbitrates in half the runs; all fixed in firmware |
 
 ## 6. AI-assisted verification, and independence
 

@@ -115,7 +115,8 @@ separately from the firmware.
 report: design decisions and their alternatives, how the layers of evidence
 chain into a claim about the chip, the real bugs found, and what is not
 covered. [`docs/verification-layers.md`](docs/verification-layers.md) has
-every layer and every planted bug.
+every layer and every planted bug, and [`docs/bug-ledger.md`](docs/bug-ledger.md)
+tells seven real bugs and which layer found each.
 
 The specification is executable: [`model/isa.ml`](model/isa.ml) is a
 reference model with no dependency on the hardware, so the two cannot share
@@ -161,7 +162,7 @@ docs/    submission.md (one-page summary), design-and-verification.md (the repor
          figures.py and img/ (diagrams drawn from the reference model),
          chip.html (the layout in 3D, one self-contained page),
          isa.md (instruction set), firmware.md (every engine),
-         verification-layers.md, metrics.md,
+         verification-layers.md, bug-ledger.md, metrics.md,
          info.md (datasheet), coverage-closure.md, related-work.md
 ```
 
