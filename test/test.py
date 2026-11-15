@@ -954,7 +954,8 @@ async def test_thirdparty_spi_controller(dut):
 import sys  # noqa: E402
 
 sys.path.insert(0, os.path.join(HERE, "..", "host"))
-import protocol_emulator as pe  # noqa: E402
+import protocol_emulator as pe
+import sigrok  # noqa: E402
 
 try:
     from cocotb import bridge, resume  # noqa: E402
@@ -1126,6 +1127,8 @@ async def test_swd(dut):
     register written and read back."""
     await reset(dut)
     dut.dev_mode.value = 6
+    trace = sigrok.Trace(dut, {"swclk": lambda: dut.swd_clk.value,
+                               "swdio": lambda: dut.swdio.value})
     chip = pe.Chip(sim_port(dut))
 
     @bridge
@@ -1148,6 +1151,24 @@ async def test_swd(dut):
         return silent, dpidr, ctrl, idr, posted, tar
 
     silent, dpidr, ctrl, idr, posted, tar = await session()
+    trace.stop()
+    if sigrok.available():
+        # sigrok's SWD decoder on the whole session.
+        seen = [text for _, _, text in trace.decode("swd")]
+        assert seen == [
+            "IDCODE", "NOREPLY", "LINERESET", "JTAG->SWD", "LINERESET",
+            "IDCODE", "OK", f"0x{SWD_DPIDR:08x}",
+            "W CTRL/STAT", "OK", "0x50000000", "R CTRL/STAT", "OK", "0xf0000000",
+            "W SELECT", "OK", "0x000000f0", "R APc", "OK", "0x00000000",
+            "RDBUFF", "OK", f"0x{SWD_AP_IDR:08x}",
+            "W SELECT", "OK", "0x00000000", "W AP4", "OK", "0xdeadbeef",
+            "R AP4", "OK", f"0x{SWD_AP_IDR:08x}", "RDBUFF", "OK", "0xdeadbeef"], seen
+        # One bit of the first word written forced high: the decoder must
+        # report different data and a parity error.
+        start = next(a for a, _, text in trace.decode("swd") if text == "0x50000000")
+        wrong = [text for _, _, text in
+                 trace.forced("swdio", start, start + 60, 1).decode("swd")]
+        assert "0x50000000" not in wrong and len(wrong) == len(seen) + 1, wrong
     assert silent, "the target answered before the JTAG-to-SWD switch"
     assert dpidr == SWD_DPIDR, f"DPIDR {dpidr:#x}"
     assert ctrl == 0xF0000000, f"CTRL/STAT {ctrl:#x}"  # both requests acknowledged
@@ -1645,9 +1666,28 @@ async def test_ps2_keyboard(dut):
     await reset(dut)
     kb = Ps2Keyboard()
     task = cocotb.start_soon(ps2_keyboard(dut, kb))
+    trace = sigrok.Trace(dut, {"clk": lambda: dut.i2c_scl.value,
+                               "data": lambda: dut.i2c_sda.value})
     chip = pe.Chip(sim_port(dut))
     log = await bridge(lambda: _ps2_session(chip, kb))()
     task.cancel()
+    trace.stop()
+    if sigrok.available():
+        # sigrok's PS/2 decoder on every frame, both ways.
+        assert sigrok.ps2_frames(trace) == [
+            ("host", 0xFF), ("device", 0xFA), ("device", 0xAA),
+            ("host", 0xF2), ("device", 0xFA), ("device", 0xAB), ("device", 0x83),
+            ("host", 0xED), ("device", 0xFA), ("host", 0x05), ("device", 0xFA),
+            ("device", 0x1C), ("device", 0xF0), ("device", 0x1C)]
+        # The keyboard's first reply, 0xFA, with its first data bit (a 0)
+        # forced to 1: the decoder must report a parity error.
+        low = trace.low_pulses("clk")
+        try:
+            sigrok.ps2_frames(trace.forced("data", low[12][1], low[13][1], 1))
+            caught = False
+        except AssertionError:
+            caught = True
+        assert caught, "sigrok's PS/2 decoder accepted a frame with a flipped bit"
     assert log == PS2_EXPECTED, [[hex(b) for b in group] for group in log]
     assert kb.got == [0xFF, 0xF2, 0xED, 0x05] and kb.leds == 0x05, (kb.got, kb.leds)
 
@@ -1815,9 +1855,33 @@ async def test_can(dut):
     await reset(dut)
     node = CanNode()
     task = cocotb.start_soon(can_node(dut, node))
+    trace = sigrok.Trace(dut, {"rxd": lambda: dut.can_bus.value})
     chip = pe.Chip(sim_port(dut))
     acked, heard = await bridge(lambda: _can_session(chip, node))()
     task.cancel()
+    trace.stop()
+    if sigrok.available():
+        # sigrok's CAN decoder on the bus: the chip's frame, acknowledged by
+        # the node, then the node's, which nobody acknowledges (the chip
+        # only listens).
+        def frames(t):
+            found = t.decode("can:can_rx=rxd:nominal_bitrate=62500", "can=fields:warnings")
+            return found, [text for _, _, text in found]
+
+        found, seen = frames(trace)
+        assert sigrok.can_frames(seen) == [
+            (0x123, [1, 2, 3], sigrok.can_crc15(0x123, [1, 2, 3]), "ACK"),
+            (0x321, [0xAA, 0x55, 0x00, 0xFF],
+             sigrok.can_crc15(0x321, [0xAA, 0x55, 0x00, 0xFF]), "NACK"),
+        ], seen
+        # One bit of the first data byte forced recessive: the decoder must
+        # no longer report the frame as sent.
+        start = next(a for a, _, text in found if text.startswith("Data byte 0"))
+        try:
+            wrong = sigrok.can_frames(frames(trace.forced("rxd", start, start + 160, 1))[1])
+        except (AssertionError, KeyError):
+            wrong = None
+        assert wrong is None or wrong[0][:3] != (0x123, [1, 2, 3], sigrok.can_crc15(0x123, [1, 2, 3]))
     assert acked and node.got == [(0x123, [1, 2, 3])], (acked, node.got)
     assert heard == [(0x123, [1, 2, 3], True), (0x321, [0xAA, 0x55, 0x00, 0xFF], False)], heard
 

@@ -34,6 +34,10 @@ jobs:
         with:
           submodules: recursive
 
+      - name: sigrok, so its decoders judge the gate netlist's pins too (test/sigrok.py)
+        run: sudo apt-get update && sudo apt-get install -y sigrok-cli
+        continue-on-error: true  # without it those checks are skipped, as locally
+
       - name: GL test
         uses: TinyTapeout/tt-gds-action/gl_test@ttihp27a
 

@@ -97,17 +97,19 @@ are in [`docs/firmware.md`](docs/firmware.md).
 | I2C | controller, with stretching and timeouts | 25 | cocotbext-i2c's EEPROM |
 | I2C | target | 63 | cocotbext-i2c's controller, 400 kHz |
 | JTAG | controller | 11 | cocotbext-jtag and an IEEE 1149.1 device |
-| Arm SWD | host | 11 | a target written from ADIv5 |
+| Arm SWD | host | 11 | a target written from ADIv5; sigrok's SWD decoder |
 | USB, low speed | host | 49 | usbhostslave's device core |
 | 1-Wire | controller, with ROM search | 25 | sockit_owm's slave model, three on one wire |
 | WS2812 | driver | 16 | a hidden data-sheet timing test |
-| PS/2 | host, both directions | 11 + 21 | a device written from the protocol's rules |
-| CAN | transmitter and listen-only receiver | 19 + 27 | a node written from ISO 11898-1 |
+| PS/2 | host, both directions | 11 + 21 | a device written from the protocol's rules; sigrok's PS/2 decoder |
+| CAN | transmitter and listen-only receiver | 19 + 27 | a node written from ISO 11898-1; sigrok's CAN decoder |
 | I2C to SPI | bridge, no host in the data path | 25 + 26 | the I2C and SPI oracles together |
 
-The "checked against" models are other people's wherever one exists. Where
-none does (SWD, PS/2, CAN, WS2812) the model is written from the standard,
-separately from the firmware.
+The "checked against" models are other people's wherever one exists. For
+SWD, PS/2 and CAN the device model is written here from the standard, so
+the pins are also recorded and handed to sigrok's protocol decoders, which
+this project did not write ([`test/sigrok.py`](test/sigrok.py)). WS2812
+has only its data-sheet timing test.
 
 ## Verification
 

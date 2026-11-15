@@ -98,10 +98,13 @@ runs a program on the reference model and prints the pins.
    equivalent to an independent specification (SAT, Z3). After every
    layout, the post-layout gate netlist is proven equal to the RTL (Yosys,
    all 1,796 flip-flops).
-3. **Device models written by other people.** Every protocol except SWD,
-   PS/2, CAN and WS2812 is checked against at least one third-party model: picosoc's SPI flash,
-   cocotbext's I2C, SPI, UART and JTAG, usbhostslave's USB device,
-   sockit_owm's 1-Wire slave.
+3. **Judges written by other people.** Every protocol except WS2812 is
+   checked by something this project did not write. Device models:
+   picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
+   USB device, sockit_owm's 1-Wire slave. For SWD, PS/2 and CAN, whose
+   device models are written here, the recorded pins go to sigrok's
+   protocol decoders, with a fault planted on the wire to show each
+   decoder's verdict can change.
 4. **Tests that are themselves tested.** 86 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the

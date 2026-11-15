@@ -7,7 +7,9 @@
 #   ./reproduce.sh quick    skip the OCaml suite (random tests and the proof, the long part)
 #
 # Needs: opam with the packages in the README, z3, python3, Icarus Verilog,
-# and `pip install -r test/requirements.txt`. The board emulation (Verilator,
+# and `pip install -r test/requirements.txt`. With sigrok-cli installed, the
+# cocotb stage also has sigrok's decoders judge SWD, PS/2 and CAN. The board
+# emulation (Verilator,
 # Node 22) and the RTL-to-netlist proof (a layout build's netlist) run only
 # in CI; section 8 of docs/design-and-verification.md has their commands.
 set -u

@@ -532,8 +532,8 @@ class SwdController:
 
     def _transfer(self, apndp, rnw, addr, value=0):
         req = self._request(apndp, rnw, addr)
-        if rnw:  # request, turnaround, ACK, data and parity, turnaround, idle
-            bits = req + [1] + [1] * 3 + [1] * 33 + [1] + [0, 0]
+        if rnw:  # request, turnaround, ACK, data and parity, turnaround
+            bits = req + [1] + [1] * 3 + [1] * 33 + [1]
         else:  # request, turnaround, ACK, turnaround, data and parity, idle
             data = [(value >> i) & 1 for i in range(32)]
             parity = sum(data) & 1

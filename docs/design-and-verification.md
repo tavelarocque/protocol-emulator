@@ -296,6 +296,7 @@ Seven of these are told in full in [`bug-ledger.md`](bug-ledger.md).
 | The driver called `int.bit_length`, which MicroPython does not have, so on the board it could not decode any received packet | running the driver in MicroPython on the emulated board; a comparison of the driver's packet and CRC functions under MicroPython and CPython now runs in CI |
 | The SWD driver's error path called `format`, which MicroPython does not have, so a target that did not answer raised NameError instead of SwdError | running every protocol class on the emulated board (`run_board.mjs`); CI now runs all of them, with this bug planted back as a check |
 | Bit-banged from MicroPython, the USB driver's handshake reached the bus 14.6 ms after the device's data, against the 16 bit times (10.7 us) the device waits; the device, never having seen the handshake, repeated DATA1 and the read failed | the emulated board, timing the real driver. cocotb could not show it: it clocks the port as fast as the chip allows. Fixed with a host port run by an RP2040 PIO state machine |
+| After an SWD read the driver clocked two idle bits. The waveform was legal and the ADIv5 target answered, but sigrok's SWD decoder took the turnaround for a start bit whenever the next request was to address 0x8, and showed a write to SELECT as a failed write to CTRL/STAT: what an engineer with a logic analyser would have seen | sigrok's decoder, on its first run; the driver no longer idles after a read, and the decoder now reads the whole session |
 | The first PIO port was fed one word at a time by MicroPython, which starved it: a short packet's handshake came 9.95 bit times after the data, and a zero-length packet's would have come after 33 | the emulated board's slack measurement; each batch is now queued with the state machine stopped, then started |
 | The PS/2 transmitter could inhibit after the device counted its frame as sent, so a byte arrived twice; and it changed DATA in the cycle the receiver sampled it | random runs against a device with its timing drawn from the legal range; fixed in firmware with a busy flag on a spare pin and a 3 us delay |
 | The CAN transmitter left a lost frame's words in the FIFO, corrupting the next frame; its first bit could start misaligned; the receiver resynchronised in one direction only and dropped a bit when it pushed a word | random runs against a node with its clock up to 1.25% off that arbitrates in half the runs; all fixed in firmware |
@@ -390,10 +391,17 @@ answer it.
   as it arrives, which does not fit beside the rest in 64 instructions; the
   chip sends, arbitrates and listens. The I2C target uses 63 of the 64
   words: program memory, not the instruction set, is the limit.
-- **PS/2's and CAN's device models, and WS2812's hidden test,** were
-  written for this project, as SWD's target was.
-- **SWD's target model** was written for this project, from ADIv5, so it does
-  not give the independence a third-party model would.
+- **SWD's, PS/2's and CAN's device models, and WS2812's hidden test,** were
+  written for this project. For the first three, sigrok's protocol
+  decoders also read the recorded pins (`test/sigrok.py`), which is
+  independent but partial: a decoder judges what is on the wire, not
+  whether a device would have answered. sigrok's SWD and CAN decoders read
+  a whole session untouched. Its PS/2 decoder (libsigrokdecode 0.5.3) knows
+  only a device's frame and no idle bus, so the test cuts out each frame
+  and, for the host's, inverts the clock; it checks the data bits and
+  parity, and the test checks the stop bit. The CAN decoder reports a
+  frame's CRC without checking it, so the test compares it with a CRC
+  computed apart from the driver's. WS2812 has no outside judge.
 
 ## 8. Reproducing
 
