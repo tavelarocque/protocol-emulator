@@ -167,6 +167,10 @@ docs/    submission.md (one-page summary), design-and-verification.md (the repor
 
 ## Running
 
+With the tools below installed, `./reproduce.sh` re-runs every check that
+needs no layout build and prints one pass or fail line per claim (about 15
+minutes for the OCaml suite and proof, then the cocotb suite).
+
 Uses a dedicated opam switch on OCaml 5.3.0 (Hardcaml's waveform viewer does
 not build on 5.4 yet).
 

@@ -16,3 +16,4 @@ test/gate_level_netlist.v
 _build/
 _opam
 *.install
+_reproduce/

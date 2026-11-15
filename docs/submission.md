@@ -174,6 +174,7 @@ the report sets out the rules.
 
 ## Reproduce
 
+`./reproduce.sh` runs all of the following and prints one line per claim.
 `dune build && dune runtest` for the OCaml suite and the whole-chip proof;
 `cd test && make` for cocotb. CI runs all of it, and the layout, on every
 push. Details: "Running" in the [README](../README.md).
