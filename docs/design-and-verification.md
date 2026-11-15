@@ -346,7 +346,7 @@ answer it.
   change in logic, so nothing above 40 MHz is claimed. At the slow corner
   only, 36 pins on 9 high-fanout nets exceed the cell library's slew limit
   (3.33 ns at worst against 2.51 ns); two repairs were tried and did not
-  clear it (README, "Metrics").
+  clear it ([`metrics.md`](metrics.md)).
 - **Pads, reset and power** are Tiny Tapeout's and are not modelled beyond
   the gate-level simulation.
 - **Hardware.** Nothing has run on silicon yet. The host driver has run in

@@ -66,7 +66,7 @@ is weakest for emulating protocols:
 - **Any host can load it**: the port is plain SPI.
 
 Each revision of the instruction set came from writing a protocol and
-finding what was missing; the README's "Architecture" tells that story.
+finding what was missing; [`firmware.md`](firmware.md) tells that story.
 
 ## What it runs
 
@@ -132,8 +132,8 @@ Stated here so nobody has to find it.
   proof and an emulated board.
 - **One signoff warning.** At the slow corner only (1.08 V, 125 C), 36 pins
   on 9 nets exceed the cell library's slew limit, by at most 33%. Two
-  repairs were tried and did not clear it; see "Metrics" in the
-  [README](../README.md).
+  repairs were tried and did not clear it; see
+  [`metrics.md`](metrics.md).
 - **USB is low speed, host only**, and needs a 12 MHz core clock.
 - **CAN is not a full node.** It sends, arbitrates and listens, but does not
   acknowledge other nodes' frames or send error frames: decoding a frame as
