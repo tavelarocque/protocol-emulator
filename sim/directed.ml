@@ -27,13 +27,14 @@ let all_push_pull = Array.create ~len:Isa.num_pins Isa.Pin_mode.Push_pull
 let all_input = Array.create ~len:Isa.num_pins Isa.Pin_mode.Input
 
 (* Two programs, each assembled at its origin and given its own config
-   (with [start] set to the origin), linked into one 64-word image. *)
+   (with [start] set to the origin), linked into one image, loaded into both threads' memories. *)
 let make
   ?(chain = false)
   ?(sync_bypass = 0)
   ?(modes = all_push_pull)
   ?(enabled = [| true; true |])
   ?(enables = Scenario.Script [])
+  ?(writes = [])
   ?(rates = [ 0, 0; 0, 0 ])
   ?(pins = Scenario.Random_pins)
   ?(cycles = 400)
@@ -52,13 +53,14 @@ let make
   in
   { scenario =
       { Scenario.name
-      ; words
+      ; words = Array.init Lockstep.Rtl.num_threads ~f:(fun _ -> Array.copy words)
       ; configs = List.map assembled ~f:(fun (_, _, c) -> c)
       ; modes
       ; chain
       ; sync_bypass
       ; enabled
       ; enables
+      ; writes
       ; rates
       ; pins
       ; cycles
@@ -330,6 +332,73 @@ top:    pull
     ]
 ;;
 
+(* Thread 0 jumps to the next page and back with [set page]. Thread 1
+   starts near the end of page 1 and runs off it into page 2, where its
+   jump must still land in page 1: PAGE is the page START is in, not the
+   page the pc has reached. *)
+let pages =
+  make
+    ~name:"pages: a jump lands in PAGE, set by START and by set page"
+    ~target:[ "Jump_ignores_page" ]
+    [ ( 62
+      , {|
+back:   set page, 1
+        jmp far
+far:    set pins, 5
+        set page, 0
+        jmp back
+|}
+      , { cfg with set_base = 0; set_count = 3 } )
+    ; ( 122
+      , {|
+top:    set pins, 1
+        nop
+        nop
+        nop
+        nop
+        nop
+        set pins, 2
+        jmp top
+|}
+      , { cfg with set_base = 4; set_count = 2 } )
+    ]
+;;
+
+(* The host rewrites thread 1's first instruction three times. While the
+   thread is stopped the write lands, and enabling it on the very next
+   cycle must still run the new word, a cycle later than it would
+   otherwise start. While it runs, the write must change nothing. *)
+let program_writes =
+  let word source = Isa.Instruction.encode (Asm.assemble source).(0) in
+  make
+    ~name:"program writes: stopped thread, running thread, and the hold after"
+    ~target:[ "Write_lands_while_running"; "No_hold_after_write" ]
+    ~enabled:[| true; false |]
+    ~enables:(Script [ 11, 1, true; 60, 1, false; 81, 1, true ])
+    ~writes:
+      [ 10, 0b10, 8, word "set pins, 2"
+      ; 40, 0b10, 8, word "set pins, 1"
+      ; 41, 0b10, 9, word "jmp 8"
+      ; 80, 0b11, 8, word "set pins, 3"
+      ]
+    ~cycles:160
+    [ ( 0
+      , {|
+lp:     set pins, 1
+        set pins, 0
+        jmp lp
+|}
+      , { cfg with set_base = 0; set_count = 1 } )
+    ; ( 8
+      , {|
+lp:     set pins, 0
+        set y, 3
+        jmp lp
+|}
+      , { cfg with set_base = 4; set_count = 2 } )
+    ]
+;;
+
 let all =
   [ pin_fight
   ; chain_backpressure
@@ -341,6 +410,8 @@ let all =
   ; thread1_datapath
   ; synchroniser_timing
   ; msb_first
+  ; pages
+  ; program_writes
   ]
 ;;
 

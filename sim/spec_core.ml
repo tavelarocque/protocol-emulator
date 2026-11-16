@@ -69,11 +69,29 @@ end
 let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
   let spec = Reg_spec.create ~clock:i.clock ~clear:i.clear () in
   let high = Reg_spec.override spec ~clear_to:(ones P.num_pins) in
-  (* Program memory: word [a] takes [prog_data] when the host writes [a]. *)
-  let program =
-    List.init P.program_size ~f:(fun a ->
-      reg spec ~enable:(i.prog_we &: (i.prog_addr ==:. a)) i.prog_data
-      -- sprintf "prog_%d" a)
+  (* Program memory, one per thread. "A write to the memory of an enabled
+     thread is ignored": word [a] of thread n's memory takes [prog_data]
+     when the host writes [a] there and the thread is disabled. Reset does
+     not touch a memory.
+
+     A memory answers a cycle late: [dout] is the word at the address it
+     was given the cycle before. It is given the pc the thread is about to
+     have, so [dout] is the instruction at the pc the thread has. In a cycle
+     with a write it reads nothing, which is why "the thread is held in its
+     initial state for the cycle after a write": [loaded] remembers it. *)
+  let unreset = Reg_spec.create ~clock:i.clock () in
+  let memory n (c : _ P.Thread_in.t) ~next_pc =
+    let written = select i.prog_we n n &: (c.enable ==:. 0) in
+    let words =
+      List.init P.program_size ~f:(fun a ->
+        reg unreset ~enable:(written &: (i.prog_addr ==:. a)) i.prog_data
+        -- sprintf "t%d_prog_%d" n a)
+    in
+    let dout_next = wire 16 in
+    let dout = reg unreset dout_next -- sprintf "t%d_prog_dout" n in
+    dout_next <== mux2 written dout (mux next_pc words);
+    let loaded = reg spec written -- sprintf "t%d_loaded" n in
+    dout, c.enable &: (loaded ==:. 0)
   in
   (* "A level that arrives during cycle t is seen by the threads in cycle
      t + 2", except on the pins in SYNC_BYPASS, which are read directly. *)
@@ -112,13 +130,16 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
   and t1_next, t1 = thread_regs 1 in
   (* "The thread runs one cycle in every clkdiv (0 and 1: every cycle).
      Its first tick is the first cycle it is enabled." *)
+  let instr0, enabled0 = memory 0 i.t0 ~next_pc:t0_next.pc
+  and instr1, enabled1 = memory 1 i.t1 ~next_pc:t1_next.pc in
+  let enabled n = if n = 0 then enabled0 else enabled1 in
   let divider n (c : _ P.Thread_in.t) =
     let count_next = wire 16 in
     let count = reg spec count_next -- sprintf "t%d_div_count" n in
     let tick = count ==:. 0 in
     let period_minus_one = mux2 (c.clkdiv <=:. 1) (zero 16) (c.clkdiv -:. 1) in
     count_next
-    <== mux2 (~:(c.enable)) (zero 16) (mux2 tick period_minus_one (count -:. 1));
+    <== mux2 (~:(enabled n)) (zero 16) (mux2 tick period_minus_one (count -:. 1));
     count, tick
   in
   let div0, tick0 = divider 0 i.t0
@@ -157,12 +178,12 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
   (* "If two threads write the same pin in the same cycle, the
      higher-numbered thread wins": thread 1 steps from the pins thread 0
      leaves. *)
-  let step state (c : _ P.Thread_in.t) ~pc ~tick ~(tx : Fifo.t) ~(rx : Fifo.t) ~pins =
+  let step state (c : _ P.Thread_in.t) ~enable ~instr ~tick ~(tx : Fifo.t) ~(rx : Fifo.t) ~pins =
     Spec.step
       { state with pin_out = pins }
-      { P.Step_in.enable = c.enable
+      { P.Step_in.enable
       ; tick
-      ; instr = mux pc program
+      ; instr
       ; lines
       ; tx_empty = tx.empty
       ; tx_head = tx.head
@@ -182,8 +203,20 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
       ; in_msb_first = c.in_msb_first
       }
   in
-  let s0 = step t0 i.t0 ~pc:t0.pc ~tick:tick0 ~tx:tx0 ~rx:rx0 ~pins:pin_out in
-  let s1 = step t1 i.t1 ~pc:t1.pc ~tick:tick1 ~tx:tx1 ~rx:rx1 ~pins:s0.next.pin_out in
+  let s0 =
+    step t0 i.t0 ~enable:enabled0 ~instr:instr0 ~tick:tick0 ~tx:tx0 ~rx:rx0 ~pins:pin_out
+  in
+  let s1 =
+    step
+      t1
+      i.t1
+      ~enable:enabled1
+      ~instr:instr1
+      ~tick:tick1
+      ~tx:tx1
+      ~rx:rx1
+      ~pins:s0.next.pin_out
+  in
   let connect next (s : _ P.Step_out.t) ~pull ~push ~value =
     P.Thread_state.iter2 next { s.next with pin_out = zero P.num_pins } ~f:( <== );
     pull <== s.pull;
@@ -206,6 +239,7 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
     ; tx_level = tx.level
     ; rx_level = rx.level
     ; pc = s.pc
+    ; page = s.page
     ; x = s.x
     ; y = s.y
     ; isr = s.isr

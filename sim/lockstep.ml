@@ -22,6 +22,7 @@ module Sim = Cyclesim.With_interface (Rtl.I) (Rtl.O)
 
 type thread_state =
   { pc : int
+  ; page : int
   ; x : int
   ; y : int
   ; isr : int
@@ -68,13 +69,16 @@ module Scenario = struct
 
   type t =
     { name : string
-    ; words : int array (* all 64 *)
+    ; words : int array array (* each thread's whole memory *)
     ; configs : Isa.Thread_config.t list
     ; modes : Isa.Pin_mode.t array
     ; chain : bool
     ; sync_bypass : int (* pins read without the synchroniser *)
     ; enabled : bool array (* at the start *)
     ; enables : enables
+    ; writes : (int * int * int * int) list
+      (* scripted host writes to program memory: (cycle, mask of threads,
+         address, word). Random trials add their own. *)
     ; rates : (int * int) list (* per thread: host push %, host pop % *)
     ; pins : pins
     ; cycles : int
@@ -129,10 +133,13 @@ let random_scenario ~seed ~cycles =
   let rand n = Random.State.int rs n in
   (* Uniformly random words, except that 3 in 4 have their delay field
      cleared: with uniform delays, 71% of cycles were spent idling. *)
+  let word () =
+    let w = rand 65536 in
+    if rand 4 = 0 then w else w land lnot (0xF lsl 9)
+  in
+  (* A different program in each thread's memory. *)
   let words =
-    Array.init Isa.program_size ~f:(fun _ ->
-      let w = rand 65536 in
-      if rand 4 = 0 then w else w land lnot (0xF lsl 9))
+    Array.init Rtl.num_threads ~f:(fun _ -> Array.init Isa.program_size ~f:(fun _ -> word ()))
   in
   let configs = List.init Rtl.num_threads ~f:(fun _ -> random_config rs) in
   let modes = random_modes rs in
@@ -171,6 +178,7 @@ let random_scenario ~seed ~cycles =
     ; sync_bypass
     ; enabled
     ; enables = Random_flips
+    ; writes = []
     ; rates
     ; pins = Random_pins
     ; cycles
@@ -205,7 +213,6 @@ let classify (model : Isa.t) ~thread ~word ~inputs =
   | Mov { dst; src = _ } -> "mov to " ^ Isa.Mov_loc.to_string dst
   | Set { dst; _ } -> "set " ^ Isa.Set_dst.to_string dst
   | Nop when raw_op = 5 -> "mov (reserved -> nop)"
-  | Nop when raw_op = 6 -> "set (reserved -> nop)"
   | Nop -> "nop"
 ;;
 
@@ -243,10 +250,12 @@ let basic_bins (model : Isa.t) ~words ~chain ~inputs =
   let drivers = ref 0 in
   for n = 0 to Rtl.num_threads - 1 do
     let th = Isa.thread model n in
-    let word = words.(th.pc) in
+    let word = words.(n).(th.pc) in
     add
       (if not th.enabled
        then "(thread disabled)"
+       else if th.loaded
+       then "(held: memory written last cycle)"
        else if th.div_count > 0
        then "(between divider ticks)"
        else if th.delay_left > 0
@@ -276,7 +285,7 @@ let cross_bins (model : Isa.t) ~words ~chain ~inputs =
   let threads = List.init Rtl.num_threads ~f:(Isa.thread model) in
   let info =
     List.mapi threads ~f:(fun n (th : Isa.Thread.t) ->
-      let word = words.(th.pc) in
+      let word = words.(n).(th.pc) in
       let instr = Isa.Instruction.decode word in
       let mask, executing = pin_writes th instr in
       let what = if executing then classify model ~thread:n ~word ~inputs else "" in
@@ -355,6 +364,8 @@ let create_coverage () =
 let run ?coverage ?mutation ~rs (s : Scenario.t) =
   let rand n = Random.State.int rs n in
   let enabled = Array.copy s.enabled in
+  (* The host rewrites words as the trial runs, so keep its own copy. *)
+  let words = Array.map s.words ~f:Array.copy in
   let sim = Sim.create (Rtl.create ?mutation) in
   let i : _ Rtl.I.t = Cyclesim.inputs sim in
   let o : _ Rtl.O.t = Cyclesim.outputs sim in
@@ -386,15 +397,18 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
   set
     i.pin_modes
     (Array.foldi s.modes ~init:0 ~f:(fun p acc m -> acc lor (mode_code m lsl (2 * p))));
-  Array.iteri s.words ~f:(fun a w ->
-    set i.prog_we 1;
-    set i.prog_addr a;
-    set i.prog_data w;
-    Cyclesim.cycle sim);
+  Array.iteri words ~f:(fun n memory ->
+    Array.iteri memory ~f:(fun a w ->
+      set i.prog_we (1 lsl n);
+      set i.prog_addr a;
+      set i.prog_data w;
+      Cyclesim.cycle sim));
   set i.prog_we 0;
+  (* One cycle with no write, so that the hold after the last one is over. *)
+  Cyclesim.cycle sim;
   let model =
-    Isa.create
-      ~program:(Array.map s.words ~f:Isa.Instruction.decode)
+    Isa.create_separate
+      ~programs:(Array.map words ~f:(Array.map ~f:Isa.Instruction.decode))
       ~pin_modes:s.modes
       ~threads:s.configs
   in
@@ -441,15 +455,47 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
           set ti.rx_pop (Bool.to_int pop);
           push, push_value, pop)
       in
+      (* The host writes a word of program memory now and then: mostly to a
+         thread that is stopped, which is when a write lands, and sometimes
+         to a running one, which both implementations must ignore. Random
+         trials only; a directed scenario's program stays as written. *)
+      let write =
+        match List.find s.writes ~f:(fun (c, _, _, _) -> c = cycle), s.enables with
+        | Some (_, mask, addr, w), _ -> Some (mask, addr, w)
+        | None, Script _ -> None
+        | None, Random_flips ->
+          let mask =
+            List.foldi (Array.to_list enabled) ~init:0 ~f:(fun n acc e ->
+              if rand (if e then 200 else 6) = 0 then acc lor (1 lsl n) else acc)
+          in
+          if mask = 0 then None else Some (mask, rand Isa.program_size, rand 65536)
+      in
+      (match write with
+       | None -> set i.prog_we 0
+       | Some (mask, addr, w) ->
+         set i.prog_we mask;
+         set i.prog_addr addr;
+         set i.prog_data w);
       Option.iter coverage ~f:(fun c ->
-        List.iter
-          (basic_bins model ~words:s.words ~chain:s.chain ~inputs:pins)
-          ~f:(Hashtbl.incr c.basic);
-        List.iter
-          (cross_bins model ~words:s.words ~chain:s.chain ~inputs:pins)
-          ~f:(Hashtbl.incr c.cross));
+        List.iter (basic_bins model ~words ~chain:s.chain ~inputs:pins) ~f:(Hashtbl.incr c.basic);
+        List.iter (cross_bins model ~words ~chain:s.chain ~inputs:pins) ~f:(Hashtbl.incr c.cross);
+        Option.iter write ~f:(fun (mask, _, _) ->
+          Array.iteri enabled ~f:(fun n e ->
+            if mask land (1 lsl n) <> 0
+            then
+              Hashtbl.incr
+                c.basic
+                (if e
+                 then "(program write to a running thread: ignored)"
+                 else "(program write to a stopped thread)"))));
       Cyclesim.cycle sim;
       Isa.step model ~inputs:pins;
+      Option.iter write ~f:(fun (mask, addr, w) ->
+        for n = 0 to Rtl.num_threads - 1 do
+          if mask land (1 lsl n) <> 0
+             && Isa.write_program model ~thread:n ~addr (Isa.Instruction.decode w)
+          then words.(n).(addr) <- w
+        done);
       let popped =
         List.mapi host ~f:(fun n (push, push_value, pop) ->
           (* The host's push and pop are refused at the chained ends. *)
@@ -466,6 +512,7 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
       let rtl_thread n =
         let t = Rtl.O.thread o n in
         { pc = get t.pc
+        ; page = get t.page
         ; x = get t.x
         ; y = get t.y
         ; isr = get t.isr
@@ -484,6 +531,7 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
       let model_thread n =
         let th = Isa.thread model n in
         { pc = th.pc
+        ; page = th.page
         ; x = th.x
         ; y = th.y
         ; isr = th.isr
@@ -507,8 +555,8 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
       then loop (cycle + 1)
       else (
         let instructions =
-          List.map pcs_before ~f:(fun pc ->
-            pc, Isa.Instruction.to_string (Isa.Instruction.decode s.words.(pc)))
+          List.mapi pcs_before ~f:(fun n pc ->
+            pc, Isa.Instruction.to_string (Isa.Instruction.decode words.(n).(pc)))
         in
         Some
           [%message

@@ -24,9 +24,10 @@
    phase must last at least 4 core clocks.
 
    Register map. Thread 0's bank is at 0x40, thread 1's at 0x50, with the
-   same layout; offsets 0x0, 0x7 and 0xE hold the global registers and are
-   unused in thread 1's bank.
-     0x00-0x3F  program memory word (write), shared by both threads
+   same layout; offsets 0x0, 0x7 and 0xE hold global registers (0x50 is
+   LOAD; 0x57 and 0x5E are unused).
+     0x00-0x3F  program memory word (write): word [5:0] of the page, and
+                into the memories, that LOAD names
      0x40       CTRL (global): bit 0 = thread 0 enable, bit 1 = thread 1
                 enable. One write starts or stops both together. Bit 2 =
                 CHAIN: thread 0's RX FIFO feeds thread 1's TX FIFO directly,
@@ -37,15 +38,19 @@
                 directly instead of through the 2-flop synchroniser (two
                 cycles sooner, but only safe for signals known to be stable
                 when sampled)
-     bank + 0x1 START address [5:0]
+     0x50       LOAD (global): [1:0] = the page program writes go to;
+                bit 4 = write thread 0's memory, bit 5 = thread 1's.
+                Resets to 0x30: page 0 of both. A write to the memory of an
+                enabled thread is ignored.
+     bank + 0x1 START address [7:0]
      bank + 0x2 OUT config: base [2:0], count [7:4]
      bank + 0x3 SET config: base [2:0], count [7:4]
      bank + 0x4 IN base [2:0]
      bank + 0x5 THRESHOLD [4:0] (1..16)
-     bank + 0x6 TIMEOUT_VECTOR [5:0]
+     bank + 0x6 TIMEOUT_VECTOR [7:0]
      bank + 0x8 TX FIFO (write pushes; dropped if full)
      bank + 0x9 RX FIFO (read pops; reads 0 if empty)
-     bank + 0xA STATUS (read): [13:8] pc, [7] enable, [6:4] rx level,
+     bank + 0xA STATUS (read): [15:8] pc, [7] enable, [6:4] rx level,
                 [2:0] tx level
      bank + 0xB TIMEOUT [15:0]: max cycles a [wait ... timeout] stalls
      bank + 0xC SIDESET: base pin [2:0], count [5:4] (0..3 delay bits used)
@@ -87,6 +92,7 @@ module Addr = struct
   let ctrl = 0x40
   let pin_modes = 0x47
   let sync_bypass = 0x4E
+  let load = 0x50
 
   (* Thread 0's per-thread registers; [for_thread n] moves one into thread
      n's bank. *)
@@ -114,11 +120,13 @@ let bit s i = select s i i
    generated Verilog is identical either way); the test suite builds each one
    and asserts that the chip-level tests and the formal proof catch it. *)
 module Mutation = struct
-  type t = Miso_shifts_early (* MISO moves on the falling edge before the first data bit *)
+  type t =
+    | Miso_shifts_early (* MISO moves on the falling edge before the first data bit *)
+    | Load_writes_both (* a program write goes to both memories whatever LOAD says *)
   [@@deriving sexp_of, enumerate, equal]
 end
 
-let create ?mutation (i : _ I.t) : _ O.t =
+let create ?mutation ?memory (i : _ I.t) : _ O.t =
   let is m = Option.value_map mutation ~default:false ~f:(Mutation.equal m) in
   let spec = Reg_spec.create ~clock:i.clock ~clear:i.clear () in
   let spec_to v = Reg_spec.override spec ~clear_to:v in
@@ -160,17 +168,18 @@ let create ?mutation (i : _ I.t) : _ O.t =
   let ctrl = config "cfg_ctrl" 3 in
   let pin_modes = config "cfg_pin_modes" 16 in
   let sync_bypass = config "cfg_sync_bypass" 8 in
+  let load = config ~init:0x30 "cfg_load" 6 in
   (* One bank of per-thread registers. Returns its writes as (address,
      register, write rule), its RX pop strobe, and the thread's core inputs. *)
   let bank n =
     let a = Addr.for_thread n in
     let config ?init name width = config ?init (sprintf "cfg_t%d_%s" n name) width in
-    let start = config "start" 6 in
+    let start = config "start" Pe_core.pc_bits in
     let out_cfg = config ~init:0x10 "out_cfg" 8 in
     let set_cfg = config ~init:0x10 "set_cfg" 8 in
     let in_base = config "in_base" 3 in
     let threshold = config ~init:8 "threshold" 5 in
-    let timeout_vector = config "timeout_vector" 6 in
+    let timeout_vector = config "timeout_vector" Pe_core.pc_bits in
     let timeout = config "timeout" 16 in
     let sideset = config "sideset" 6 in
     let clkdiv = config "clkdiv" 16 in
@@ -223,10 +232,13 @@ let create ?mutation (i : _ I.t) : _ O.t =
   in
   let core =
     Pe_core.create
+      ?memory
       { Pe_core.I.clock = i.clock
       ; clear = i.clear
-      ; prog_we = data_done &: is_write &: (addr <:. Addr.program_words)
-      ; prog_addr = select addr 5 0
+      ; prog_we =
+          repeat (data_done &: is_write &: (addr <:. Addr.program_words)) Pe_core.num_threads
+          &: (if is Load_writes_both then ones Pe_core.num_threads else select load.value 5 4)
+      ; prog_addr = select load.value (Pe_core.page_bits - 1) 0 @: select addr 5 0
       ; prog_data = data_now
       ; pin_modes = pin_modes.value
       ; pins_in = i.uio_in
@@ -244,13 +256,14 @@ let create ?mutation (i : _ I.t) : _ O.t =
   table.(Addr.ctrl) <- uresize ctrl.value 16;
   table.(Addr.pin_modes) <- pin_modes.value;
   table.(Addr.sync_bypass) <- uresize sync_bypass.value 16;
+  table.(Addr.load) <- uresize load.value 16;
   List.iteri banks ~f:(fun n (writes, _, _) ->
     let a = Addr.for_thread n in
     let t = Pe_core.O.thread core n in
     List.iter writes ~f:(fun (addr, (r : Variable.t), _) -> table.(addr) <- uresize r.value 16);
     table.(a Addr.rx_fifo) <- mux2 (rx_nonempty n) t.rx_data (zero 16);
     table.(a Addr.status)
-    <- concat_msb [ zero 2; t.pc; bit ctrl.value n; t.rx_level; gnd; t.tx_level ]);
+    <- concat_msb [ t.pc; bit ctrl.value n; t.rx_level; gnd; t.tx_level ]);
   (* The last entry is zero, and mux repeats it for higher addresses. *)
   let read_value = mux read_addr (Array.to_list table) in
   List.iteri banks ~f:(fun n (_, rx_pop, _) ->
@@ -278,6 +291,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
      ; when_ (write_to Addr.ctrl) [ ctrl <-- select data_now 2 0 ]
      ; when_ (write_to Addr.pin_modes) [ pin_modes <-- data_now ]
      ; when_ (write_to Addr.sync_bypass) [ sync_bypass <-- select data_now 7 0 ]
+     ; when_ (write_to Addr.load) [ load <-- select data_now 5 0 ]
      ]
      @ List.concat_map banks ~f:(fun (writes, _, _) ->
        List.map writes ~f:(fun (_, _, w) -> w)));

@@ -416,3 +416,97 @@ let%test_unit "assembler enforces side-set syntax" =
       | _ -> raise_s [%message "assembler accepted bad side-set input" (src : string)]
       | exception _ -> ())
 ;;
+
+(* --- Pages (v2.0) -------------------------------------------------------- *)
+
+(* 70 words in a row, so the program runs off page 0 into page 1. *)
+let long_program ~tail = String.concat ~sep:"\n" (List.init 66 ~f:(fun _ -> "nop") @ tail)
+
+let%test_unit "a program longer than a page: the pc runs on, PAGE stays, set page moves it" =
+  let m =
+    machine
+      (long_program
+         ~tail:
+           [ "set x, 7" (* word 66, in page 1 *)
+           ; "set page, 1"
+           ; "jmp there"
+           ; "nop"
+           ; "there: set y, 9" (* word 70 *)
+           ; "set page, 0"
+           ; "jmp 0"
+           ])
+  in
+  let th = Isa.thread m 0 in
+  run m ~cycles:67 ~inputs:0;
+  (* Fell from word 63 into word 64 and on; PAGE is still where START was. *)
+  [%test_result: int * int * int] (th.pc, th.page, th.x) ~expect:(67, 0, 7);
+  run m ~cycles:2 ~inputs:0;
+  [%test_result: int * int] (th.pc, th.page) ~expect:(70, 1);
+  run m ~cycles:3 ~inputs:0;
+  [%test_result: int * int * int] (th.pc, th.page, th.y) ~expect:(0, 0, 9)
+;;
+
+let%test_unit "PAGE starts as the page START is in; a timeout does not change it" =
+  let program = Asm.assemble ~origin:130 "wait 1 pin 0 timeout\nhang: jmp hang" in
+  let image = Array.append (Array.create ~len:130 Isa.unloaded) program in
+  let m =
+    Isa.create
+      ~program:image
+      ~pin_modes:all_input
+      ~threads:[ { Isa.Thread_config.default with start = 130; timeout = 0; timeout_vector = 5 } ]
+  in
+  Isa.set_sync_bypass m 0xFF;
+  let th = Isa.thread m 0 in
+  [%test_result: int * int] (th.pc, th.page) ~expect:(130, 2);
+  (* Pin 0 is low and the budget is 0: the wait jumps to the vector, a full
+     address in page 0, and PAGE is left at 2. *)
+  run m ~cycles:1 ~inputs:0;
+  [%test_result: int * int] (th.pc, th.page) ~expect:(5, 2);
+  (* Word 5 is unloaded, "jmp 0": it goes to word 0 of page 2. *)
+  run m ~cycles:1 ~inputs:0;
+  [%test_result: int] th.pc ~expect:128
+;;
+
+let%test_unit "the assembler refuses a jump out of the page PAGE holds" =
+  List.iter
+    [ long_program ~tail:[ "far: nop"; "jmp far" ] (* far is in page 1, PAGE is 0 *)
+    ; "back: nop\n" ^ long_program ~tail:[ "set page, 1"; "jmp back" ] (* back is in page 0 *)
+    ; "jmp 64" (* a numeric target is a place in the page *)
+    ]
+    ~f:(fun src ->
+      match Asm.assemble src with
+      | _ -> raise_s [%message "assembler accepted a jump across pages" (src : string)]
+      | exception _ -> ());
+  (* And accepts it once PAGE is set. *)
+  ignore
+    (Asm.assemble (long_program ~tail:[ "far: nop"; "set page, 1"; "jmp far" ])
+     : Isa.Instruction.t array)
+;;
+
+let%test_unit "each thread runs its own memory" =
+  let m =
+    Isa.create_separate
+      ~programs:[| Asm.assemble "set x, 1\nh: jmp h"; Asm.assemble "set x, 2\nh: jmp h" |]
+      ~pin_modes:all_input
+      ~threads:[ Isa.Thread_config.default; Isa.Thread_config.default ]
+  in
+  run m ~cycles:1 ~inputs:0;
+  [%test_result: int * int] ((Isa.thread m 0).x, (Isa.thread m 1).x) ~expect:(1, 2)
+;;
+
+let%test_unit "a program write: ignored while the thread runs, and holds it a cycle after" =
+  let m = machine "set x, 1\nh: jmp h" in
+  let th = Isa.thread m 0 in
+  let set_x_5 = (Asm.assemble "set x, 5").(0) in
+  run m ~cycles:2 ~inputs:0;
+  [%test_result: bool] (Isa.write_program m ~thread:0 ~addr:0 set_x_5) ~expect:false;
+  Isa.set_enabled m ~thread:0 false;
+  run m ~cycles:1 ~inputs:0;
+  [%test_result: bool] (Isa.write_program m ~thread:0 ~addr:0 set_x_5) ~expect:true;
+  (* Enabled at once, but held for this cycle; the next one runs the new word. *)
+  Isa.set_enabled m ~thread:0 true;
+  run m ~cycles:1 ~inputs:0;
+  [%test_result: int * int] (th.pc, th.x) ~expect:(0, 0);
+  run m ~cycles:1 ~inputs:0;
+  [%test_result: int * int] (th.pc, th.x) ~expect:(1, 5)
+;;

@@ -80,15 +80,18 @@ let%expect_test "the directed suite catches every planted bug" =
     if List.is_empty catchers then raise_s [%message "mutant survived" name];
     printf "%-28s caught by %d of %d\n" name (List.length catchers) (List.length Directed.all));
   [%expect {|
-    Xdec_never_decrements        caught by 1 of 10
-    Wait_timeout_ignores_budget  caught by 3 of 10
-    Delay_field_ignored          caught by 4 of 10
-    Set_pins_count_off_by_one    caught by 2 of 10
-    Push_not_right_justified     caught by 2 of 10
-    Pin_priority_inverted        caught by 1 of 10
-    Fetch_port_crossed           caught by 10 of 10
-    Chain_ignores_full           caught by 3 of 10
-    Push_ignores_in_direction    caught by 1 of 10
-    Sync_bypass_inverted         caught by 2 of 10
+    Xdec_never_decrements        caught by 1 of 12
+    Wait_timeout_ignores_budget  caught by 3 of 12
+    Delay_field_ignored          caught by 4 of 12
+    Set_pins_count_off_by_one    caught by 4 of 12
+    Push_not_right_justified     caught by 2 of 12
+    Pin_priority_inverted        caught by 1 of 12
+    Fetch_port_crossed           caught by 12 of 12
+    Chain_ignores_full           caught by 3 of 12
+    Push_ignores_in_direction    caught by 1 of 12
+    Sync_bypass_inverted         caught by 2 of 12
+    Jump_ignores_page            caught by 1 of 12
+    Write_lands_while_running    caught by 1 of 12
+    No_hold_after_write          caught by 1 of 12
     |}]
 ;;

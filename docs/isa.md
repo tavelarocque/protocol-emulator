@@ -1,4 +1,4 @@
-# Protocol emulator ISA, v1.4
+# Protocol emulator ISA, v2.0
 
 This document describes the instruction set in prose. The normative version
 is the executable model in `model/isa.ml`: where the two disagree, the model
@@ -31,14 +31,18 @@ weakest for this job:
 | Bit timing | fractional clock divider per state machine | integer clock divider per thread, or counter loops on X/Y with the count supplied by the host at run time |
 | Program loading | host bus inside the RP2040 | SPI slave port, so an external host can load firmware |
 | Undefined encodings | n/a | every word is defined; reserved encodings are NOP |
+| Program memory | 32 words, shared by four state machines | 256 words per thread, in SRAM; jumps reach a 64-word page, chosen by a PAGE register |
 
 ## Machine state
 
-- **Program memory:** 64 words of 16 bits, shared by all threads. Resets to
-  0, which decodes as `jmp 0`.
-- **Threads:** 2. Each has its own PC, configuration, registers and FIFOs,
-  and its own read port into the shared program memory, so both execute an
-  instruction every cycle.
+- **Program memory:** 256 words of 16 bits for each thread, in four pages
+  of 64. The host writes either memory or both at once; loading the same
+  image into both is the default and gives two threads sharing one
+  program. The memories are SRAM: reset does not clear them, and what they
+  hold before the host loads them is undefined.
+- **Threads:** 2. Each has its own PC, PAGE, configuration, registers,
+  FIFOs and program memory, so both execute an instruction every cycle.
+- **`PAGE`**, 2 bits per thread: the page a `jmp` lands in (see `jmp`).
 - **Per-thread registers**, all 16 bits:
   - `X`, `Y`: scratch and loop counters.
   - `OSR` (output shift register), with a count of bits shifted out since
@@ -92,12 +96,12 @@ output, read back on a push-pull or open-drain pin, is never delayed.
 
 | Field | Meaning |
 |---|---|
-| `start` | initial PC |
+| `start` | initial PC, anywhere in the thread's memory. While the thread is disabled, PAGE is the page `start` is in |
 | `out_base`, `out_count` | first pin and pin count for `out pins` / `mov pins` |
 | `set_base`, `set_count` | first pin and pin count for `set pins` |
 | `in_base` | first pin for `in pins` |
 | `threshold` | bits per word (1 to 16): when the OSR counts as empty and the ISR as full |
-| `timeout_vector` | jump target when a `wait ... timeout` expires |
+| `timeout_vector` | jump target when a `wait ... timeout` expires: a full address, so it can be in any page. PAGE is not changed by the jump |
 | `timeout` | cycles (0 to 65535) a `wait ... timeout` may stall before it expires |
 | `sideset_base`, `sideset_count` | first side-set pin, and how many of the delay field's top bits (0 to 3) are side-set values |
 | `clkdiv` | the thread runs one cycle in every `clkdiv` (0 and 1: every cycle). Between those ticks it does nothing at all, so delays and wait timeouts count in ticks |
@@ -195,8 +199,19 @@ Unused operand bits are ignored. These reserved encodings decode as `nop`
 
 ## Instructions
 
-**`jmp [cond] addr`** jumps to `addr` if the condition holds, otherwise
-falls through to the next instruction.
+**`jmp [cond] addr`** jumps if the condition holds, otherwise falls through
+to the next instruction. `addr` is 6 bits, a place within a page; the jump
+goes to word `addr` of page `PAGE`, that is to `PAGE × 64 + addr`.
+
+`PAGE` is the page `start` is in when the thread starts, and after that
+only `set page, n` changes it. Running off the end of one page into the
+next does not, and neither does a wait timing out. So a program of up to 64
+words placed in one page, with `start` in that page, never needs to think
+about pages, and runs the same in any of them; that is every program
+written before v2.0. A longer program crosses to another page by falling
+into it or with `set page, n` then `jmp`, two instructions. The assembler
+follows PAGE down the listing and rejects a jump to a label in any other
+page.
 
 | cond | Syntax | Holds when |
 |---|---|---|
@@ -253,7 +268,7 @@ the TX FIFO is empty.
 - Writing `isr` or `osr` resets that register's shift count.
 
 **`set dst, value`** writes a 5-bit immediate to `pins` (`set_count` pins
-from `set_base`), `x` or `y`.
+from `set_base`), `x`, `y` or `page` (the value modulo 4).
 
 ## Host interface
 
@@ -261,8 +276,14 @@ The host talks to the chip over a small SPI slave port on the dedicated
 input/output pins: 3 inputs (SCK, CS, MOSI) and 1 output (MISO). Through it
 the host:
 
-- writes program memory (one image for both threads; the assembler can
-  place each program at its own origin)
+- writes program memory, 64 words at a time: a LOAD register names the
+  page and which threads' memories a write goes to (both, by default; the
+  assembler can place each thread's program at its own origin in one
+  image). A write to the memory of an enabled thread is ignored. After a
+  write to a stopped thread's memory, that thread is held in its initial
+  state for one more cycle even if the host enables it at once: the memory
+  answers a cycle after it is asked, and in a cycle with a write it is not
+  asked for the thread's first instruction
 - writes each thread's configuration, in two identical register banks
 - sets the pin modes, shared by both threads
 - enables threads through one CTRL register, so a single write can start or
@@ -331,6 +352,26 @@ rates.
   thread could not bridge an MSB-first protocol into an LSB-first one. With
   SHIFT set, the side-set SPI controller takes and returns plain bytes. The
   last hardware change before the design freeze.
+
+- **v2.0.** Program memory in SRAM, one memory of 256 words per thread,
+  where v1.4 had 64 words of flip-flops shared by both. The flip-flop
+  memory could not grow: on this process a design gets one horizontal
+  routing layer, and the read multiplexers of a 128-word memory already
+  would not route in the time allowed, a 256-word one not at all. An SRAM
+  macro of 256 words takes 2% of the die. It can read one word a clock, so
+  each thread has its own; it registers its address, so it is given the pc
+  the thread will have next cycle, and each thread still executes one
+  instruction every cycle. Three things changed for firmware and the host:
+  - `jmp` still holds 6 bits, so a PAGE register per thread supplies the
+    rest, and `set page, n` (until now a reserved encoding, a NOP) sets it.
+    `start` and `timeout_vector` are full addresses.
+  - A LOAD register says where program writes go. It resets to "both
+    memories, page 0", so a host that never touches it loads and runs a
+    v1.4 image exactly as before.
+  - Memory is not cleared by reset, a write to a running thread's memory
+    is ignored, and a thread is held for one cycle after a write to its
+    memory.
+  Every v1.4 program encodes and runs identically.
 
 ## Open questions for review
 

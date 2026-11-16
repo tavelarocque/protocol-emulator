@@ -1,14 +1,16 @@
-(* The protocol-emulator core: two threads of the ISA in docs/isa.md,
-   sharing one program memory and the 8 protocol pins.
+(* The protocol-emulator core: two threads of the ISA in docs/isa.md, each
+   with its own program memory, sharing the 8 protocol pins.
 
    Every behaviour here is defined by the reference model in model/isa.ml,
    and sim/test_core.ml checks this circuit against that model cycle by
    cycle on random programs, configurations, pin inputs and host traffic.
 
-   Structure: a single-cycle machine. Each cycle every thread reads the
-   instruction at its own [pc] from the shared flop-based program memory (one
-   read port per thread), decodes it combinationally, and its effects are
-   registered at the clock edge. All reads of the pins see the levels at the
+   Structure: a single-cycle machine. Each cycle every thread has the
+   instruction at its own [pc], read from its own program memory, decodes it
+   combinationally, and its effects are registered at the clock edge. The
+   memory is an SRAM macro, which registers its address: it is given the pc
+   the thread will have next cycle, so its output is always the instruction
+   at the pc the thread has now (see [program_memory]). All reads of the pins see the levels at the
    start of the cycle. Pin writes land at the clock edge; when both threads
    write the same pin in the same cycle, thread 1 wins. That rule is built
    structurally: thread 1's datapath takes thread 0's next pin value as its
@@ -19,7 +21,10 @@ open! Core
 open! Hardcaml
 open! Signal
 
-let program_size = 64
+let program_size = 256
+let pc_bits = Int.ceil_log2 program_size
+let page_size = 64
+let page_bits = pc_bits - Int.ceil_log2 page_size
 let num_pins = 8
 let num_threads = 2
 
@@ -28,14 +33,14 @@ let num_threads = 2
 module Thread_in = struct
   type 'a t =
     { enable : 'a (* low: thread held at its initial state *)
-    ; start : 'a [@bits 6]
+    ; start : 'a [@bits pc_bits]
     ; out_base : 'a [@bits 3]
     ; out_count : 'a [@bits 4]
     ; set_base : 'a [@bits 3]
     ; set_count : 'a [@bits 4]
     ; in_base : 'a [@bits 3]
     ; threshold : 'a [@bits 5]
-    ; timeout_vector : 'a [@bits 6]
+    ; timeout_vector : 'a [@bits pc_bits]
     ; timeout : 'a [@bits 16] (* max cycles a [wait ... timeout] stalls *)
     ; sideset_base : 'a [@bits 3]
     ; sideset_count : 'a [@bits 2] (* top bits of the delay field that are side-set *)
@@ -56,7 +61,8 @@ module Thread_out = struct
     { rx_data : 'a [@bits 16] (* head of the RX FIFO *)
     ; tx_level : 'a [@bits 3]
     ; rx_level : 'a [@bits 3]
-    ; pc : 'a [@bits 6]
+    ; pc : 'a [@bits pc_bits]
+    ; page : 'a [@bits page_bits]
     ; x : 'a [@bits 16]
     ; y : 'a [@bits 16]
     ; isr : 'a [@bits 16]
@@ -75,8 +81,11 @@ module I = struct
   type 'a t =
     { clock : 'a
     ; clear : 'a
-    ; prog_we : 'a
-    ; prog_addr : 'a [@bits 6]
+    ; prog_we : 'a [@bits num_threads]
+      (* bit n: write thread n's memory. Ignored while that thread is
+         enabled, and the thread is held in its initial state for the cycle
+         after a write, while the memory reads its first instruction. *)
+    ; prog_addr : 'a [@bits pc_bits]
     ; prog_data : 'a [@bits 16]
     ; pin_modes : 'a [@bits 16] (* 2 bits per pin: 0 input, 1 push-pull, 2 open-drain *)
     ; pins_in : 'a [@bits 8] (* straight from the pads, asynchronous *)
@@ -123,6 +132,13 @@ module Mutation = struct
     | Sync_bypass_inverted
       (* SYNC_BYPASS read with the wrong polarity: bypassed pins go through
          the synchroniser and synchronised ones skip it *)
+    | Jump_ignores_page (* a jump stays in the page the pc is in *)
+    | Write_lands_while_running
+      (* a host write to a running thread's memory lands, taking the
+         memory's address from the fetch *)
+    | No_hold_after_write
+      (* a thread enabled in the cycle after a write to its memory runs at
+         once, on whatever the memory last read *)
   [@@deriving sexp_of, enumerate, equal]
 end
 
@@ -176,7 +192,10 @@ let read_pins ~lines ~base ~count =
    register itself for thread 0, thread 0's result for thread 1. *)
 module Thread_state = struct
   type 'a t =
-    { pc : 'a [@bits 6]
+    { pc : 'a [@bits pc_bits]
+    ; page : 'a [@bits page_bits]
+      (* a jump goes to [page @: instr[5:0]]; set only by [set page] and,
+         while disabled, to the page of [start] *)
     ; x : 'a [@bits 16]
     ; y : 'a [@bits 16]
     ; isr : 'a [@bits 16]
@@ -200,14 +219,14 @@ module Step_in = struct
     ; tx_empty : 'a
     ; tx_head : 'a [@bits 16]
     ; rx_full : 'a
-    ; start : 'a [@bits 6]
+    ; start : 'a [@bits pc_bits]
     ; out_base : 'a [@bits 3]
     ; out_count : 'a [@bits 4]
     ; set_base : 'a [@bits 3]
     ; set_count : 'a [@bits 4]
     ; in_base : 'a [@bits 3]
     ; threshold : 'a [@bits 5]
-    ; timeout_vector : 'a [@bits 6]
+    ; timeout_vector : 'a [@bits pc_bits]
     ; timeout : 'a [@bits 16]
     ; sideset_base : 'a [@bits 3]
     ; sideset_count : 'a [@bits 2]
@@ -238,6 +257,7 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
   let open Always in
   let w v = Variable.wire ~default:v in
   let pc = w s.pc in
+  let page = w s.page in
   let x = w s.x in
   let y = w s.y in
   let isr = w s.isr in
@@ -293,7 +313,7 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
   (* PUSH / PULL *)
   let is_pull = bit instr 8 in
   (* MOV: source/destination 6 and 7 are reserved, making the whole
-     instruction a NOP. SET destination 3 likewise. *)
+     instruction a NOP. *)
   let mov_dst = select instr 8 6 in
   let mov_src = select instr 5 3 in
   let mov_valid = (mov_dst <:. 6) &: (mov_src <:. 6) in
@@ -305,7 +325,10 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
     |: (is_op 4 &: ~:is_pull &: i.rx_full)
   in
   let goto_ = (is_op 0 &: cond_true) |: (is_op 1 &: ~:wait_ok &: wait_expired) in
-  let target = mux2 (is_op 0) (select instr 5 0) i.timeout_vector in
+  let jump_page =
+    if is Jump_ignores_page then select s.pc (pc_bits - 1) (pc_bits - page_bits) else s.page
+  in
+  let target = mux2 (is_op 0) (jump_page @: select instr 5 0) i.timeout_vector in
   let next_pc = mux2 goto_ target (s.pc +:. 1) in
   let advance = executing &: ~:stall in
   let pull = executing &: is_op 4 &: is_pull &: ~:(i.tx_empty) in
@@ -361,6 +384,7 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
         ~:(i.enable)
         [ (* Held in the initial state until the host enables the thread. *)
           pc <-- i.start
+        ; page <-- select i.start (pc_bits - 1) (pc_bits - page_bits)
         ; x <--. 0
         ; y <--. 0
         ; isr <--. 0
@@ -447,6 +471,7 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
                            set_dst
                            [ of_int ~width:2 1, [ x <-- set_value ]
                            ; of_int ~width:2 2, [ y <-- set_value ]
+                           ; of_int ~width:2 3, [ page <-- select instr (page_bits - 1) 0 ]
                            ]
                        ] )
                    ]
@@ -455,6 +480,7 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
     ];
   { Step_out.next =
       { Thread_state.pc = pc.value
+      ; page = page.value
       ; x = x.value
       ; y = y.value
       ; isr = isr.value
@@ -472,15 +498,67 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
   }
 ;;
 
-let create ?mutation ?datapath (i : _ I.t) : _ O.t =
+(* How a thread's program memory is built. Both give the same thing: a
+   memory of [program_size] words that registers its address, so that
+   [dout] in one cycle is the word at the [addr] of the cycle before, or is
+   unspecified if that cycle was a write. Reset does not touch it.
+
+   [Macro] instantiates IHP's SRAM macro, and is what the chip is built
+   from. [Model] is that behaviour in flip-flops, for simulation and the
+   proofs; on a write cycle its [dout] holds, which no thread can observe,
+   because a thread is held in its initial state in the cycle after a
+   write to its memory. *)
+module Memory = struct
+  type t =
+    | Macro
+    | Model
+  [@@deriving sexp_of, equal]
+end
+
+let program_memory (memory : Memory.t) ~clock ~n ~we ~addr ~data =
+  match memory with
+  | Model ->
+    let spec = Reg_spec.create ~clock () in
+    let words =
+      List.init program_size ~f:(fun a ->
+        reg spec ~enable:(we &: (addr ==:. a)) data -- sprintf "t%d_prog_%d" n a)
+    in
+    let next = wire 16 in
+    let dout = reg spec next -- sprintf "t%d_prog_dout" n in
+    next <== mux2 we dout (mux addr words);
+    dout
+  | Macro ->
+    let inst =
+      Instantiation.create
+        ()
+        ~instance:(sprintf "sram%d" n)
+        ~name:"RM_IHPSG13_1P_256x16_c2_bm_bist"
+        ~inputs:
+          [ "A_CLK", clock
+          ; "A_MEN", vdd
+          ; "A_WEN", we
+          ; "A_REN", ~:we
+          ; "A_ADDR", addr
+          ; "A_DIN", data
+          ; "A_DLY", vdd
+          ; "A_BM", ones 16
+          ; "A_BIST_CLK", gnd
+          ; "A_BIST_EN", gnd
+          ; "A_BIST_MEN", gnd
+          ; "A_BIST_WEN", gnd
+          ; "A_BIST_REN", gnd
+          ; "A_BIST_ADDR", zero pc_bits
+          ; "A_BIST_DIN", zero 16
+          ; "A_BIST_BM", zero 16
+          ]
+        ~outputs:[ "A_DOUT", 16 ]
+    in
+    Map.find_exn inst "A_DOUT"
+;;
+
+let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
   let is m = Option.value_map mutation ~default:false ~f:(Mutation.equal m) in
   let spec = Reg_spec.create ~clock:i.clock ~clear:i.clear () in
-  (* --- Program memory: 64 x 16 flops, written by the host, shared. --- *)
-  let program =
-    List.init program_size ~f:(fun a ->
-      reg spec ~enable:(i.prog_we &: (i.prog_addr ==:. a)) i.prog_data
-      -- sprintf "prog_%d" a)
-  in
   (* --- The shared pin register. Resets to all ones: idle-high for UART,
      released for open-drain. --- *)
   let pin_next = wire num_pins in
@@ -519,10 +597,39 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
     d, q
   in
   let threads = List.init num_threads ~f:(fun n -> n, regs n) in
-  let pcs = List.map threads ~f:(fun (_, (_, q)) -> q.pc) in
+  (* --- Program memories. A write lands only while the thread is disabled.
+     The thread is then held disabled for one more cycle, in which the
+     memory reads the instruction at [start]. Otherwise the address is the
+     thread's next pc. --- *)
+  let loading =
+    List.init num_threads ~f:(fun n ->
+      if is Write_lands_while_running
+      then bit i.prog_we n
+      else bit i.prog_we n &: ~:((I.thread i n).enable))
+  in
+  let enables =
+    List.init num_threads ~f:(fun n ->
+      let loaded = reg spec (List.nth_exn loading n) -- sprintf "t%d_loaded" n in
+      if is No_hold_after_write
+      then
+        (* The register stays in the circuit, so that the equivalence
+           checker can still pair it with the spec's. *)
+        (I.thread i n).enable |: (loaded &: ~:loaded)
+      else (I.thread i n).enable &: ~:loaded)
+  in
   let fetch n =
-    let pc = List.nth_exn pcs (if n = 1 && is Fetch_port_crossed then 0 else n) in
-    mux pc program
+    let next_pc m =
+      let (d : _ Thread_state.t), _ = List.Assoc.find_exn threads ~equal:Int.equal m in
+      d.pc
+    in
+    let we = List.nth_exn loading n in
+    program_memory
+      memory
+      ~clock:i.clock
+      ~n
+      ~we
+      ~addr:(mux2 we i.prog_addr (next_pc (if n = 1 && is Fetch_port_crossed then 0 else n)))
+      ~data:i.prog_data
   in
   (* --- Clock dividers: the thread ticks when its counter is 0, then
      reloads it with [clkdiv - 1]. Held at 0 while disabled, so a thread's
@@ -535,7 +642,7 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
       let tick = q ==:. 0 in
       d
       <== mux2
-            ~:(ti.enable)
+            ~:(List.nth_exn enables n)
             (zero 16)
             (mux2 tick (mux2 (ti.clkdiv ==:. 0) (zero 16) (ti.clkdiv -:. 1)) (q -:. 1));
       q, tick)
@@ -603,7 +710,7 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
       let (out : _ Step_out.t) =
         step
           { q with pin_out = pins_so_far }
-          { Step_in.enable = ti.enable
+          { Step_in.enable = List.nth_exn enables n
           ; tick = snd (List.nth_exn dividers n)
           ; instr = fetch n
           ; lines
@@ -649,6 +756,7 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
     ; tx_level = tx.level
     ; rx_level = rx.level
     ; pc = q.pc
+    ; page = q.page
     ; x = q.x
     ; y = q.y
     ; isr = q.isr

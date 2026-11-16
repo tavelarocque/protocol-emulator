@@ -57,14 +57,14 @@ type sample =
 let random_sample rs word =
   let r n = Random.State.int rs n in
   let config =
-    { Isa.Thread_config.start = r 64
+    { Isa.Thread_config.start = r Isa.program_size
     ; out_base = r 8
     ; out_count = 1 + r 8
     ; set_base = r 8
     ; set_count = 1 + r 8
     ; in_base = r 8
     ; threshold = 1 + r 16
-    ; timeout_vector = r 64
+    ; timeout_vector = r Isa.program_size
     ; timeout = (if r 2 = 0 then r 4 else r 65536)
     ; sideset_base = r 8
     ; sideset_count = r 4
@@ -74,7 +74,8 @@ let random_sample rs word =
     }
   in
   let state =
-    { P.Thread_state.pc = r 64
+    { P.Thread_state.pc = r Isa.program_size
+    ; page = r Isa.num_pages
     ; x = (if r 4 = 0 then 0 else r 65536)
     ; y = (if r 4 = 0 then 0 else r 65536)
     ; isr = r 65536
@@ -122,6 +123,7 @@ let run_model s =
   Isa.set_sync_bypass m 0xFF;
   let th = Isa.thread m 0 in
   th.pc <- s.state.pc;
+  th.page <- s.state.page;
   th.x <- s.state.x;
   th.y <- s.state.y;
   th.isr <- s.state.isr;
@@ -141,6 +143,7 @@ let run_model s =
   Isa.step m ~inputs:s.lines;
   { next =
       { P.Thread_state.pc = th.pc
+      ; page = th.page
       ; x = th.x
       ; y = th.y
       ; isr = th.isr
@@ -174,14 +177,14 @@ let run_spec s =
       ; tx_empty = Bits.of_bool (Option.is_none s.tx_head)
       ; tx_head = b 16 (Option.value s.tx_head ~default:0)
       ; rx_full = Bits.of_bool s.rx_full
-      ; start = b 6 c.start
+      ; start = b P.pc_bits c.start
       ; out_base = b 3 c.out_base
       ; out_count = b 4 c.out_count
       ; set_base = b 3 c.set_base
       ; set_count = b 4 c.set_count
       ; in_base = b 3 c.in_base
       ; threshold = b 5 c.threshold
-      ; timeout_vector = b 6 c.timeout_vector
+      ; timeout_vector = b P.pc_bits c.timeout_vector
       ; timeout = b 16 c.timeout
       ; sideset_base = b 3 c.sideset_base
       ; sideset_count = b 2 c.sideset_count
@@ -293,7 +296,10 @@ let%expect_test "every planted host-port bug is refuted by the whole-chip proof"
       "%-24s %s\n"
       (Sexp.to_string (Pe_hw.Top.Mutation.sexp_of_t mutation))
       (prove (top ~mutation ()) (spec_top ())));
-  [%expect {| Miso_shifts_early        SAT: counterexample found |}]
+  [%expect {|
+    Miso_shifts_early        SAT: counterexample found
+    Load_writes_both         SAT: counterexample found
+    |}]
 ;;
 
 (* --- 3. The proof can fail ------------------------------------------------- *)
@@ -315,6 +321,9 @@ let%expect_test "every planted RTL bug is refuted with a counterexample" =
     Chain_ignores_full           SAT: counterexample found
     Push_ignores_in_direction    SAT: counterexample found
     Sync_bypass_inverted         SAT: counterexample found
+    Jump_ignores_page            SAT: counterexample found
+    Write_lands_while_running    SAT: counterexample found
+    No_hold_after_write          SAT: counterexample found
     |}]
 ;;
 
@@ -336,5 +345,8 @@ let%expect_test "every planted RTL bug is refuted by the whole-core spec" =
     Chain_ignores_full           SAT: counterexample found
     Push_ignores_in_direction    SAT: counterexample found
     Sync_bypass_inverted         SAT: counterexample found
+    Jump_ignores_page            SAT: counterexample found
+    Write_lands_while_running    SAT: counterexample found
+    No_hold_after_write          SAT: counterexample found
     |}]
 ;;

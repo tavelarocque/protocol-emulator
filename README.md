@@ -9,6 +9,14 @@ SPI and I2C are implemented in firmware loaded after fabrication rather than in
 fixed logic. Written in Hardcaml, designed for tapeout through
 [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (8x4 tiles).
 
+> **This branch is v2.0, in progress.** The program memory moves from 64
+> words of flip-flops shared by both threads to an SRAM macro of 256 words
+> for each thread, with a PAGE register for jumps
+> ([`docs/isa.md`](docs/isa.md), revision history). The model, the RTL, the
+> proofs and every test are updated and pass. The text and numbers below
+> still describe v1.4, the chip on `main`, until the v2 layout is
+> characterised.
+
 **In ten minutes:** [`docs/submission.md`](docs/submission.md) is the
 one-page summary for judges. This page is the map.
 

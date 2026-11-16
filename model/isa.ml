@@ -11,7 +11,11 @@
 
 open! Core
 
-let program_size = 64
+(* Each thread has its own program memory of [program_size] words. A jump
+   reaches the [page_size] words of one page; see [Thread.page]. *)
+let program_size = 256
+let page_size = 64
+let num_pages = program_size / page_size
 let num_pins = 8
 let fifo_depth = 4
 let word_bits = 16
@@ -91,11 +95,11 @@ module Out_dst = struct
 end
 
 module Set_dst = struct
-  (* Encoding 3 is reserved and decodes the whole instruction as NOP. *)
   type t =
     | Pins
     | X
     | Y
+    | Page (* the thread's jump page; the value is taken modulo [num_pages] *)
   [@@deriving sexp_of, compare, equal, enumerate]
 
   let to_int = index_of ~all ~equal
@@ -105,6 +109,7 @@ module Set_dst = struct
     | Pins -> "pins"
     | X -> "x"
     | Y -> "y"
+    | Page -> "page"
   ;;
 end
 
@@ -184,7 +189,7 @@ module Instruction = struct
     let opcode, arg =
       match op with
       | Jmp { cond; addr } ->
-        check "addr" addr ~lo:0 ~hi:(program_size - 1);
+        check "addr" addr ~lo:0 ~hi:(page_size - 1);
         0, (Cond.to_int cond lsl 6) lor addr
       | Wait { polarity; pin; timeout } ->
         check "pin" pin ~lo:0 ~hi:(num_pins - 1);
@@ -311,6 +316,10 @@ module Thread = struct
   type t =
     { config : Thread_config.t
     ; mutable pc : int
+    ; mutable page : int
+      (* A jump goes to [page * page_size + addr]. It starts as the page
+         [start] is in and changes only by [set page]: not when the pc runs
+         from one page into the next, and not on a timeout. *)
     ; mutable x : int
     ; mutable y : int
     ; mutable isr : int
@@ -323,6 +332,9 @@ module Thread = struct
     ; mutable div_count : int (* cycles until the thread's next tick *)
     ; tx_fifo : int Queue.t (* host -> thread *)
     ; rx_fifo : int Queue.t (* thread -> host *)
+    ; mutable loaded : bool
+      (* the host wrote this thread's memory in the last cycle; see
+         [write_program] *)
     ; mutable enabled : bool
       (* a disabled thread is held in its initial state; its FIFOs keep
          their contents *)
@@ -331,6 +343,7 @@ module Thread = struct
   (* The state a thread starts in, and is held in while disabled. *)
   let reset t =
     t.pc <- t.config.start;
+    t.page <- t.config.start / page_size;
     t.x <- 0;
     t.y <- 0;
     t.isr <- 0;
@@ -346,6 +359,7 @@ module Thread = struct
   let create (config : Thread_config.t) =
     { config
     ; pc = config.start
+    ; page = config.start / page_size
     ; x = 0
     ; y = 0
     ; isr = 0
@@ -358,13 +372,15 @@ module Thread = struct
     ; div_count = 0
     ; tx_fifo = Queue.create ()
     ; rx_fifo = Queue.create ()
+    ; loaded = false
     ; enabled = true
     }
   ;;
 end
 
 type t =
-  { program : Instruction.t array
+  { programs : Instruction.t array array
+    (* one memory per thread: thread n executes [programs.(n)] *)
   ; pin_modes : Pin_mode.t array
   ; threads : Thread.t array
   ; mutable sync_bypass : int
@@ -377,18 +393,26 @@ type t =
   ; mutable cycle : int
   }
 
-let create ~program ~pin_modes ~threads =
-  if Array.length program > program_size
-  then raise_s [%message "program too long" (Array.length program : int)];
+(* The word a memory holds where nothing was loaded. On the chip the memory
+   is not reset and holds anything at all; 0, "jmp 0", is what this model
+   uses, and the tests that compare it with the hardware load every word. *)
+let unloaded = Instruction.decode 0
+
+(* Each thread's memory loaded with its own program. *)
+let create_separate ~programs ~pin_modes ~threads =
   if Array.length pin_modes <> num_pins then raise_s [%message "need one mode per pin"];
   if List.is_empty threads || List.length threads > 2
   then raise_s [%message "1 or 2 threads"];
-  (* Unwritten program memory resets to 0, which decodes as "jmp 0". *)
-  let program =
-    Array.init program_size ~f:(fun i ->
-      if i < Array.length program then program.(i) else Instruction.decode 0)
+  if Array.length programs <> List.length threads
+  then raise_s [%message "need one program per thread"];
+  let programs =
+    Array.map programs ~f:(fun program ->
+      if Array.length program > program_size
+      then raise_s [%message "program too long" (Array.length program : int)];
+      Array.init program_size ~f:(fun i ->
+        if i < Array.length program then program.(i) else unloaded))
   in
-  { program
+  { programs
   ; pin_modes = Array.copy pin_modes
   ; threads = Array.of_list_map threads ~f:Thread.create
   ; sync_bypass = 0
@@ -398,6 +422,15 @@ let create ~program ~pin_modes ~threads =
   ; pin_out = mask num_pins (* all high: idle for UART, released for open-drain *)
   ; cycle = 0
   }
+;;
+
+(* One image loaded into every thread's memory, which is how the host driver
+   loads a program unless told otherwise. *)
+let create ~program ~pin_modes ~threads =
+  create_separate
+    ~programs:(Array.of_list_map threads ~f:(fun _ -> program))
+    ~pin_modes
+    ~threads
 ;;
 
 let thread t i = t.threads.(i)
@@ -456,12 +489,12 @@ let eval_cond (th : Thread.t) (cond : Cond.t) =
 ;;
 
 (* One tick of a thread: count down a delay, or execute an instruction. *)
-let tick t (th : Thread.t) ~lines_now ~pin_out =
+let tick (program : Instruction.t array) (th : Thread.t) ~lines_now ~pin_out =
   if th.delay_left > 0
   then th.delay_left <- th.delay_left - 1
   else (
     let cfg = th.config in
-    let instr = t.program.(th.pc) in
+    let instr = program.(th.pc) in
     (* Side-set: the top [sideset_count] bits of the 4-bit delay field are
        values for the side-set pins; the rest is the delay. *)
     let n = cfg.sideset_count in
@@ -470,7 +503,8 @@ let tick t (th : Thread.t) ~lines_now ~pin_out =
     let result =
       match instr.op with
       | Nop -> `Next
-      | Jmp { cond; addr } -> if eval_cond th cond then `Goto addr else `Next
+      | Jmp { cond; addr } ->
+        if eval_cond th cond then `Goto ((th.page * page_size) + addr) else `Next
       | Wait { polarity; pin; timeout } ->
         let level = (lines_now lsr pin) land 1 = 1 in
         if Bool.equal level polarity
@@ -574,7 +608,8 @@ let tick t (th : Thread.t) ~lines_now ~pin_out =
          | Pins ->
            pin_out := write_pins !pin_out ~base:cfg.set_base ~count:cfg.set_count value
          | X -> th.x <- value
-         | Y -> th.y <- value);
+         | Y -> th.y <- value
+         | Page -> th.page <- value % num_pages);
         `Next
     in
     (* Side-set pins are driven on every cycle the instruction executes,
@@ -592,8 +627,10 @@ let tick t (th : Thread.t) ~lines_now ~pin_out =
       th.delay_left <- delay)
 ;;
 
-let exec t (th : Thread.t) ~lines_now ~pin_out =
-  if not th.enabled
+let exec program (th : Thread.t) ~lines_now ~pin_out =
+  let loaded = th.loaded in
+  th.loaded <- false;
+  if (not th.enabled) || loaded
   then Thread.reset th
   else if th.div_count > 0
   then
@@ -602,7 +639,7 @@ let exec t (th : Thread.t) ~lines_now ~pin_out =
     th.div_count <- th.div_count - 1
   else (
     th.div_count <- max 0 (th.config.clkdiv - 1);
-    tick t th ~lines_now ~pin_out)
+    tick program th ~lines_now ~pin_out)
 ;;
 
 (* One clock cycle. Every thread sees the same snapshot of the pins; pin
@@ -637,7 +674,7 @@ let step t ~inputs =
     && (not (Queue.is_empty t.threads.(0).rx_fifo))
     && Queue.length t.threads.(1).tx_fifo < fifo_depth
   in
-  Array.iter t.threads ~f:(fun th -> exec t th ~lines_now ~pin_out);
+  Array.iteri t.threads ~f:(fun n th -> exec t.programs.(n) th ~lines_now ~pin_out);
   if move then Queue.enqueue t.threads.(1).tx_fifo (Queue.dequeue_exn t.threads.(0).rx_fifo);
   t.pin_out <- !pin_out;
   t.sync2 <- t.sync1;
@@ -668,6 +705,24 @@ let pop_rx t ~thread =
 ;;
 
 let set_chain t b = t.chain <- b
+
+(* The host writes one word of a thread's program memory. Like the other
+   host actions it is called after the [step] of the cycle it happens in.
+
+   A write to the memory of an enabled thread is ignored. After a write
+   that lands, the thread is held in its initial state for one more cycle,
+   even if the host enables it at once: the memory answers a cycle after it
+   is asked, and in the cycle of a write it is not asked for the thread's
+   first instruction. Returns whether the write landed. *)
+let write_program t ~thread ~addr instr =
+  let th = t.threads.(thread) in
+  if th.enabled
+  then false
+  else (
+    t.programs.(thread).(addr) <- instr;
+    th.loaded <- true;
+    true)
+;;
 
 (* Threads are enabled when created. While disabled, a thread is held in
    its initial state from the next step on, as the hardware's enable bit

@@ -76,6 +76,8 @@ module tb ();
       .io3(flash_io3)
   );
   wire uart_tx = uio_out[0];
+  // A second UART output, for a thread transmitting beside another protocol.
+  wire uart_tx_p4 = uio_oe[4] ? uio_out[4] : 1'b1;
   reg uart_rx = 1;
   reg spi_sclk = 0;
   reg spi_mosi = 1;

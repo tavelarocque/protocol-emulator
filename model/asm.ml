@@ -76,6 +76,7 @@ let parse_set_dst ~line = function
   | "pins" -> Set_dst.Pins
   | "x" -> X
   | "y" -> Y
+  | "page" -> Page
   | s -> error ~line (sprintf "bad SET destination %S" s)
 ;;
 
@@ -132,7 +133,17 @@ let assemble ?(origin = 0) (source : string) : Instruction.t array =
           (origin : int)
           ~instructions:(List.length body : int)
           (program_size : int)];
-  (* Pass 2: parse each instruction. *)
+  (* Pass 2: parse each instruction.
+
+     A jump reaches one page: [jmp] holds the low 6 bits of its target and
+     the thread's PAGE register supplies the rest. The assembler follows
+     PAGE down the listing: it starts as the page of [origin], which is what
+     the chip sets when the thread starts there, and [set page, n] changes
+     it for the lines below. A jump to a label in any other page is an
+     error. This follows the listing, not the control flow, so a program
+     that reaches a line with PAGE set some other way must say so with its
+     own [set page]. *)
+  let page = ref (origin / page_size) in
   List.map body ~f:(fun (line, text) ->
     let num tok =
       match Int.of_string_opt tok with
@@ -140,9 +151,23 @@ let assemble ?(origin = 0) (source : string) : Instruction.t array =
       | None -> error ~line (sprintf "expected a number, got %S" tok)
     in
     let target tok =
-      match Hashtbl.find labels tok with
-      | Some a -> a
-      | None -> num tok
+      let a =
+        match Hashtbl.find labels tok with
+        | Some a -> a
+        | None -> (!page * page_size) + num tok
+      in
+      if a / page_size <> !page
+      then
+        error
+          ~line
+          (sprintf
+             "jump to %S at %d, in page %d, but PAGE is %d here: put [set page, %d] first"
+             tok
+             a
+             (a / page_size)
+             !page
+             (a / page_size));
+      a % page_size
     in
     let polarity = function
       | "0" -> false
@@ -188,6 +213,9 @@ let assemble ?(origin = 0) (source : string) : Instruction.t array =
       | [ "set"; d; v ] -> Set { dst = parse_set_dst ~line d; value = num v }
       | _ -> error ~line (sprintf "cannot parse %S" text)
     in
+    (match op with
+     | Set { dst = Page; value } -> page := value % num_pages
+     | _ -> ());
     let instr = { Instruction.op; delay } in
     (* Encoding range-checks every field. *)
     (try ignore (Instruction.encode instr : int) with

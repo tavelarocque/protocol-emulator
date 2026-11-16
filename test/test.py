@@ -806,6 +806,82 @@ def marker(address, read):
     return ((address << 1) | int(read)) << 8
 
 
+LOAD = 0x50  # where program writes go: page [1:0], thread 0 [4], thread 1 [5]
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_separate_programs(dut):
+    """Each thread has its own program memory. Thread 0 runs the I2C target
+    (63 words) for cocotbext-i2c's controller while thread 1 runs the UART
+    transmitter (15 words) into cocotbext-uart's receiver: 78 words, both
+    starting at address 0 of their own memory. Then thread 1 is stopped and
+    reloaded with the echo program while thread 0 goes on answering."""
+    await reset(dut)
+    dut.dev_mode.value = 1
+    master = I2cMaster(
+        sda=dut.i2c_sda, sda_o=dut.i2c_sda_dev, scl=dut.i2c_scl, scl_o=dut.i2c_scl_dev,
+        speed=400e3)
+    divisor = 16
+    sink = UartSink(dut.uart_tx_p4, baud=10_000_000 // divisor, bits=8)
+    target, uart = firmware("i2c_target"), firmware("uart_tx")
+    assert len(target) + len(uart) > 64, "the point: these do not fit one 64-word memory"
+    await write(dut, CTRL, 0)
+    await write(dut, LOAD, 0x10)  # thread 0's memory only
+    for a, w in enumerate(target):
+        await write(dut, a, w)
+    await write(dut, LOAD, 0x20)  # thread 1's memory only
+    for a, w in enumerate(uart):
+        await write(dut, a, w)
+    address = 0x3C
+    await write(dut, OUT_CFG, 0x10)
+    await write(dut, SET_CFG, 0x10)
+    await write(dut, IN_BASE, 0)
+    await write(dut, SIDESET, 0x11)
+    await write(dut, THRESHOLD, 8)
+    await write(dut, TIMEOUT, 0)
+    await write(dut, TIMEOUT_VECTOR, I2C_TARGET_REST)
+    await write(dut, SHIFT, 0b10)
+    await write(dut, OUT_CFG + BANK1, 0x14)  # the UART on P4
+    await write(dut, SET_CFG + BANK1, 0x14)
+    await write(dut, PIN_MODES, 0b01_00_00_10_10)  # P0, P1 open-drain; P4 push-pull
+    await write(dut, CTRL, 0b11)
+    await push(dut, address)
+    await push(dut, divisor - 4, bank=BANK1)
+
+    # Both at once: a write over I2C while the UART sends.
+    sent = b"v2"
+    register, data = 0x10, [0xDE, 0xAD]
+    async def i2c_write():
+        await master.write(address, [register] + data)
+        await master.send_stop()
+
+    writer = cocotb.start_soon(i2c_write())
+    for b in sent:
+        await push(dut, b, bank=BANK1)
+    got = [await pop(dut) for _ in range(4)]
+    await writer
+    assert got == [marker(address, False), register] + data, f"I2C RX {[hex(w) for w in got]}"
+    received = bytearray()
+    while len(received) < len(sent):
+        received += await sink.read()
+    assert bytes(received) == sent, f"UART got {bytes(received)!r}"
+
+    # Stop thread 1 and give it another program. Thread 0 keeps its own, and
+    # a write aimed at its memory while it runs changes nothing.
+    await write(dut, CTRL, 0b01)
+    await write(dut, LOAD, 0x30)  # both: thread 0 is running, so only thread 1's lands
+    for a, w in enumerate(firmware("echo")):
+        await write(dut, a, w)
+    await write(dut, CTRL, 0b11)
+    for v in [0x1234, 0xBEEF]:
+        await push(dut, v, bank=BANK1)
+        assert await pop(dut, bank=BANK1) == v, "thread 1 is not running the echo program"
+    writer = cocotb.start_soon(i2c_write())
+    got = [await pop(dut) for _ in range(4)]
+    await writer
+    assert got == [marker(address, False), register] + data, "thread 0's program was overwritten"
+
+
 @cocotb.test(timeout_time=60, timeout_unit="ms")
 async def test_thirdparty_i2c_controller(dut):
     """The roles reversed: cocotbext-i2c's I2cMaster is the controller and the

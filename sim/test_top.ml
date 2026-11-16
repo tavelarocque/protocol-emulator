@@ -139,10 +139,13 @@ let%test_unit "thread 1's bank resets like thread 0's, and the unused slots read
   [%test_result: int] (read h (t1 Top.Addr.set_cfg)) ~expect:0x10;
   [%test_result: int] (read h (t1 Top.Addr.threshold)) ~expect:8;
   [%test_result: int] (status ~thread:1 h) ~expect:0;
-  write h (t1 Top.Addr.ctrl) 0xFFFF;
+  (* Thread 1's bank has LOAD where thread 0's has CTRL. The other two
+     slots that hold globals in thread 0's bank are unused here. *)
+  [%test_result: int] (read h Top.Addr.load) ~expect:0x30;
   write h (t1 Top.Addr.pin_modes) 0xFFFF;
-  [%test_result: int] (read h (t1 Top.Addr.ctrl)) ~expect:0;
+  write h (t1 Top.Addr.sync_bypass) 0xFFFF;
   [%test_result: int] (read h (t1 Top.Addr.pin_modes)) ~expect:0;
+  [%test_result: int] (read h (t1 Top.Addr.sync_bypass)) ~expect:0;
   [%test_result: int] (read h Top.Addr.ctrl) ~expect:0 ~message:"global CTRL untouched";
   [%test_result: int] (read h Top.Addr.pin_modes) ~expect:0
 ;;
@@ -150,12 +153,12 @@ let%test_unit "thread 1's bank resets like thread 0's, and the unused slots read
 let%test_unit "configuration registers read back what was written" =
   let per_thread =
     Top.Addr.
-      [ start, 0x3F
+      [ start, 0xFF
       ; out_cfg, 0xFF
       ; set_cfg, 0xFF
       ; in_base, 0x7
       ; threshold, 0x1F
-      ; timeout_vector, 0x3F
+      ; timeout_vector, 0xFF
       ; timeout, 0xFFFF
       ; sideset, 0x3F
       ; clkdiv, 0xFFFF
@@ -163,7 +166,7 @@ let%test_unit "configuration registers read back what was written" =
       ]
   in
   let registers =
-    Top.Addr.[ ctrl, 0x7; pin_modes, 0xFFFF; sync_bypass, 0xFF ]
+    Top.Addr.[ ctrl, 0x7; pin_modes, 0xFFFF; sync_bypass, 0xFF; load, 0x3F ]
     @ per_thread
     @ List.map per_thread ~f:(fun (a, m) -> Top.Addr.for_thread 1 a, m)
   in
@@ -237,7 +240,8 @@ let%test_unit "UART firmware loaded over SPI: bytes on pin 0 decode with a real 
 (* --- Planted host-port bugs --------------------------------------------- *)
 
 (* Each bug in [Top.Mutation] must be caught through the pins alone, by the
-   register read-back and the echo firmware. *)
+   register read-back, the echo firmware, or the echo firmware with the two
+   memories loaded separately. *)
 let%expect_test "planted host-port bugs: each is caught through the pins" =
   List.iter Top.Mutation.all ~f:(fun mutation ->
     let h = create ~mutation ~half:4 () in
@@ -253,10 +257,26 @@ let%expect_test "planted host-port bugs: each is caught through the pins" =
     List.iter words ~f:(write h Top.Addr.tx_fifo);
     wait h 200;
     let echo_ok = List.for_all words ~f:(fun w -> read h Top.Addr.rx_fifo = w) in
+    (* Each thread's memory on its own: echo into thread 0's only, then
+       three words of "jmp 0" into thread 1's only. Thread 0 must still
+       echo. *)
+    let h = create ~mutation ~half:4 () in
+    write h Top.Addr.load 0x10;
+    load_firmware h Firmware.echo;
+    write h Top.Addr.load 0x20;
+    load_image h (Array.create ~len:3 (Isa.Instruction.decode 0));
+    write h Top.Addr.ctrl 1;
+    List.iter words ~f:(write h Top.Addr.tx_fifo);
+    wait h 200;
+    let separate_ok = List.for_all words ~f:(fun w -> read h Top.Addr.rx_fifo = w) in
     printf
-      "%-20s read-back %s, echo %s\n"
+      "%-20s read-back %s, echo %s, separate memories %s\n"
       (Sexp.to_string (Top.Mutation.sexp_of_t mutation))
       (if readback_ok then "MISSED" else "caught")
-      (if echo_ok then "MISSED" else "caught"));
-  [%expect {| Miso_shifts_early    read-back caught, echo caught |}]
+      (if echo_ok then "MISSED" else "caught")
+      (if separate_ok then "MISSED" else "caught"));
+  [%expect {|
+    Miso_shifts_early    read-back caught, echo caught, separate memories caught
+    Load_writes_both     read-back MISSED, echo MISSED, separate memories caught
+    |}]
 ;;

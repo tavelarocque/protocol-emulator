@@ -38,6 +38,7 @@ The USB host needs the port driven by PIO instead (see UsbHost)::
 CTRL = 0x40
 PIN_MODES = 0x47
 SYNC_BYPASS = 0x4E
+LOAD = 0x50  # page [1:0]; bit 4 = thread 0's memory, bit 5 = thread 1's
 START = 0x41
 OUT_CFG = 0x42
 SET_CFG = 0x43
@@ -53,7 +54,8 @@ CLKDIV = 0x4D
 SHIFT = 0x4F
 BANK = 0x10  # thread 1's registers are thread 0's plus this
 FIFO_DEPTH = 4
-PROGRAM_WORDS = 64
+PROGRAM_WORDS = 256  # in each thread's memory
+PAGE_WORDS = 64  # a jump reaches one page; LOAD picks the page a write goes to
 
 INPUT, PUSH_PULL, OPEN_DRAIN = 0, 1, 2
 
@@ -250,12 +252,24 @@ class Chip:
         """Disable both threads (they return to their start state)."""
         self.write(CTRL, 0)
 
-    def load(self, words, origin=0):
-        """Write a firmware image into program memory at [origin]."""
-        if origin + len(words) > PROGRAM_WORDS:
+    def load(self, words, origin=0, threads=(0, 1)):
+        """Write a firmware image into program memory at [origin].
+
+        Each thread has its own memory of PROGRAM_WORDS words; [threads]
+        says which get the image (both, unless told otherwise, which is two
+        threads sharing one program). The chip ignores a write to the
+        memory of an enabled thread, so stop a thread before loading it."""
+        if origin < 0 or origin + len(words) > PROGRAM_WORDS:
             raise ValueError("image does not fit in program memory")
+        select = sum(0x10 << t for t in threads)
+        page = None
         for i, w in enumerate(words):
-            self.write(origin + i, w)
+            a = origin + i
+            if a // PAGE_WORDS != page:
+                page = a // PAGE_WORDS
+                self.write(LOAD, select | page)
+            self.write(a % PAGE_WORDS, w)
+        self.write(LOAD, 0x30)  # as after reset: both memories, page 0
 
     def configure(self, thread=0, start=0, out_base=0, out_count=1, set_base=0,
                   set_count=1, in_base=0, threshold=8, timeout_vector=0, timeout=0,
@@ -304,7 +318,7 @@ class Chip:
 
     def status(self, thread=0):
         s = self.read(STATUS + BANK * thread)
-        return {"pc": (s >> 8) & 0x3F, "enabled": bool(s & 0x80),
+        return {"pc": (s >> 8) & 0xFF, "enabled": bool(s & 0x80),
                 "rx_level": (s >> 4) & 7, "tx_level": s & 7}
 
     def push(self, value, thread=0):

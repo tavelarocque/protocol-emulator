@@ -107,7 +107,8 @@ module Make (C : Comb.S) = struct
         ; y = mux2 (cond ==:. 4) (s.y -:. 1) s.y
         }
       in
-      finish ~st ~pc:(mux2 taken (select ins 5 0) (s.pc +:. 1)) ()
+      (* "A jump goes to PAGE x 64 + addr." *)
+      finish ~st ~pc:(mux2 taken (concat_msb [ s.page; select ins 5 0 ]) (s.pc +:. 1)) ()
     in
     (* --- WAIT --- *)
     let r_wait =
@@ -242,6 +243,8 @@ module Make (C : Comb.S) = struct
                 s.pin_out
           ; x = mux2 (dst ==:. 1) v s.x
           ; y = mux2 (dst ==:. 2) v s.y
+          ; (* "set page, n": n modulo the number of pages *)
+            page = mux2 (dst ==:. 3) (select ins (P.page_bits - 1) 0) s.page
           }
         ()
     in
@@ -272,6 +275,8 @@ module Make (C : Comb.S) = struct
         st =
           { s with
             pc = i.start
+          ; (* "PAGE starts as the page START is in" *)
+            page = select i.start (P.pc_bits - 1) (P.pc_bits - P.page_bits)
           ; x = zero 16
           ; y = zero 16
           ; isr = zero 16
