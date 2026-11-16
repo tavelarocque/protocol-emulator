@@ -157,7 +157,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
   let config ?(init = 0) name width =
     Variable.reg (spec_to (of_int ~width init)) ~width |> named name
   in
-  let ctrl = config "cfg_ctrl" 3 in
+  let ctrl = config "cfg_ctrl" 4 in
   let pin_modes = config "cfg_pin_modes" 16 in
   let sync_bypass = config "cfg_sync_bypass" 8 in
   (* One bank of per-thread registers. Returns its writes as (address,
@@ -165,12 +165,12 @@ let create ?mutation (i : _ I.t) : _ O.t =
   let bank n =
     let a = Addr.for_thread n in
     let config ?init name width = config ?init (sprintf "cfg_t%d_%s" n name) width in
-    let start = config "start" 6 in
+    let start = config "start" 7 in
     let out_cfg = config ~init:0x10 "out_cfg" 8 in
     let set_cfg = config ~init:0x10 "set_cfg" 8 in
     let in_base = config "in_base" 3 in
     let threshold = config ~init:8 "threshold" 5 in
-    let timeout_vector = config "timeout_vector" 6 in
+    let timeout_vector = config "timeout_vector" 7 in
     let timeout = config "timeout" 16 in
     let sideset = config "sideset" 6 in
     let clkdiv = config "clkdiv" 16 in
@@ -226,7 +226,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
       { Pe_core.I.clock = i.clock
       ; clear = i.clear
       ; prog_we = data_done &: is_write &: (addr <:. Addr.program_words)
-      ; prog_addr = select addr 5 0
+      ; prog_addr = select ctrl.value 3 3 @: select addr 5 0  (* spike: CTRL[3] is the page *)
       ; prog_data = data_now
       ; pin_modes = pin_modes.value
       ; pins_in = i.uio_in
@@ -250,7 +250,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
     List.iter writes ~f:(fun (addr, (r : Variable.t), _) -> table.(addr) <- uresize r.value 16);
     table.(a Addr.rx_fifo) <- mux2 (rx_nonempty n) t.rx_data (zero 16);
     table.(a Addr.status)
-    <- concat_msb [ zero 2; t.pc; bit ctrl.value n; t.rx_level; gnd; t.tx_level ]);
+    <- uresize (concat_msb [ t.pc; t.rx_level; t.tx_level ]) 16 ^: uresize (bit ctrl.value n) 16);
   (* The last entry is zero, and mux repeats it for higher addresses. *)
   let read_value = mux read_addr (Array.to_list table) in
   List.iteri banks ~f:(fun n (_, rx_pop, _) ->
@@ -275,7 +275,7 @@ let create ?mutation (i : _ I.t) : _ O.t =
              (fall &: (bit_count.value >=:. if is Miso_shifts_early then 8 else 9))
              [ miso_shift <-- sll miso_shift.value 1 ]
          ]
-     ; when_ (write_to Addr.ctrl) [ ctrl <-- select data_now 2 0 ]
+     ; when_ (write_to Addr.ctrl) [ ctrl <-- select data_now 3 0 ]
      ; when_ (write_to Addr.pin_modes) [ pin_modes <-- data_now ]
      ; when_ (write_to Addr.sync_bypass) [ sync_bypass <-- select data_now 7 0 ]
      ]

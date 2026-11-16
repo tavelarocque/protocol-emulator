@@ -19,7 +19,7 @@ open! Core
 open! Hardcaml
 open! Signal
 
-let program_size = 64
+let program_size = 128
 let num_pins = 8
 let num_threads = 2
 
@@ -28,14 +28,14 @@ let num_threads = 2
 module Thread_in = struct
   type 'a t =
     { enable : 'a (* low: thread held at its initial state *)
-    ; start : 'a [@bits 6]
+    ; start : 'a [@bits 7]
     ; out_base : 'a [@bits 3]
     ; out_count : 'a [@bits 4]
     ; set_base : 'a [@bits 3]
     ; set_count : 'a [@bits 4]
     ; in_base : 'a [@bits 3]
     ; threshold : 'a [@bits 5]
-    ; timeout_vector : 'a [@bits 6]
+    ; timeout_vector : 'a [@bits 7]
     ; timeout : 'a [@bits 16] (* max cycles a [wait ... timeout] stalls *)
     ; sideset_base : 'a [@bits 3]
     ; sideset_count : 'a [@bits 2] (* top bits of the delay field that are side-set *)
@@ -56,7 +56,7 @@ module Thread_out = struct
     { rx_data : 'a [@bits 16] (* head of the RX FIFO *)
     ; tx_level : 'a [@bits 3]
     ; rx_level : 'a [@bits 3]
-    ; pc : 'a [@bits 6]
+    ; pc : 'a [@bits 7]
     ; x : 'a [@bits 16]
     ; y : 'a [@bits 16]
     ; isr : 'a [@bits 16]
@@ -76,7 +76,7 @@ module I = struct
     { clock : 'a
     ; clear : 'a
     ; prog_we : 'a
-    ; prog_addr : 'a [@bits 6]
+    ; prog_addr : 'a [@bits 7]
     ; prog_data : 'a [@bits 16]
     ; pin_modes : 'a [@bits 16] (* 2 bits per pin: 0 input, 1 push-pull, 2 open-drain *)
     ; pins_in : 'a [@bits 8] (* straight from the pads, asynchronous *)
@@ -176,7 +176,7 @@ let read_pins ~lines ~base ~count =
    register itself for thread 0, thread 0's result for thread 1. *)
 module Thread_state = struct
   type 'a t =
-    { pc : 'a [@bits 6]
+    { pc : 'a [@bits 7]
     ; x : 'a [@bits 16]
     ; y : 'a [@bits 16]
     ; isr : 'a [@bits 16]
@@ -200,14 +200,14 @@ module Step_in = struct
     ; tx_empty : 'a
     ; tx_head : 'a [@bits 16]
     ; rx_full : 'a
-    ; start : 'a [@bits 6]
+    ; start : 'a [@bits 7]
     ; out_base : 'a [@bits 3]
     ; out_count : 'a [@bits 4]
     ; set_base : 'a [@bits 3]
     ; set_count : 'a [@bits 4]
     ; in_base : 'a [@bits 3]
     ; threshold : 'a [@bits 5]
-    ; timeout_vector : 'a [@bits 6]
+    ; timeout_vector : 'a [@bits 7]
     ; timeout : 'a [@bits 16]
     ; sideset_base : 'a [@bits 3]
     ; sideset_count : 'a [@bits 2]
@@ -305,7 +305,7 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
     |: (is_op 4 &: ~:is_pull &: i.rx_full)
   in
   let goto_ = (is_op 0 &: cond_true) |: (is_op 1 &: ~:wait_ok &: wait_expired) in
-  let target = mux2 (is_op 0) (select instr 5 0) i.timeout_vector in
+  let target = mux2 (is_op 0) (select s.pc 6 6 @: select instr 5 0) i.timeout_vector in
   let next_pc = mux2 goto_ target (s.pc +:. 1) in
   let advance = executing &: ~:stall in
   let pull = executing &: is_op 4 &: is_pull &: ~:(i.tx_empty) in
