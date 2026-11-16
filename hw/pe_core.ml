@@ -19,7 +19,7 @@ open! Core
 open! Hardcaml
 open! Signal
 
-let program_size = 64
+let program_size = 256
 let num_pins = 8
 let num_threads = 2
 
@@ -28,14 +28,14 @@ let num_threads = 2
 module Thread_in = struct
   type 'a t =
     { enable : 'a (* low: thread held at its initial state *)
-    ; start : 'a [@bits 6]
+    ; start : 'a [@bits 8]
     ; out_base : 'a [@bits 3]
     ; out_count : 'a [@bits 4]
     ; set_base : 'a [@bits 3]
     ; set_count : 'a [@bits 4]
     ; in_base : 'a [@bits 3]
     ; threshold : 'a [@bits 5]
-    ; timeout_vector : 'a [@bits 6]
+    ; timeout_vector : 'a [@bits 8]
     ; timeout : 'a [@bits 16] (* max cycles a [wait ... timeout] stalls *)
     ; sideset_base : 'a [@bits 3]
     ; sideset_count : 'a [@bits 2] (* top bits of the delay field that are side-set *)
@@ -56,7 +56,7 @@ module Thread_out = struct
     { rx_data : 'a [@bits 16] (* head of the RX FIFO *)
     ; tx_level : 'a [@bits 3]
     ; rx_level : 'a [@bits 3]
-    ; pc : 'a [@bits 6]
+    ; pc : 'a [@bits 8]
     ; x : 'a [@bits 16]
     ; y : 'a [@bits 16]
     ; isr : 'a [@bits 16]
@@ -76,7 +76,7 @@ module I = struct
     { clock : 'a
     ; clear : 'a
     ; prog_we : 'a
-    ; prog_addr : 'a [@bits 6]
+    ; prog_addr : 'a [@bits 8]
     ; prog_data : 'a [@bits 16]
     ; pin_modes : 'a [@bits 16] (* 2 bits per pin: 0 input, 1 push-pull, 2 open-drain *)
     ; pins_in : 'a [@bits 8] (* straight from the pads, asynchronous *)
@@ -176,7 +176,7 @@ let read_pins ~lines ~base ~count =
    register itself for thread 0, thread 0's result for thread 1. *)
 module Thread_state = struct
   type 'a t =
-    { pc : 'a [@bits 6]
+    { pc : 'a [@bits 8]
     ; x : 'a [@bits 16]
     ; y : 'a [@bits 16]
     ; isr : 'a [@bits 16]
@@ -200,14 +200,14 @@ module Step_in = struct
     ; tx_empty : 'a
     ; tx_head : 'a [@bits 16]
     ; rx_full : 'a
-    ; start : 'a [@bits 6]
+    ; start : 'a [@bits 8]
     ; out_base : 'a [@bits 3]
     ; out_count : 'a [@bits 4]
     ; set_base : 'a [@bits 3]
     ; set_count : 'a [@bits 4]
     ; in_base : 'a [@bits 3]
     ; threshold : 'a [@bits 5]
-    ; timeout_vector : 'a [@bits 6]
+    ; timeout_vector : 'a [@bits 8]
     ; timeout : 'a [@bits 16]
     ; sideset_base : 'a [@bits 3]
     ; sideset_count : 'a [@bits 2]
@@ -305,7 +305,7 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
     |: (is_op 4 &: ~:is_pull &: i.rx_full)
   in
   let goto_ = (is_op 0 &: cond_true) |: (is_op 1 &: ~:wait_ok &: wait_expired) in
-  let target = mux2 (is_op 0) (select instr 5 0) i.timeout_vector in
+  let target = mux2 (is_op 0) (select s.pc 7 6 @: select instr 5 0) i.timeout_vector in
   let next_pc = mux2 goto_ target (s.pc +:. 1) in
   let advance = executing &: ~:stall in
   let pull = executing &: is_op 4 &: is_pull &: ~:(i.tx_empty) in
@@ -475,12 +475,12 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
 let create ?mutation ?datapath (i : _ I.t) : _ O.t =
   let is m = Option.value_map mutation ~default:false ~f:(Mutation.equal m) in
   let spec = Reg_spec.create ~clock:i.clock ~clear:i.clear () in
-  (* --- Program memory: 64 x 16 flops, written by the host, shared. --- *)
-  let program =
-    List.init program_size ~f:(fun a ->
-      reg spec ~enable:(i.prog_we &: (i.prog_addr ==:. a)) i.prog_data
-      -- sprintf "prog_%d" a)
-  in
+  (* --- SPIKE. Program memory: one IHP 256 x 16 SRAM macro per thread,
+     both written by the host with the same word, each read by its own
+     thread. The macro registers its address, so it is given the pc the
+     thread will have next cycle, and its output is then the instruction at
+     the thread's pc: one instruction per clock, as with the flop memory.
+     A host write takes the address for that cycle. --- *)
   (* --- The shared pin register. Resets to all ones: idle-high for UART,
      released for open-drain. --- *)
   let pin_next = wire num_pins in
@@ -520,9 +520,35 @@ let create ?mutation ?datapath (i : _ I.t) : _ O.t =
   in
   let threads = List.init num_threads ~f:(fun n -> n, regs n) in
   let pcs = List.map threads ~f:(fun (_, (_, q)) -> q.pc) in
+  ignore (pcs : Signal.t list);
   let fetch n =
-    let pc = List.nth_exn pcs (if n = 1 && is Fetch_port_crossed then 0 else n) in
-    mux pc program
+    let d, _ = List.Assoc.find_exn threads ~equal:Int.equal n in
+    let inst =
+      Instantiation.create
+        ()
+        ~instance:(sprintf "sram%d" n)
+        ~name:"RM_IHPSG13_1P_256x16_c2_bm_bist"
+        ~inputs:
+          [ "A_CLK", i.clock
+          ; "A_MEN", vdd
+          ; "A_WEN", i.prog_we
+          ; "A_REN", ~:(i.prog_we)
+          ; "A_ADDR", mux2 i.prog_we i.prog_addr d.pc
+          ; "A_DIN", i.prog_data
+          ; "A_DLY", vdd
+          ; "A_BM", ones 16
+          ; "A_BIST_CLK", gnd
+          ; "A_BIST_EN", gnd
+          ; "A_BIST_MEN", gnd
+          ; "A_BIST_WEN", gnd
+          ; "A_BIST_REN", gnd
+          ; "A_BIST_ADDR", zero 8
+          ; "A_BIST_DIN", zero 16
+          ; "A_BIST_BM", zero 16
+          ]
+        ~outputs:[ "A_DOUT", 16 ]
+    in
+    Map.find_exn inst "A_DOUT"
   in
   (* --- Clock dividers: the thread ticks when its counter is 0, then
      reloads it with [clkdiv - 1]. Held at 0 while disabled, so a thread's
