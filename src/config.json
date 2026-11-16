@@ -19,6 +19,15 @@
   "//": "the default; DELAY 4 buffered and duplicated logic into 29% more cells.",
   "SYNTH_STRATEGY": "AREA 0",
 
+  "//": "EXPERIMENT (slew-corners branch): the slow-corner slew warning. By default the",
+  "//": "repair steps see only the typical corner; show them all three, cap fan-out at 8,",
+  "//": "and repair again after global routing with a 30% margin.",
+  "PNR_CORNERS": ["nom_typ_1p20V_25C", "nom_slow_1p08V_125C", "nom_fast_1p32V_m40C"],
+  "MAX_FANOUT_CONSTRAINT": 8,
+  "RUN_POST_GRT_DESIGN_REPAIR": 1,
+  "DESIGN_REPAIR_MAX_SLEW_PCT": 30,
+  "GRT_DESIGN_REPAIR_MAX_SLEW_PCT": 30,
+
   "//": "CLOCK_PERIOD - Increase this in case you are getting setup time violations.",
   "//": "The value is in nanoseconds, so 20ns == 50MHz.",
   "//": "This design: 25 ns (40 MHz), not 20. It runs at 10 to 12 MHz; 20 ns had",
