@@ -6,13 +6,21 @@
 Two Yosys proofs, which together cover every run from reset:
 
   base.ys   from any state, after one clock with rst_n low, every paired
-            signal (all 24 output pins and every flip-flop) agrees, for any
-            inputs;
+            signal (all 24 output pins, every flip-flop and every input
+            of each memory) agrees, for any inputs;
   step.ys   if every paired signal agrees in one cycle, it agrees in the
             next, for any state and any inputs.
 
+The two SRAM macros are not part of either proof: each is replaced on both
+sides by sram_cut.v, which makes its output an arbitrary word, the same
+for the netlist and the RTL, and requires everything driven into it to be
+proved equal.
+
 So from the first cycle after a reset, the netlist and the RTL drive the
-same value on every output pin, forever, whatever the inputs.
+same value on every output pin and into every pin of each memory, forever,
+whatever the inputs and whatever the memories hold. The macro itself is
+IHP's layout and is not checked here; formal/sram_equiv.py covers the model
+of it that the other proofs and tests use.
 
 With --mutants, it also plants bugs in the netlist and requires each to
 break the proof, so the proof is shown to be able to fail.
@@ -38,6 +46,26 @@ SRC = os.path.join(HERE, "..", "src")
 # --- Planted netlist bugs ----------------------------------------------------
 # Each returns the mutated netlist. [half] is the proof that must fail.
 
+FLOP = re.compile(r"sg13cmos5l_dfrbpq_1\s+\S+\s*\((.*?)\);", re.S)
+
+
+def pin(name):
+    """The net on pin [name] of an instance: group 1."""
+    return re.compile(r"\." + name + r"\(\s*(.*?)\s*\)", re.S)
+
+
+def flops(g):
+    """Every flip-flop: (offset of its pin list, pin list)."""
+    return [(m.start(1), m.group(1)) for m in FLOP.finditer(g)]
+
+
+def tie_low(g, net):
+    """The tie-high cell driving [net] becomes a tie-low."""
+    t = re.search(r"sg13cmos5l_tiehi(\s+\S+\s*\(\s*)\.L_HI(\(\s*" + re.escape(net)
+                  + r"\s*\)\s*\);)", g)
+    return g[:t.start()] + "sg13cmos5l_tielo" + t.group(1) + ".L_LO" + t.group(2) + g[t.end():]
+
+
 def gate_function_changed(g):
     """A logic gate computes the wrong function: the first NAND becomes a NOR
     (same pins A, B, Y)."""
@@ -47,35 +75,42 @@ def gate_function_changed(g):
 
 def flop_stuck_in_reset(g):
     """A flip-flop's asynchronous reset is tied active, so it holds 0."""
-    t = re.search(r"sg13cmos5l_tiehi (\S+) \(\.L_HI\((\S+)\)\);", g)
-    return (g[:t.start()] + "sg13cmos5l_tielo %s (.L_LO(%s));" % t.groups()
-            + g[t.end():])
+    _, pins = flops(g)[0]
+    return tie_low(g, pin("RESET_B").search(pins).group(1))
 
 
 def flop_inputs_crossed(g):
     """Two flip-flops' D inputs swapped (a routing mistake)."""
-    ds = list(re.finditer(
-        r"sg13cmos5l_dfrbpq_1 \S+ \(\.RESET_B\(\S+\),\s*\.D\((\S+?)\)", g))
-    a, b = ds[100], ds[900]
-    return (g[:a.start(1)] + b.group(1) + g[a.end(1):b.start(1)] + a.group(1)
-            + g[b.end(1):])
+    fs = flops(g)
+    (ao, ap), (bo, bp) = fs[len(fs) // 8], fs[len(fs) * 7 // 8]
+    a, b = pin("D").search(ap), pin("D").search(bp)
+    return (g[:ao + a.start(1)] + b.group(1) + g[ao + a.end(1):bo + b.start(1)]
+            + a.group(1) + g[bo + b.end(1):])
 
 
 def wrong_reset_value(g):
     """The host port's chip-select synchroniser, which resets to 1 (idle),
     held in reset at 0 instead: wrong from the first cycle."""
-    m = re.search(r"sg13cmos5l_dfrbpq_1 \S+ \(\.RESET_B\((\S+)\),\s*\.D\(\S+\),"
-                  r"\s*\.Q\(\\u_protocol_emulator\.host_cs_n_s1 \)", g)
-    net = m.group(1)
-    t = re.search(r"sg13cmos5l_tiehi (\S+) \(\.L_HI\(" + re.escape(net) + r"\)\);", g)
-    return (g[:t.start()] + "sg13cmos5l_tielo %s (.L_LO(%s));" % (t.group(1), net)
-            + g[t.end():])
+    for _, pins in flops(g):
+        if pin("Q").search(pins).group(1) == "\\u_protocol_emulator.host_cs_n_s1":
+            return tie_low(g, pin("RESET_B").search(pins).group(1))
+    raise ValueError("host_cs_n_s1 flip-flop not found")
+
+
+def memory_address_crossed(g):
+    """Two address bits of a program memory swapped on their way into the
+    SRAM macro: the thread would fetch from the wrong word."""
+    m = re.search(r"RM_IHPSG13_1P_256x16_c2_bm_bist\s.*?\.A_ADDR\(\s*\{(.*?)\}\s*\)", g, re.S)
+    bits = m.group(1).split(",")
+    bits[0], bits[1] = bits[1], bits[0]
+    return g[:m.start(1)] + ",".join(bits) + g[m.end(1):]
 
 
 MUTANTS = [
     ("a gate's function changed", gate_function_changed, "step"),
     ("a flip-flop stuck in reset", flop_stuck_in_reset, "step"),
     ("two flip-flops' inputs crossed", flop_inputs_crossed, "step"),
+    ("a memory's address bits crossed", memory_address_crossed, "step"),
     ("a wrong reset value", wrong_reset_value, "base"),
 ]
 
@@ -86,7 +121,7 @@ def run(yosys, netlist_text, lib, half, workdir):
     os.makedirs(workdir)
     for f in ("project.v", "protocol_emulator.v"):
         shutil.copy(os.path.join(SRC, f), workdir)
-    for f in ("setup.ys", "step.ys", "base.ys"):
+    for f in ("setup.ys", "step.ys", "base.ys", "sram_cut.v"):
         shutil.copy(os.path.join(HERE, f), workdir)
     shutil.copy(lib, os.path.join(workdir, "cells.lib"))
     with open(os.path.join(workdir, "gate.v"), "w") as f:

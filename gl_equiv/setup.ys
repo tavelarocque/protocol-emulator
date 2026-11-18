@@ -1,21 +1,29 @@
 # Shared by step.ys and base.ys. Run from a directory holding project.v and
-# protocol_emulator.v (the RTL, from src/), gate.v (the post-layout netlist)
-# and cells.lib (the PDK's standard-cell Liberty file).
+# protocol_emulator.v (the RTL, from src/), sram_cut.v, gate.v (the
+# post-layout netlist) and cells.lib (the PDK's standard-cell Liberty file).
+#
+# The SRAM macros are replaced, on both sides, by sram_cut.v: each macro's
+# output becomes an input of the whole design, the same one for the netlist
+# and the RTL, and everything driven into a macro is a named signal that
+# must be proved equal. See sram_cut.v for what that does and does not show.
 
 # Gold: the RTL. splitnets names every register bit "name[i]", the way the
 # netlist names each flip-flop's output, so the two can be paired by name.
-read_verilog project.v protocol_emulator.v
+read_verilog sram_cut.v project.v protocol_emulator.v
 hierarchy -top tt_um_tavelarocque_protocol_emulator
 proc; flatten; opt_clean; splitnets
+expose -input w:*.cut[*]
 rename tt_um_tavelarocque_protocol_emulator gold
 design -stash gold
 
 # Gate: the netlist, with each cell's logic taken from its Liberty function.
 # Only fill, decap and antenna cells have no function, and none has an output.
 read_liberty -ignore_miss_func cells.lib
-read_verilog gate.v
+read_verilog sram_cut.v gate.v
 hierarchy -top tt_um_tavelarocque_protocol_emulator
 flatten
+splitnets w:*.cut w:*.seen
+expose -input w:*.cut[*]
 # Every flip-flop's asynchronous reset is tied inactive (a tie-high cell);
 # reset is the synchronous clear in the logic, as in the RTL.
 opt_expr; opt_clean; opt_dff; opt_clean
