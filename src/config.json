@@ -23,7 +23,7 @@
   "//": "The value is in nanoseconds, so 20ns == 50MHz.",
   "//": "This design: 25 ns (40 MHz), not 20. It runs at 10 to 12 MHz; 20 ns had",
   "//": "only about 1 ns of slack at the slow corner, and once failed it.",
-  "CLOCK_PERIOD": 25,
+  "CLOCK_PERIOD": 20,
 
   "//": "Hold slack margin - Increase them in case you are getting hold violations.",
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
