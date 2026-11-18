@@ -1,7 +1,30 @@
 # Base case: from any state, after one clock with rst_n low, every paired
 # signal agrees, for every input.
+#
+# setup.ys leaves one module holding both circuits, joined by an $equiv cell
+# at every paired signal. Here it becomes two machines with their own state
+# and the same inputs: one where each $equiv passes on the RTL's value, one
+# where it passes on the netlist's. Every paired signal is made an output,
+# and the two machines' outputs must agree after the reset clock.
+#
+# (equiv_miter builds the same thing, but walks the circuit by recursion,
+# and on the v2 netlist that ran out of stack in the WebAssembly build of
+# Yosys and ended the run without a verdict.)
 script setup.ys
-equiv_miter -trigger miter equiv
+select -set paired t:$equiv %co1:+[Y] w:* %i
+expose @paired
+design -save both
+
+techmap -map view_gold.v
+rename equiv gold_view
+design -stash gold_view
+
+design -load both
+techmap -map view_gate.v
+rename equiv gate_view
+design -copy-from gold_view gold_view
+
+miter -equiv -flatten gold_view gate_view miter
 hierarchy -top miter
-flatten; opt_clean
-sat -seq 2 -set-at 1 rst_n 0 -prove-skip 1 -prove trigger 0 -verify
+opt_clean
+sat -seq 2 -set-at 1 in_rst_n 0 -prove-skip 1 -prove trigger 0 -verify

@@ -121,7 +121,7 @@ def run(yosys, netlist_text, lib, half, workdir):
     os.makedirs(workdir)
     for f in ("project.v", "protocol_emulator.v"):
         shutil.copy(os.path.join(SRC, f), workdir)
-    for f in ("setup.ys", "step.ys", "base.ys", "sram_cut.v"):
+    for f in ("setup.ys", "step.ys", "base.ys", "sram_cut.v", "view_gold.v", "view_gate.v"):
         shutil.copy(os.path.join(HERE, f), workdir)
     shutil.copy(lib, os.path.join(workdir, "cells.lib"))
     with open(os.path.join(workdir, "gate.v"), "w") as f:
@@ -129,10 +129,13 @@ def run(yosys, netlist_text, lib, half, workdir):
     # Paths relative to workdir: the WebAssembly build of Yosys sees only it.
     r = subprocess.run(yosys + ["-q", "-l", half + ".log", half + ".ys"],
                        cwd=workdir, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+                       stderr=subprocess.PIPE, text=True, errors="replace")
     with open(os.path.join(workdir, half + ".log")) as f:
         text = f.read()
-    return r.returncode == 0, text
+    # What Yosys itself wrote when it stopped (a crash leaves nothing in the
+    # log): kept after the log for [trouble].
+    crash = [line for line in r.stderr.splitlines() if "trap" in line or "rror" in line]
+    return r.returncode == 0, text + "".join("\nERROR (stderr): " + line for line in crash[-3:])
 
 
 def summary(half, text):
