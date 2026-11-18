@@ -112,6 +112,12 @@ are in [`docs/firmware.md`](docs/firmware.md).
 | PS/2 | host, both directions | 11 + 21 | a device written from the protocol's rules; sigrok's PS/2 decoder |
 | CAN | transmitter and listen-only receiver | 19 + 27 | a node written from ISO 11898-1; sigrok's CAN decoder |
 | I2C to SPI | bridge, no host in the data path | 25 + 26 | the I2C and SPI oracles together |
+| I2S | transmitter, 16-bit stereo | 11 | sigrok's I2S decoder |
+| DMX512 | transmitter | 26 | sigrok's DMX512 decoder |
+| Wiegand | transmitter | 17 | sigrok's Wiegand decoder |
+| NEC infrared | transmitter, 38 kHz carrier included | 25 | sigrok's NEC decoder |
+| MIDI | on the UART transmitter | no new firmware | sigrok's MIDI decoder |
+| MAX7219 | on the SPI controller | no new firmware | sigrok's MAX7219 decoder |
 
 The "checked against" models are other people's wherever one exists. For
 SWD, PS/2 and CAN the device model is written here from the standard, so

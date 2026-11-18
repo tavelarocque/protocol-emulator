@@ -2246,3 +2246,228 @@ async def test_usb_driver_planted_bugs(dut):
         if not caught:
             missed.append(name)
     assert not missed, f"planted USB driver bugs not caught: {missed}"
+
+
+# --- Protocols added on v2: each judged by a sigrok decoder -------------------
+#
+# Transmitters with no device model on the other end: what the pins did is
+# recorded and handed to sigrok's decoder for that protocol, which must read
+# back exactly what the host asked for. Each test also damages the recording
+# once and requires the decoder's reading to change, so a decoder that would
+# accept anything cannot pass.
+
+
+def pin_trace(dut, **pins):
+    """The named protocol pins as a receiver sees them: the chip's level
+    while it drives the pin, high (a pull-up) while it does not."""
+    def level(k):
+        return (int(dut.uio_out.value) >> k) & 1 if (int(dut.uio_oe.value) >> k) & 1 else 1
+    return sigrok.Trace(dut, {name: (lambda k=k: level(k)) for name, k in pins.items()})
+
+
+def texts(found):
+    return [text for _, _, text in found]
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_i2s(dut):
+    """I2S: 16-bit stereo samples, read back by sigrok's I2S decoder. The
+    first two frames are queued before the clock starts, so the bit clock
+    must not stretch across them."""
+    await reset(dut)
+    trace = pin_trace(dut, sck=0, ws=1, sd=2)
+    chip = pe.Chip(sim_port(dut))
+    frames = [(0x1234, 0xABCD), (0x8001, 0x7FFE), (0x0000, 0xFFFF), (0x5A5A, 0xA5A5)]
+
+    @bridge
+    def play():
+        # One more frame than is checked: a decoder closes a sample on the
+        # word-select edge after it.
+        pe.I2sTx(chip, firmware("i2s_tx"), first=frames[:2]).write(frames[2:] + [(0, 0)])
+
+    await play()
+    await ClockCycles(dut.clk, 400)
+    trace.stop()
+    rises = [t for t, v in trace.level("sck") if v == 1][1:]  # [0]: before the pin drives
+    gaps = {b - a for a, b in zip(rises[:63], rises[1:64])}
+    assert gaps == {4}, f"bit clock periods over two queued frames: {sorted(gaps)}"
+    if sigrok.available():
+        want = [f"{side} channel: {v:08x}" for frame in frames
+                for side, v in zip(("Left", "Right"), frame)]
+        found = trace.decode("i2s")
+        assert texts(found)[:8] == want, texts(found)
+        # The data line held high across the first sample: it must read 0xffff.
+        wrong = texts(trace.forced("sd", found[0][0], found[0][1], 1).decode("i2s"))
+        assert wrong[0] == "Left channel: 0000ffff" and wrong[1:8] == want[1:], wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_dmx512(dut):
+    """DMX512: two packets, read back by sigrok's DMX512 decoder, which
+    also checks the break, the mark after it and both stop bits."""
+    await reset(dut)
+    trace = pin_trace(dut, dmx=0)
+    chip = pe.Chip(sim_port(dut))
+    packets = [[0x00, 0xFF, 0x55, 0x81, 0x7E], [0x10, 0x20]]
+
+    @bridge
+    def play():
+        dmx = pe.DmxTx(chip, firmware("dmx_tx"))
+        for slots in packets:
+            dmx.send(slots)
+
+    await play()
+    await ClockCycles(dut.clk, 3000)
+    trace.stop()
+    breaks = [a for a, b in trace.low_pulses("dmx") if b - a >= 920]  # 92 us or more
+    assert len(breaks) == len(packets), f"{len(breaks)} breaks for {len(packets)} packets"
+    if sigrok.available():
+        # sigrok's decoder takes the first long run of either level as the
+        # break and looks for the next one only after 512 slots, so it is
+        # shown each packet on its own, from the moment its break begins.
+        def read(recording, k):
+            end = breaks[k + 1] if k + 1 < len(breaks) else None
+            found = recording.decode("dmx512", start=breaks[k], end=end)
+            names = texts(found)
+            assert names[:2] == ["Break", "MAB"], names[:4]
+            return ([int(t.split(" / ")[0]) for t in names if " / 0x" in t],
+                    [t for t in names if "nvalid" in t], found)
+
+        for k, slots in enumerate(packets):
+            got, bad, found = read(trace, k)
+            assert got == [0] + slots and not bad, (got, bad)
+        # One slot's first stop bit pulled low: the decoder must object.
+        at = next(a for a, _, text in found if text == "Stop bit")
+        _, bad, _ = read(trace.forced("dmx", at, at + 40, 0), len(packets) - 1)
+        assert bad, "a missing stop bit went unnoticed"
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_wiegand(dut):
+    """Wiegand: a 26-bit card number, read back by sigrok's Wiegand
+    decoder as one frame of 26 bits."""
+    await reset(dut)
+    trace = pin_trace(dut, d0=0, d1=1)
+    chip = pe.Chip(sim_port(dut))
+    facility, card = 0x9C, 0xB1E5
+
+    @bridge
+    def play():
+        pe.WiegandTx(chip, firmware("wiegand_tx")).send26(facility, card)
+
+    await play()
+    await ClockCycles(dut.clk, 300_000)
+    trace.stop()
+    pulses = sorted(trace.low_pulses("d0") + trace.low_pulses("d1"))
+    assert len(pulses) == 26 and {b - a for a, b in pulses} == {500}, pulses
+    assert {b[0] - a[0] for a, b in zip(pulses, pulses[1:])} == {10_000}, "bits not 1 ms apart"
+    if sigrok.available():
+        data = f"{facility:08b}{card:016b}"
+        want = f"{data[:12].count('1') & 1}{data}{1 ^ (data[12:].count('1') & 1)}"
+        frames = [t for t in texts(trace.decode("wiegand:bitwidth_ms=1")) if " bits " in t]
+        assert frames == [f"26 bits {want}"], frames
+        # Both lines low at once is not a Wiegand bit.
+        a = pulses[5][0]
+        wrong = texts(trace.forced("d0", a, a + 500, 0).forced("d1", a, a + 500, 0)
+                      .decode("wiegand:bitwidth_ms=1"))
+        assert f"26 bits {want}" not in wrong, wrong
+
+
+@cocotb.test(timeout_time=400, timeout_unit="ms")
+async def test_nec_infrared(dut):
+    """NEC infrared with its 38 kHz carrier, as the LED is driven: read
+    back by sigrok's NEC decoder, which checks every interval to 5% and
+    each byte against its complement."""
+    await reset(dut)
+    trace = pin_trace(dut, ir=0)
+    chip = pe.Chip(sim_port(dut))
+    address, command = 0x04, 0x08
+
+    @bridge
+    def play():
+        pe.NecTx(chip, firmware("nec_tx")).send(address, command)
+
+    await play()
+    await ClockCycles(dut.clk, 760_000)
+    trace.stop()
+    highs = [(a, b) for (a, _), (b, _) in zip(trace.level("ir"), trace.level("ir")[1:])]
+    periods = {b[0] - a[0] for a, b in zip(highs[1::2], highs[3::2]) if b[0] - a[0] < 1000}
+    assert periods == {264}, f"carrier periods {periods}"  # 37.9 kHz
+    if sigrok.available():
+        decoder = "ir_nec:polarity=active-high:cd_freq=38000"
+        fields = [t for t in texts(trace.decode(decoder)) if ": 0x" in t]
+        want = [f"Address: 0x{address:02X}", f"Address#: 0x{address ^ 0xFF:02X}",
+                f"Command: 0x{command:02X}", f"Command#: 0x{command ^ 0xFF:02X}"]
+        assert fields == want, fields
+        # One burst of carrier blanked out: the frame must not decode.
+        a = next(a for a, _, text in trace.decode(decoder) if text == "Command: 0x08")
+        wrong = [t for t in texts(trace.forced("ir", a, a + 9000, 0).decode(decoder))
+                 if ": 0x" in t]
+        assert wrong != want, wrong
+
+
+# Two device-level protocols that need no firmware of their own: the engine
+# is one the chip already has, and sigrok's decoder for the device, stacked
+# on its decoder for the bus, says what a real device would have understood.
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_midi(dut):
+    """MIDI is 31,250 baud 8N1: the UART transmitter with a divisor of
+    320. sigrok's MIDI decoder, on its UART decoder, must read the notes."""
+    await reset(dut)
+    trace = pin_trace(dut, midi=0)
+    chip = pe.Chip(sim_port(dut))
+    message = [0x90, 60, 100, 0x80, 60, 0, 0xB0, 7, 127, 0xC0, 5]
+
+    @bridge
+    def play():
+        pe.UartTx(chip, firmware("uart_tx"), divisor=320).write(message)
+
+    await play()
+    await ClockCycles(dut.clk, 5 * 3200)
+    trace.stop()
+    if sigrok.available():
+        decoder = "uart:rx=midi:baudrate=31250,midi"
+        found = trace.decode(decoder, "midi")
+        want = ["Channel 1: note on (note = 60 'C4', velocity = 100)",
+                "Channel 1: note off (note = 60 'C4', velocity = 0)",
+                "Channel 1: control change 'channel volume MSB",
+                "Channel 1: program change to instrument 6"]
+        got = texts(found)
+        assert len(got) == len(want) and all(g.startswith(w) for g, w in zip(got, want)), got
+        # The lowest bit of the first note number held high: note 61, not 60.
+        at = found[0][0] + 10 * 320  # the second byte's first data bit
+        wrong = texts(trace.forced("midi", at, at + 320, 1).decode(decoder, "midi"))
+        assert wrong[0].startswith("Channel 1: note on (note = 61"), wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_max7219(dut):
+    """A MAX7219 display driver is set up and given two digits over the SPI
+    controller; sigrok's MAX7219 decoder, on its SPI decoder, must read
+    each register write."""
+    await reset(dut)
+    trace = pin_trace(dut, sck=0, mosi=1, cs=3)
+    chip = pe.Chip(sim_port(dut))
+    writes = [(0x0C, 0x01), (0x09, 0xFF), (0x0A, 0x08), (0x0B, 0x07), (0x01, 0x05), (0x08, 0x09)]
+
+    @bridge
+    def play():
+        spi = pe.SpiController(chip, firmware("spi_fast"))
+        for register, value in writes:
+            spi.transfer([register, value])
+
+    await play()
+    await ClockCycles(dut.clk, 500)
+    trace.stop()
+    if sigrok.available():
+        decoder = "spi:clk=sck:mosi=mosi:cs=cs,max7219"
+        found = trace.decode(decoder, "max7219")
+        want = ["Shutdown: off", "Decode: 0b11111111", "Intensity: 8", "Scan limit: 8",
+                "Digit 1: 05", "Digit 8: 09"]
+        assert texts(found) == want, texts(found)
+        # The data line held high for the last write: not digit 8's 09.
+        a, b, _ = found[-1]
+        wrong = texts(trace.forced("mosi", a - 20, b, 1).decode(decoder, "max7219"))
+        assert wrong[:-1] == want[:-1] and wrong[-1] != want[-1], wrong

@@ -24,9 +24,26 @@ is 64 words.
 | WS2812 LEDs | 16 | written blind, see below |
 | PS/2 host | 11 + 21 | a receiver on one thread that never stops listening and a transmitter on the other; the receiver tells the transmitter through a spare pin when a frame is under way, so a host byte never cuts one off too late for the device to notice |
 | CAN | 19 + 27 | a transmitter that arbitrates and reads the ACK slot, and a listen-only receiver that resynchronises on every falling edge, up to 1 Mbit/s. Not a full node: it does not acknowledge other nodes' frames |
+| I2S transmitter | 11 | 16-bit stereo, bit clock and word select made by the chip, 2.5 MHz bit clock at 10 MHz; the next sample is fetched inside the last bit, so the clock never stretches while the host keeps up |
+| DMX512 transmitter | 26 | break, mark after break, start code and slots at 250 kbit/s, two stop bits; the break is counted in the input shift register's bit counter, the only counter left free |
+| Wiegand transmitter | 17 | any frame length; 50 us pulses exactly 1 ms apart, also across word boundaries |
+| NEC infrared transmitter | 25 | the 38 kHz carrier included, so the pin drives an IR LED; leader, 32 bits by pulse distance, final burst |
 
 Everything from the I2C target down was written after the hardware was
 frozen at v1.4, as firmware alone.
+
+The last four were written on v2.0, in one sitting, each tested by handing
+the recorded pins to sigrok's decoder for that protocol.
+
+**Protocols that need no engine of their own.** Some protocols are an
+existing engine at particular settings plus framing on the host, and are
+tested the same way, with sigrok's decoder for the device stacked on its
+decoder for the bus:
+
+| Protocol | Engine | Judged by |
+|---|---|---|
+| MIDI | UART transmitter, 320 clocks per bit (31,250 baud) | sigrok's MIDI decoder reads the notes |
+| MAX7219 LED driver | SPI controller, 16-bit frames | sigrok's MAX7219 decoder reads each register write |
 
 **The blind test.** The WS2812 driver was written by a programmer (an AI
 agent) given only [`isa.md`](isa.md) and the simulator. It passed a hidden

@@ -144,6 +144,14 @@ def summary(half, text):
     return "counterexample found" if "model found: FAIL" in text else "no result"
 
 
+def trouble(text):
+    """What a log says went wrong: its ERROR lines, or failing that its
+    last few lines."""
+    lines = [line for line in text.splitlines() if line.strip()]
+    errors = [line for line in lines if "ERROR" in line]
+    return errors[:5] or lines[-8:]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--netlist", required=True)
@@ -173,6 +181,12 @@ def main():
         verdict = ("proved" if passed else "FAILED") if want_pass else \
                   ("caught" if not passed else "MISSED")
         print("%-32s %-4s  %-8s %s" % (name, half, verdict, summary(half, log)))
+        # A proof that ended without a verdict either way is a broken run,
+        # whichever outcome was wanted: say why, and fail.
+        if not ok or "no result" in summary(half, log):
+            failed = True
+            for line in trouble(log):
+                print("    | " + line[:300])
     print("logs in", tmp)
     sys.exit(1 if failed else 0)
 

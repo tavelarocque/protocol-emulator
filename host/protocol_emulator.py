@@ -583,6 +583,96 @@ class SwdController:
         return self.read_dp(self.RDBUFF)
 
 
+class I2sTx:
+    """I2S transmitter, 16-bit stereo (i2s_tx.hex): SCK on pin 0, WS on
+    pin 1, SD on pin 2. SCK is core clock / (4 x clkdiv). [first]: up to
+    two (left, right) frames queued before the clock starts."""
+
+    START = 8  # Firmware.i2s_tx_start
+
+    def __init__(self, chip, image, clkdiv=0, first=()):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(start=self.START, sideset_base=0, sideset_count=2, out_base=2,
+                       out_count=1, threshold=16, out_msb_first=True, clkdiv=clkdiv)
+        chip.set_pin_modes({0: PUSH_PULL, 1: PUSH_PULL, 2: PUSH_PULL})
+        for left, right in first:
+            chip.write(TX_FIFO, left & 0xFFFF)
+            chip.write(TX_FIFO, right & 0xFFFF)
+        chip.run()
+
+    def write(self, frames):
+        for left, right in frames:
+            self.chip.push(left & 0xFFFF)
+            self.chip.push(right & 0xFFFF)
+
+
+class DmxTx:
+    """DMX512 transmitter on [pin] (dmx_tx.hex), 250 kbit/s."""
+
+    def __init__(self, chip, image, clock_hz=10_000_000, pin=0):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(out_base=pin, set_base=pin, threshold=9)
+        chip.run()  # the firmware raises the line before the pin drives it
+        chip.set_pin_modes({pin: PUSH_PULL})
+        chip.push(clock_hz // 250_000 - 4)
+
+    def send(self, slots, start_code=0):
+        """One packet: break, mark, the start code, then the slots."""
+        self.chip.push(1 | (start_code << 1))
+        for level in slots:
+            self.chip.push(level << 1)
+
+
+class WiegandTx:
+    """Wiegand transmitter (wiegand_tx.hex): D0 on pin 0, D1 on pin 1; 50 us
+    pulses, 1 ms apart."""
+
+    def __init__(self, chip, image, clock_hz=10_000_000):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(set_base=0, set_count=2, threshold=16, clkdiv=clock_hz // 40_000)
+        chip.run()  # the firmware raises both lines before the pins drive them
+        chip.set_pin_modes({0: PUSH_PULL, 1: PUSH_PULL})
+
+    def send(self, bits):
+        """A frame of bits (0 or 1), first bit first."""
+        self.chip.push(len(bits) - 1)
+        for k in range(0, len(bits), 16):
+            self.chip.push(sum(b << i for i, b in enumerate(bits[k:k + 16])))
+
+    def send26(self, facility, card):
+        """The 26-bit format: even parity, 8-bit facility code, 16-bit card
+        number, odd parity; each parity bit covers the 12 bits next to it."""
+        data = [(facility >> (7 - k)) & 1 for k in range(8)]
+        data += [(card >> (15 - k)) & 1 for k in range(16)]
+        self.send([sum(data[:12]) & 1] + data + [1 ^ (sum(data[12:]) & 1)])
+
+
+class NecTx:
+    """NEC infrared transmitter with carrier (nec_tx.hex): an IR LED on pin
+    0, lit when high."""
+
+    def __init__(self, chip, image, clock_hz=10_000_000, carrier_hz=38_000):
+        self.chip = chip
+        clkdiv = (clock_hz + carrier_hz) // (2 * carrier_hz)  # half a carrier period
+        self.leader = (9 * clock_hz + 1000 * clkdiv) // (2000 * clkdiv)  # 9 ms, in periods
+        chip.stop()
+        chip.load(image)
+        chip.configure(sideset_base=0, sideset_count=1, threshold=16, clkdiv=clkdiv)
+        chip.set_pin_modes({0: PUSH_PULL})
+        chip.run()
+
+    def send(self, address, command):
+        self.chip.push(self.leader - 1)
+        self.chip.push(address | ((address ^ 0xFF) << 8))
+        self.chip.push(command | ((command ^ 0xFF) << 8))
+
+
 class OneWireError(Exception):
     pass
 

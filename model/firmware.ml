@@ -1567,6 +1567,211 @@ module Uart_duplex = struct
   let rx_setup ~divisor = [ divisor - 4; uart_rx_half ~divisor ]
 end
 
+(* I2S transmitter (Philips I2S, the bus between audio chips): the chip
+   makes the bit clock and the word select and shifts out 16-bit stereo
+   samples, most significant bit first.
+
+   Pins: P0 = SCK and P1 = WS (side-set), P2 = SD, all push-pull. Config:
+   [i2s_tx_config]: sideset_base 0, sideset_count 2; out_base 2,
+   out_count 1; threshold 16; out_msb_first; start = [i2s_tx_start].
+
+   Host protocol: TX words alternate left sample, right sample.
+
+   On the wire, as the standard has it: SD and WS change while SCK is low
+   and are read on its rising edge; WS is 0 for the left sample and 1 for
+   the right, and changes one bit early, with the last bit of the sample
+   before. So each sample's bits 15 to 1 go out under its own WS level and
+   bit 0 under the next one's.
+
+   Timing: SCK is 2 ticks low and 2 high, core clock / 4: 2.5 MHz at
+   10 MHz, a 78.125 kHz sample rate; CLKDIV slows it. The fetch of the next
+   sample fits inside the last bit, so the clock never stretches while the
+   host keeps up. When the TX FIFO is empty the thread stalls with SCK low
+   and the bus simply pauses. *)
+let i2s_tx =
+  {|
+        .side_set 2
+lbit:   out pins, 1      side 0 [1]   ; left bits 15..1: WS 0, SCK low
+        jmp x-- lbit     side 1 [1]   ; SCK high
+        out pins, 1      side 2       ; left bit 0, with WS already 1
+        pull             side 2       ; the right sample
+        set x, 14        side 3 [1]
+rbit:   out pins, 1      side 2 [1]   ; right bits 15..1: WS 1
+        jmp x-- rbit     side 3 [1]
+        out pins, 1      side 0       ; right bit 0, with WS already 0
+entry:  pull             side 0       ; the left sample
+        set x, 14        side 1
+        jmp lbit         side 1
+|}
+;;
+
+let i2s_tx_start = 8
+
+let i2s_tx_config =
+  { Isa.Thread_config.default with
+    start = i2s_tx_start
+  ; sideset_base = 0
+  ; sideset_count = 2
+  ; out_base = 2
+  ; out_count = 1
+  ; threshold = 16
+  ; out_msb_first = true
+  }
+;;
+
+(* DMX512 transmitter (stage lighting, on RS-485): a break, a mark, then a
+   start code and up to 512 slots, each one start bit, 8 data bits LSB
+   first and two stop bits at 250 kbit/s.
+
+   Pins: P0 = the line, push-pull (to an RS-485 driver). Config: threshold
+   9, the rest as reset.
+
+   Host protocol on the TX FIFO:
+     word 0  : bit time - 4, in clock cycles: 36 for 250 kbit/s at 10 MHz
+     then    : one word per slot: bit 0 = 1 to send a break and the mark
+               after it first (so: on the start code), bits 8:1 the byte
+               ([dmx_word])
+
+   Timing: every bit is exactly one bit time, and back-to-back slots have
+   two stop bits and one cycle more. (Two exactly is legal, but a receiver
+   that samples on the bit boundaries then sees the next start bit in the
+   sample where it looks for the idle line; sigrok's decoder is one.) The
+   break is 9 x (4 x (bit time - 3) + 3) cycles,
+   136 us at 10 MHz (the standard asks a transmitter for 92 us or more),
+   and the mark after it 4 bit times, 16 us (12 us or more). Between slots
+   the line idles high for as long as the host takes, which the standard
+   allows up to a second. *)
+let dmx_tx =
+  {|
+        set pins, 1
+        pull                ; bit time - 4
+        mov y, osr
+next:   pull                ; the line stays high while waiting
+        out x, 1            ; break first?
+        jmp !x slot
+        set pins, 0         ; break: 9 rounds of about 4 bit times
+brk:    mov x, y
+b:      jmp x-- b [3]
+        in null, 1          ; count the rounds in the ISR's bit counter
+        jmp !isrf brk
+        set pins, 1         ; mark after break
+        mov x, y
+m:      jmp x-- m [3]
+        mov isr, null       ; clear the round counter
+slot:   set pins, 0 [1]     ; start bit
+        mov x, y
+start:  jmp x-- start
+bit:    out pins, 1         ; data bit, LSB first
+        mov x, y
+hold:   jmp x-- hold
+        jmp !osre bit
+        set pins, 1 [1]     ; two stop bits and a cycle
+        mov x, y
+stop:   jmp x-- stop [1]
+        jmp next
+|}
+;;
+
+let dmx_word ~break byte = Bool.to_int break lor (byte lsl 1)
+
+(* Wiegand transmitter (card readers and keypads): two lines, D0 and D1,
+   both idle high; a 0 is a short low pulse on D0, a 1 a short low pulse on
+   D1.
+
+   Pins: P0 = D0, P1 = D1, push-pull or open-drain. Config:
+   [wiegand_tx_config]: set_base 0, set_count 2; threshold 16; CLKDIV sets
+   the tick: 250 for 25 us at 10 MHz.
+
+   Host protocol, one frame at a time:
+     TX word 0 : N - 1, for a frame of N bits (26 and 34 are the common
+                 formats; parity bits are the host's to work out)
+     then      : ceil(N / 16) words, first bit sent in bit 0
+
+   Timing, in ticks: the pulse is 2 and bits are exactly 40 apart, also
+   where a word ends: 50 us and 1 ms with a 25 us tick, which is what
+   readers send. *)
+let wiegand_tx =
+  {|
+        set pins, 3         ; both lines idle high
+frame:  pull                ; X <- bits - 1
+        out x, 16
+word:   pull
+bit:    out y, 1
+        jmp !y zero
+        set pins, 1         ; a 1: D1 low
+        jmp gap
+zero:   set pins, 2 [1]     ; a 0: D0 low
+gap:    set pins, 3 [15]
+        nop [15]
+        jmp x-- more
+        jmp frame
+more:   jmp !osre same      ; both ways round take 3 ticks
+        pull
+        jmp bit
+same:   jmp bit [1]
+|}
+;;
+
+let wiegand_tx_config = { Isa.Thread_config.default with set_count = 2; threshold = 16 }
+
+(* NEC infrared transmitter (the commonest remote-control code), carrier
+   included: the pin drives an IR LED directly. A frame is a 9 ms burst of
+   carrier, 4.5 ms of silence, then 32 bits, each a 562.5 us burst followed
+   by 562.5 us of silence for a 0 or 1687.5 us for a 1, and a final burst.
+
+   Pins: P0 = the LED, push-pull, high = lit. Config: [nec_tx_config]:
+   sideset_base 0, sideset_count 1; threshold 16; CLKDIV sets the tick to
+   half a carrier period: 132 for 37.9 kHz at 10 MHz.
+
+   Host protocol, one frame at a time:
+     TX word 0 : carrier periods in the leading burst, less one: 341
+     TX word 1 : address in bits 7:0, its complement in 15:8 (or the high
+                 address byte, in the extended form)
+     TX word 2 : command in bits 7:0, its complement in 15:8
+   ([nec_words]). Bits go out LSB first, as NEC has them.
+
+   Timing, in ticks of 13.2 us: a burst is 21 carrier periods (554 us), a
+   0 is 85 ticks from burst to burst (1.122 ms; NEC: 1.125) and a 1 is 170
+   (2.244 ms; 2.25). The carrier is high one tick and low one. *)
+let nec_tx =
+  {|
+        .side_set 1
+frame:  pull               side 0     ; carrier periods in the leader - 1
+        mov x, osr         side 0
+lead:   nop                side 1     ; 9 ms of carrier
+        jmp x-- lead       side 0
+        set x, 20          side 0     ; 4.5 ms of silence
+gap1:   jmp x-- gap1       side 0 [7]
+        set x, 20          side 0
+gap2:   jmp x-- gap2       side 0 [7]
+        set y, 1           side 0     ; two words of 16 bits
+word:   pull               side 0
+bit:    set x, 20          side 0     ; a burst of 21 periods
+mark:   nop                side 1
+        jmp x-- mark       side 0
+        out x, 1           side 0     ; the bit
+        jmp !x short       side 0
+        set x, 20          side 0     ; a 1: two more units of silence
+long:   jmp x-- long       side 0 [3]
+short:  set x, 18          side 0
+space:  jmp x-- space      side 0 [1]
+        jmp !osre bit      side 0
+        jmp y-- word       side 0
+        set x, 20          side 0     ; the final burst
+last:   nop                side 1
+        jmp x-- last       side 0
+        jmp frame          side 0
+|}
+;;
+
+let nec_tx_config =
+  { Isa.Thread_config.default with sideset_base = 0; sideset_count = 1; threshold = 16 }
+;;
+
+let nec_words ~address ~command =
+  [ 341; address lor ((address lxor 0xFF) lsl 8); command lor ((command lxor 0xFF) lsl 8) ]
+;;
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo
@@ -1585,4 +1790,8 @@ let all =
   ; "ps2_tx", ps2_tx
   ; "can_rx", can_rx
   ; "can_tx", can_tx
+  ; "i2s_tx", i2s_tx
+  ; "dmx_tx", dmx_tx
+  ; "wiegand_tx", wiegand_tx
+  ; "nec_tx", nec_tx
   ]

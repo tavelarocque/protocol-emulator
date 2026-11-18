@@ -152,3 +152,35 @@
   (with-stdout-to
    can.hex
    (run %{dep:../bin/firmware_hex.exe} can))))
+
+(rule
+ (targets i2s_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i2s_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} i2s_tx))))
+
+(rule
+ (targets dmx_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dmx_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} dmx_tx))))
+
+(rule
+ (targets wiegand_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   wiegand_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} wiegand_tx))))
+
+(rule
+ (targets nec_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   nec_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} nec_tx))))

@@ -31,7 +31,10 @@
  (action
   (with-stdout-to
    spi_controller.s
-   (run %{dep:../bin/firmware_src.exe} spi_controller %{dep:../model/firmware.ml}))))
+   (run
+    %{dep:../bin/firmware_src.exe}
+    spi_controller
+    %{dep:../model/firmware.ml}))))
 
 (rule
  (targets spi_fast.s)
@@ -47,7 +50,10 @@
  (action
   (with-stdout-to
    spi_target.s
-   (run %{dep:../bin/firmware_src.exe} spi_target %{dep:../model/firmware.ml}))))
+   (run
+    %{dep:../bin/firmware_src.exe}
+    spi_target
+    %{dep:../model/firmware.ml}))))
 
 (rule
  (targets i2c_controller.s)
@@ -55,7 +61,10 @@
  (action
   (with-stdout-to
    i2c_controller.s
-   (run %{dep:../bin/firmware_src.exe} i2c_controller %{dep:../model/firmware.ml}))))
+   (run
+    %{dep:../bin/firmware_src.exe}
+    i2c_controller
+    %{dep:../model/firmware.ml}))))
 
 (rule
  (targets i2c.s)
@@ -71,7 +80,10 @@
  (action
   (with-stdout-to
    i2c_target.s
-   (run %{dep:../bin/firmware_src.exe} i2c_target %{dep:../model/firmware.ml}))))
+   (run
+    %{dep:../bin/firmware_src.exe}
+    i2c_target
+    %{dep:../model/firmware.ml}))))
 
 (rule
  (targets jtag.s)
@@ -136,3 +148,38 @@
   (with-stdout-to
    can_tx.s
    (run %{dep:../bin/firmware_src.exe} can_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets i2s_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i2s_tx.s
+   (run %{dep:../bin/firmware_src.exe} i2s_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets dmx_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dmx_tx.s
+   (run %{dep:../bin/firmware_src.exe} dmx_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets wiegand_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   wiegand_tx.s
+   (run
+    %{dep:../bin/firmware_src.exe}
+    wiegand_tx
+    %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets nec_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   nec_tx.s
+   (run %{dep:../bin/firmware_src.exe} nec_tx %{dep:../model/firmware.ml}))))

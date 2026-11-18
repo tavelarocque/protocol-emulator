@@ -22,6 +22,10 @@ them, so they cannot drift.
 | [`onewire.s`](onewire.s) | 1-Wire bus engine | 25 |
 | [`ps2_rx.s`](ps2_rx.s), [`ps2_tx.s`](ps2_tx.s) | PS/2 host: receiver and transmitter, one on each thread | 11 + 21 |
 | [`can_rx.s`](can_rx.s), [`can_tx.s`](can_tx.s) | CAN: listen-only receiver and transmitter, one on each thread | 19 + 27 |
+| [`i2s_tx.s`](i2s_tx.s) | I2S transmitter, 16-bit stereo | 11 |
+| [`dmx_tx.s`](dmx_tx.s) | DMX512 transmitter | 26 |
+| [`wiegand_tx.s`](wiegand_tx.s) | Wiegand transmitter | 17 |
+| [`nec_tx.s`](nec_tx.s) | NEC infrared transmitter, with carrier | 25 |
 | [`echo.s`](echo.s) | TX FIFO to RX FIFO, for bring-up | 5 |
 | [`ws2812/`](ws2812) | WS2812 LEDs: the blind firmware test, with its task and hidden test | 16 |
 
