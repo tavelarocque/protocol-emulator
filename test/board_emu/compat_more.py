@@ -130,3 +130,16 @@ for _ in range(5):
     except NecError as e:
         print("nec rx error:", e)
 _show("nec rx", _chip)
+
+print("modbus", [hex(modbus_crc16(bytes([k] * k))) for k in range(1, 9)])
+print("modbus", list(modbus_frame(0x11, 0x03, [0x00, 0x6B, 0x00, 0x03])))
+
+_chip = _Recorder()
+_p = Pwm(_chip, _image)
+_p.set(300, 1000)
+_p.servo(1500)
+_show("pwm", _chip)
+
+_chip = _Recorder(line=0b01101110)
+print("nes", NesPad(_chip, _image, clock_hz=12_000_000).read())
+_show("nes", _chip)

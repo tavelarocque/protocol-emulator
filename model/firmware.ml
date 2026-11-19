@@ -2080,6 +2080,77 @@ let nec_rx_config =
   }
 ;;
 
+(* PWM, and so RC servo pulses: a pin high for one count and low for
+   another, over and over.
+
+   Pins: P0, push-pull (side-set). Config: [pwm_config]: sideset_base 0,
+   sideset_count 1; CLKDIV sets the tick.
+
+   Host protocol: two TX words when the thread starts: H then L. The pin
+   is then high for H + 2 ticks and low for L + 3, for as long as the thread
+   runs ([pwm_words] does the sums). To change them the host stops the
+   thread, which leaves the pin as it is, and starts it with two new
+   words.
+
+   A servo wants 1 to 2 ms high every 20 ms: with a tick of 1 us (CLKDIV
+   10 at 10 MHz), 1.5 ms is H = 1498 and L = 18497. *)
+let pwm =
+  {|
+        .side_set 1
+        pull             side 0
+        mov isr, osr     side 0     ; the high count, kept in the ISR
+        pull             side 0     ; the low count stays in the OSR
+high:   mov x, isr       side 1
+h:      jmp x-- h        side 1
+        mov x, osr       side 0
+l:      jmp x-- l        side 0
+        jmp high         side 0
+|}
+;;
+
+let pwm_config = { Isa.Thread_config.default with sideset_base = 0; sideset_count = 1 }
+
+(* The two words for a pin high [high] ticks in every [period]. *)
+let pwm_words ~high ~period = [ high - 2; period - high - 3 ]
+
+(* NES gamepad, read as the console reads it: a pulse on the latch line
+   makes the pad's shift register take in its eight buttons, and eight
+   clocks bring them out, A first; a pressed button reads 0.
+
+   Pins: P0 = latch and P1 = clock (side-set, push-pull), P2 = data, an
+   input. Config: [nes_pad_config]: sideset_base 0, sideset_count 2;
+   in_base 2; threshold 8; in_msb_first; CLKDIV sets the tick to 3 us: 30
+   at 10 MHz.
+
+   Host protocol: any TX word asks for one reading; the RX word is the
+   buttons, A in bit 7, then B, Select, Start, Up, Down, Left, Right.
+
+   Timing, as the console's: latch high 12 us, then the clock, idle high,
+   low 6 us and high 6 us for each button. A button is read as the clock
+   falls; the pad moves to the next as it rises. *)
+let nes_pad =
+  {|
+        .side_set 2                 ; bit 0 the latch, bit 1 the clock
+next:   pull           side 2       ; until the host asks
+        nop            side 3 [3]   ; latch: the pad takes in its buttons
+        set x, 7       side 2 [1]
+bit:    in pins, 1     side 0 [1]   ; read a button; the clock falls
+        jmp x-- bit    side 2 [1]   ; the clock rises: the pad moves on
+        push           side 2
+        jmp next       side 2
+|}
+;;
+
+let nes_pad_config =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 2
+  ; in_base = 2
+  ; threshold = 8
+  ; in_msb_first = true
+  }
+;;
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo
@@ -2107,4 +2178,6 @@ let all =
   ; "rc5_tx", rc5_tx
   ; "wiegand_rx", wiegand_rx
   ; "nec_rx", nec_rx
+  ; "pwm", pwm
+  ; "nes_pad", nes_pad
   ]

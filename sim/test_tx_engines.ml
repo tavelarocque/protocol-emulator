@@ -685,3 +685,84 @@ let%test_unit "NEC receiver: a planted bug (bits read too late) is caught by a f
          (nec_rx ~source:late (nec_module_output ~unit:4500 0xFF0000FF))
          [ 0x00FF; 0xFF00 ]))
 ;;
+
+(* --- PWM -------------------------------------------------------------------- *)
+
+let pwm_run ?(source = Firmware.pwm) ~high ~period () =
+  record ~cycles:(6 * period) ~pins:1 ~config:Firmware.pwm_config source (Firmware.pwm_words ~high ~period)
+;;
+
+let pwm_measured trace =
+  (* Skip the first high run: the pin resets high. *)
+  let highs = List.tl_exn (runs trace 0 1) in
+  ( List.dedup_and_sort ~compare (List.map highs ~f:snd)
+  , List.dedup_and_sort
+      ~compare
+      (List.map2_exn (List.drop_last_exn highs) (List.tl_exn highs) ~f:(fun (a, _) (b, _) -> b - a)) )
+;;
+
+let%test_unit "PWM: the high time and the period are exactly what was asked" =
+  List.iter [ 300, 1000; 2, 6; 3, 1000; 997, 1000; 1500, 20_000 ] ~f:(fun (high, period) ->
+    [%test_result: int list * int list] (pwm_measured (pwm_run ~high ~period ())) ~expect:([ high ], [ period ]))
+;;
+
+let%test_unit "PWM: a planted bug (the pin still high while the loop turns round) is caught" =
+  let long = String.substr_replace_first Firmware.pwm ~pattern:"jmp high         side 0" ~with_:"jmp high         side 1" in
+  assert (not (String.equal long Firmware.pwm));
+  assert (
+    not
+      ([%equal: int list * int list]
+         (pwm_measured (pwm_run ~source:long ~high:300 ~period:1000 ()))
+         ([ 300 ], [ 1000 ])))
+;;
+
+(* --- NES gamepad ------------------------------------------------------------- *)
+
+(* One reading of a pad holding [buttons] down (bit 7 = A ... bit 0 = Right,
+   1 = down), against a 4021 shift register: loaded while the latch (pin 0)
+   is high, shifted by each rising edge of the clock (pin 1), its output on
+   pin 2, low for a button that is down. Returns the RX word and how many
+   times the clock rose. *)
+let nes_read ?(source = Firmware.nes_pad) buttons =
+  let modes =
+    Array.init Isa.num_pins ~f:(fun i -> if i < 2 then Isa.Pin_mode.Push_pull else Input)
+  in
+  let m =
+    Isa.create
+      ~program:(Asm.assemble source)
+      ~pin_modes:modes
+      ~threads:[ { Firmware.nes_pad_config with clkdiv = 30 } ]
+  in
+  let register = ref 0xFF in
+  let clock_was = ref 1 in
+  let clocks = ref 0 in
+  let word = ref None in
+  assert (Isa.push_tx m ~thread:0 0);
+  for _ = 1 to 5_000 do
+    let pins = Isa.pin_out m in
+    let latch = pins land 1
+    and clock = (pins lsr 1) land 1 in
+    if latch = 1
+    then register := lnot buttons land 0xFF
+    else if clock = 1 && !clock_was = 0
+    then (
+      incr clocks;
+      register := ((!register lsl 1) lor 1) land 0xFF);
+    clock_was := clock;
+    Option.iter (Isa.pop_rx m ~thread:0) ~f:(fun v -> word := Some v);
+    Isa.step m ~inputs:(0xFB lor (((!register lsr 7) land 1) lsl 2))
+  done;
+  !word, !clocks
+;;
+
+let%test_unit "NES gamepad: every combination of buttons, eight clocks a reading" =
+  for buttons = 0 to 255 do
+    [%test_result: int option * int] (nes_read buttons) ~expect:(Some (lnot buttons land 0xFF), 8)
+  done
+;;
+
+let%test_unit "NES gamepad: a planted bug (seven clocks) is caught" =
+  let short = String.substr_replace_first Firmware.nes_pad ~pattern:"set x, 7" ~with_:"set x, 6" in
+  assert (not (String.equal short Firmware.nes_pad));
+  assert (not ([%equal: int option * int] (nes_read ~source:short 0x81) (Some 0x7E, 8)))
+;;

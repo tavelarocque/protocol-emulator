@@ -226,3 +226,19 @@
   (with-stdout-to
    nec_rx.s
    (run %{dep:../bin/firmware_src.exe} nec_rx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets pwm.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   pwm.s
+   (run %{dep:../bin/firmware_src.exe} pwm %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets nes_pad.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   nes_pad.s
+   (run %{dep:../bin/firmware_src.exe} nes_pad %{dep:../model/firmware.ml}))))

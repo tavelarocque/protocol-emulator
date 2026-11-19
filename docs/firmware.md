@@ -33,11 +33,13 @@ is 64 words.
 | RC-5 infrared transmitter | 37 | the 36 kHz carrier included; looks one bit ahead so that where a 1 meets a 0 their two bursts are one unbroken burst |
 | Wiegand receiver | 16 | any frame length; looks at both lines at once by copying all eight pins and peeling off the first two, so pulses down to a microsecond are seen |
 | NEC infrared receiver | 33 | on an IR receiver module's output; reads each bit once, 1.3 units after its burst; tolerates a remote 20% fast or slow, ignores repeat codes, and never lets a frame cut short put the host's pairs of words out of step |
+| PWM, and RC servo pulses | 8 | high time and period each exact to the tick; the two counts live in the two shift registers, which leaves X free to count |
+| NES gamepad | 7 | read as the console reads it: latch, then eight clocks, a button read as each clock falls |
 
 Everything from the I2C target down was written after the hardware was
 frozen at v1.4, as firmware alone.
 
-The last nine were written on v2.0. The transmitters are each tested by
+The last eleven were written on v2.0. The transmitters are each tested by
 handing the recorded pins to sigrok's decoder for that protocol; the two
 receivers by sources written from the protocol's rules, with remotes off
 speed, frames cut short and, for NEC, repeat codes. MDIO also reads from a PHY
@@ -54,6 +56,17 @@ decoder for the bus:
 | MIDI | UART transmitter, 320 clocks per bit (31,250 baud) | sigrok's MIDI decoder reads the notes |
 | MAX7219 LED driver | SPI controller, 16-bit frames | sigrok's MAX7219 decoder reads each register write |
 | LIN, master frames | DMX512 transmitter (a UART that can send a break), 19,200 baud | sigrok's LIN decoder reads break, sync, identifier, data and checksum, and checks the parity and the checksum |
+| Modbus RTU requests | UART transmitter; the CRC is the host's | sigrok's Modbus decoder reads the request and checks the CRC; the frame is the example in the Modbus specification |
+| 24Cxx EEPROM | I2C controller | sigrok's 24xx decoder names a page write and a byte write; cocotbext-i2c's memory holds and returns the data |
+| DS1307 real-time clock | I2C controller | sigrok's DS1307 decoder reads the date and time out of the bytes written and read |
+| LM75 temperature sensor | I2C controller | sigrok's LM75 decoder reads the temperature |
+| SPI NOR flash commands | SPI controller | sigrok's flash decoder names the commands, the address and the data; picosoc's flash model answers |
+| WS2801 LED pixels | SPI controller | sigrok's decoder for SPI LED strips reads the colours |
+
+One limit these tests turned up: the I2C controller starts a transfer only
+after a STOP, so it cannot send the repeated START some devices ask for
+between setting a register pointer and reading. The devices above accept a
+STOP there; one that does not is out of reach until the firmware learns it.
 
 **The blind test.** The WS2812 driver was written by a programmer (an AI
 agent) given only [`isa.md`](isa.md) and the simulator. It passed a hidden

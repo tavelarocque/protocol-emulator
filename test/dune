@@ -224,3 +224,19 @@
   (with-stdout-to
    nec_rx.hex
    (run %{dep:../bin/firmware_hex.exe} nec_rx))))
+
+(rule
+ (targets pwm.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   pwm.hex
+   (run %{dep:../bin/firmware_hex.exe} pwm))))
+
+(rule
+ (targets nes_pad.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   nes_pad.hex
+   (run %{dep:../bin/firmware_hex.exe} nes_pad))))

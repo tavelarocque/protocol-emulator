@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Drivers for the protocols added on v2.0: I2S, DMX512, Wiegand and NEC
-# infrared (to send and to receive), RC-5 infrared, MDIO, DALI and LIN. Each takes a Chip from
+# infrared (to send and to receive), RC-5 infrared, MDIO, DALI and LIN, and
+# Modbus RTU framing for the UART. Each takes a Chip from
 # protocol_emulator.py and a firmware image, as the drivers there do.
 #
 # They are a module of their own because of the Pico's memory: MicroPython
@@ -218,6 +219,73 @@ class LinMaster:
         self.chip.push(1 | (0x55 << 1))
         for byte in [pid] + list(data) + [total ^ 0xFF]:
             self.chip.push(byte << 1)
+
+
+class Pwm:
+    """PWM on pin 0 (pwm.hex), and so RC servo pulses. Times are in ticks of
+    [tick_us] microseconds."""
+
+    def __init__(self, chip, image, tick_us=1, clock_hz=10_000_000):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(sideset_base=0, sideset_count=1, clkdiv=clock_hz * tick_us // 1_000_000)
+        chip.run()  # pins reset high: the firmware lowers the pin before it drives
+        chip.set_pin_modes({0: pe.PUSH_PULL})
+        chip.stop()
+
+    def set(self, high, period):
+        """High for [high] ticks in every [period]. The pin holds its level
+        for the moment it takes to change over."""
+        self.chip.stop()
+        self.chip.push(high - 2)
+        self.chip.push(period - high - 3)
+        self.chip.run()
+
+    def servo(self, microseconds):
+        """A servo pulse of that width every 20 ms (with a 1 us tick)."""
+        self.set(microseconds, 20_000)
+
+
+class NesPad:
+    """NES gamepad (nes_pad.hex): latch on pin 0, clock on pin 1, data on
+    pin 2."""
+
+    BUTTONS = ("A", "B", "Select", "Start", "Up", "Down", "Left", "Right")
+
+    def __init__(self, chip, image, clock_hz=10_000_000):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(sideset_base=0, sideset_count=2, in_base=2, threshold=8,
+                       in_msb_first=True, clkdiv=3 * clock_hz // 1_000_000)
+        chip.run()  # the firmware lowers the latch before the pins drive
+        chip.set_pin_modes({0: pe.PUSH_PULL, 1: pe.PUSH_PULL, 2: pe.INPUT})
+
+    def read(self):
+        """The buttons held down, as a list of their names."""
+        self.chip.push(0)
+        word = self.chip.pop()
+        return [name for k, name in enumerate(self.BUTTONS) if not (word >> (7 - k)) & 1]
+
+
+def modbus_crc16(data):
+    """Modbus RTU's CRC: polynomial 0xA001 (reflected), start 0xFFFF."""
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    return crc
+
+
+def modbus_frame(server, function, payload):
+    """A Modbus RTU frame: server address, function code, payload, and the
+    CRC low byte first. Send it with UartTx, and leave 3.5 character times
+    of silence before the next."""
+    body = bytes([server, function]) + bytes(payload)
+    crc = modbus_crc16(body)
+    return body + bytes([crc & 0xFF, crc >> 8])
 
 
 class WiegandError(Exception):

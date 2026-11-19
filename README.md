@@ -119,8 +119,13 @@ are in [`docs/firmware.md`](docs/firmware.md).
 | MDIO | controller, reads and writes | 7 | a PHY written from IEEE 802.3 clause 22; sigrok's MDIO decoder |
 | DALI | forward frame transmitter | 17 | sigrok's DALI decoder |
 | RC-5 infrared | transmitter, 36 kHz carrier included | 37 | sigrok's RC-5 decoder |
+| PWM, RC servo | generator | 8 | sigrok's PWM decoder; exact to the cycle |
+| NES gamepad | host | 7 | a pad's shift register written from its data sheet; sigrok's gamepad decoder |
 | MIDI | on the UART transmitter | no new firmware | sigrok's MIDI decoder |
 | LIN | master frames, on the DMX512 transmitter | no new firmware | sigrok's LIN decoder |
+| Modbus RTU | requests, on the UART transmitter | no new firmware | sigrok's Modbus decoder, which checks the CRC |
+| 24Cxx EEPROM, DS1307 clock, LM75 sensor | on the I2C controller | no new firmware | sigrok's decoder for each; cocotbext-i2c's memory |
+| SPI NOR flash, WS2801 LEDs | on the SPI controller | no new firmware | sigrok's decoder for each; picosoc's flash |
 | MAX7219 | on the SPI controller | no new firmware | sigrok's MAX7219 decoder |
 
 The "checked against" models are other people's wherever one exists. For

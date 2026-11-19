@@ -2821,3 +2821,319 @@ async def test_nec_receive(dut):
     await rest
     assert await read() == (0xFF, 0x00)
     assert await waiting() == 0
+
+
+# --- Devices on the engines the chip already had ------------------------------
+#
+# A device's own protocol on top of a bus: no new firmware, only what the
+# host sends. sigrok's decoder for the device, stacked on its decoder for the
+# bus, must find in the recording what the host meant.
+
+
+async def i2c_session(dut, address, size):
+    """The divider-timed I2C controller on a bus with cocotbext-i2c's memory
+    at [address]; returns the memory and a function running one transfer
+    (the words to push; the reports popped)."""
+    dut.dev_mode.value = 1
+    memory = I2cMemory(sda=dut.i2c_sda, sda_o=dut.i2c_sda_dev, scl=dut.i2c_scl,
+                       scl_o=dut.i2c_scl_dev, addr=address, size=size)
+    await load(dut, firmware("i2c"))
+    await configure_i2c(dut)
+    await write(dut, PIN_MODES, 0b1010)  # P0 SDA, P1 SCL open-drain
+    await write(dut, CTRL, 1)
+
+    async def transfer(words):
+        reports = []
+        for w in words:  # a report comes back for every word, and the FIFOs hold four
+            await push(dut, w)
+            reports.append(await pop(dut))
+        return reports
+
+    def write_bytes(data):
+        """START, address + W, the bytes, STOP."""
+        return [i2c_write_word(address << 1, False)] + [
+            i2c_write_word(b, k == len(data) - 1) for k, b in enumerate(data)]
+
+    def read_bytes(pointer, n):
+        """Set the pointer, repeated START, address + R, n bytes, STOP."""
+        return [i2c_write_word(address << 1, False), i2c_write_word(pointer, True),
+                i2c_write_word((address << 1) | 1, False)] + [
+                    i2c_read_word(k == n - 1) for k in range(n)]
+
+    return memory, transfer, write_bytes, read_bytes
+
+
+def i2c_trace(dut):
+    return sigrok.Trace(dut, {"scl": lambda: int(dut.i2c_scl.value),
+                              "sda": lambda: int(dut.i2c_sda.value)})
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_eeprom_24xx(dut):
+    """A 24Cxx EEPROM on the I2C controller: a page write, a byte write and
+    a read from the address they leave behind. sigrok's 24xx decoder, on
+    its I2C decoder, names both writes; cocotbext-i2c's memory holds what
+    was written and supplies what is read."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    memory, transfer, write_bytes, _ = await i2c_session(dut, 0x50, 256)
+    await transfer(write_bytes([0x10, 0xDE, 0xAD, 0xBE]))
+    await ClockCycles(dut.clk, 200)
+    await transfer(write_bytes([0x0F, 0x55]))
+    await ClockCycles(dut.clk, 200)
+    reports = await transfer([i2c_write_word(0xA1, False)] + [i2c_read_word(k == 2) for k in range(3)])
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert memory.read_mem(0x0F, 4) == bytes([0x55, 0xDE, 0xAD, 0xBE])
+    assert [rev8(r & 0xFF) for r in reports[1:]] == [0xDE, 0xAD, 0xBE], reports
+    if sigrok.available():
+        decoder = "i2c,eeprom24xx"
+        named = lambda found: [t for t in texts(found) if "(addr=" in t]
+        want = ["Page write (addr=10, 3 bytes): DE AD BE", "Byte write (addr=0F, 1 byte): 55"]
+        found = trace.decode(decoder, "eeprom24xx")
+        assert named(found) == want, named(found)
+        # The data line held low through the first data byte: not 0xDE.
+        a, b = next((a, b) for a, b, text in found if text == "Data byte 10: DE")
+        wrong = named(trace.forced("sda", a, b, 0).decode(decoder, "eeprom24xx"))
+        assert wrong != want, wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_ds1307_clock(dut):
+    """A DS1307 real-time clock on the I2C controller: the seven time
+    registers are set and read back. sigrok's DS1307 decoder, on its I2C
+    decoder, must read the date and time out of the bytes on the bus."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    memory, transfer, write_bytes, read_bytes = await i2c_session(dut, 0x68, 64)
+    # Seconds, minutes, hours, weekday, date, month, year, in BCD.
+    await transfer(write_bytes([0x00, 0x56, 0x34, 0x12, 0x04, 0x19, 0x11, 0x26]))
+    await ClockCycles(dut.clk, 200)
+    reports = await transfer(read_bytes(0x00, 7))
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert [rev8(r & 0xFF) for r in reports[3:]] == [0x56, 0x34, 0x12, 0x04, 0x19, 0x11, 0x26]
+    if sigrok.available():
+        times = [t for t in texts(trace.decode("i2c,ds1307", "ds1307")) if "date/time" in t]
+        assert len(times) == 2 and all(
+            t.endswith("date/time: Wednesday, 19.11.2026 12:34:56") for t in times), times
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_lm75_thermometer(dut):
+    """An LM75 temperature sensor on the I2C controller: the two-byte read
+    every driver does. sigrok's LM75 decoder must make 25.5 degrees of it."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    memory, transfer, _, _ = await i2c_session(dut, 0x48, 8)
+    memory.write_mem(0, bytes([0x19, 0x80]))  # 25.5 degrees: 9 bits, 0.5 each
+    reports = await transfer([i2c_write_word(0x91, False)] + [i2c_read_word(k == 1) for k in range(2)])
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert [rev8(r & 0xFF) for r in reports[1:]] == [0x19, 0x80], reports
+    if sigrok.available():
+        found = trace.decode("i2c,lm75", "lm75")
+        assert "Temperature: 25.5 °C" in texts(found), texts(found)
+        # The top data bit held high: a negative temperature.
+        a, b, _ = found[0]
+        wrong = texts(trace.forced("sda", a, a + 60, 1).decode("i2c,lm75", "lm75"))
+        assert "Temperature: 25.5 °C" not in wrong, wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_spi_flash_commands(dut):
+    """A SPI NOR flash on the SPI controller, driven by the board driver:
+    release from power-down, then a read. sigrok's flash decoder, on its
+    SPI decoder, must name the commands, the address and the data."""
+    await reset(dut)
+    address, data = 0x000100, [0x12, 0x34, 0x56]
+    for k, b in enumerate(data):
+        dut.flash.memory[address + k].value = b
+    dut.dev_mode.value = 2
+    trace = sigrok.Trace(dut, {"sck": lambda: int(dut.uio_out.value) & 1,
+                               "mosi": lambda: (int(dut.uio_out.value) >> 1) & 1,
+                               "miso": lambda: 0 if str(dut.flash_io1.value) == "0" else 1,
+                               "cs": lambda: (int(dut.uio_out.value) >> 3) & 1})
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def read_flash():
+        spi = pe.SpiController(chip, firmware("spi_fast"))
+        spi.transfer([0xAB])
+        return spi.transfer([0x03, 0x00, 0x01, 0x00, 0, 0, 0])[4:]
+
+    assert await read_flash() == data
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    if sigrok.available():
+        decoder = "spi:clk=sck:mosi=mosi:miso=miso:cs=cs,spiflash"
+        found = trace.decode(decoder, "spiflash")
+        got = texts(found)
+        assert "Command: Release from deep powerdown / Read electronic ID (RDP/RES)" in got, got
+        assert "Read data (addr 0x000100, 3 bytes): 12 34 56" in got, got
+        # The data-out line held high through the middle address byte.
+        a, b = next((a, b) for a, b, text in found if text == "Address bits 15..8: 0x01")
+        wrong = texts(trace.forced("mosi", a - 20, b, 1).decode(decoder, "spiflash"))
+        assert "Read data (addr 0x000100, 3 bytes): 12 34 56" not in wrong, wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_ws2801_leds(dut):
+    """WS2801 LED pixels on the SPI controller: three bytes a pixel. sigrok's
+    decoder for SPI LED strips must read the two colours."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    trace = pin_trace(dut, sck=0, mosi=1, cs=3)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def light():
+        pe.SpiController(chip, firmware("spi_fast")).transfer([0xFF, 0x80, 0x00, 0x00, 0x40, 0xFF])
+
+    await light()
+    await ClockCycles(dut.clk, 600)
+    trace.stop()
+    if sigrok.available():
+        decoder = "spi:clk=sck:mosi=mosi:cs=cs,rgb_led_spi"
+        found = trace.decode(decoder, "rgb_led_spi")
+        assert texts(found) == ["#ff8000", "#0040ff"], texts(found)
+        a, b, _ = found[1]
+        wrong = texts(trace.forced("mosi", a - 20, a + 200, 1).decode(decoder, "rgb_led_spi"))
+        assert wrong[0] == "#ff8000" and wrong[1] != "#0040ff", wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_modbus_rtu(dut):
+    """A Modbus RTU request on the UART transmitter: the example in the
+    Modbus specification (read three holding registers from 0x006B of
+    server 17), whose bytes and CRC are copied from there. sigrok's Modbus
+    decoder, on its UART decoder, must read the request and pass the CRC."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    trace = pin_trace(dut, tx=0)
+    chip = pe.Chip(sim_port(dut))
+    frame = more.modbus_frame(0x11, 0x03, [0x00, 0x6B, 0x00, 0x03])
+    assert frame == bytes([0x11, 0x03, 0x00, 0x6B, 0x00, 0x03, 0x76, 0x87]), frame.hex()
+
+    @bridge
+    def send():
+        pe.UartTx(chip, firmware("uart_tx"), divisor=87).write(frame)  # 114,943 baud
+
+    await send()
+    await ClockCycles(dut.clk, 8000)  # the silence that ends a frame
+    trace.stop()
+    if sigrok.available():
+        decoder = "uart:tx=tx:baudrate=114943,modbus"
+        want = ["Slave ID: 17", "Function 3: Read Holding Registers",
+                "Start at address 0x6B / 30108", "Read 3 units of data", "CRC correct"]
+        found = trace.decode(decoder, "modbus")
+        assert texts(found) == want, texts(found)
+        # One data bit of the register count held high: the CRC no longer fits.
+        a = found[3][0]
+        wrong = texts(trace.forced("tx", a + 2 * 87, a + 3 * 87, 1).decode(decoder, "modbus"))
+        assert "CRC correct" not in wrong, wrong
+
+
+async def nes_pad_model(dut, state):
+    """A gamepad's 4021 shift register, from its data sheet: while the latch
+    (pin 0) is high it holds the eight buttons, A at the output; each rising
+    edge of the clock (pin 1) moves the next one to the output (pin 2).
+    [state]["held"] is the set of buttons down; a button down reads 0."""
+    order = ("A", "B", "Select", "Start", "Up", "Down", "Left", "Right")
+    register, was = [1] * 8, 1
+    while True:
+        await RisingEdge(dut.clk)
+        pins = int(dut.uio_out.value)
+        latch, clock = pins & 1, (pins >> 1) & 1
+        if latch:
+            register = [0 if name in state["held"] else 1 for name in order]
+        elif clock and not was:
+            register = register[1:] + [1]
+        was = clock
+        state["out"] = register[0]
+        drive_pin(dut, 2, register[0])
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_nes_gamepad(dut):
+    """An NES gamepad read as the console reads it, against a pad's shift
+    register written from its data sheet. sigrok's gamepad decoder, on its
+    SPI decoder, must name the buttons held in each reading."""
+    await reset(dut)
+    dut.dev_mode.value = 0  # an earlier test's device may still be wired to the pins
+    dut.uio_in.value = 0xFF
+    state = {"held": set(), "out": 1}
+    cocotb.start_soon(nes_pad_model(dut, state))
+    clock = lambda: (int(dut.uio_out.value) >> 1) & 1 if (int(dut.uio_oe.value) >> 1) & 1 else 1
+    trace = sigrok.Trace(dut, {"clk": clock, "data": lambda: state["out"]})
+    latch = pin_trace(dut, latch=0, clock=1)
+    chip = pe.Chip(sim_port(dut))
+    pad = []
+
+    @bridge
+    def start():
+        pad.append(more.NesPad(chip, firmware("nes_pad")))
+
+    @bridge
+    def read():
+        return set(pad[0].read())
+
+    await start()
+    readings = [set(), {"A"}, {"Start", "Right"}, {"B", "Select", "Up", "Down", "Left"}]
+    for held in readings:
+        state["held"] = held
+        assert await read() == held
+    await ClockCycles(dut.clk, 500)
+    trace.stop()
+    latch.stop()
+    # The console's timing: latch 12 us; clock low 6 us, eight times a reading.
+    lows = [b - a for a, b in latch.low_pulses("clock")]
+    assert lows == [60] * (8 * len(readings)), lows
+    if sigrok.available():
+        decoder = "spi:clk=clk:miso=data:cpol=1:cpha=0,nes_gamepad"
+        found = trace.decode(decoder, "nes_gamepad")
+        want = ["No button is pressed", "A", "Start + East", "B + Select + North + South + West"]
+        assert texts(found) == want, texts(found)
+        # The data line held low for the second reading: every button down.
+        a, b, _ = found[1]
+        wrong = texts(trace.forced("data", a - 200, b + 200, 0).decode(decoder, "nes_gamepad"))
+        assert wrong[1] != "A" and wrong[2:] == want[2:], wrong
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_pwm(dut):
+    """PWM: 30% of a 1 ms period, then a servo's 1.5 ms pulse every 20 ms,
+    each exact to the clock cycle. sigrok's PWM decoder measures both."""
+    await reset(dut)
+    trace = pin_trace(dut, pwm=0)
+    chip = pe.Chip(sim_port(dut))
+    pwm = []
+
+    @bridge
+    def start():
+        pwm.append(more.Pwm(chip, firmware("pwm")))
+        pwm[0].set(300, 1000)
+
+    @bridge
+    def servo():
+        pwm[0].servo(1500)
+
+    await start()
+    await ClockCycles(dut.clk, 60_000)
+    changed = trace.n  # samples so far
+    await servo()
+    await ClockCycles(dut.clk, 3 * 200_000)
+    trace.stop()
+    edges = trace.level("pwm")
+    rises = [t for t, v in edges if v == 1][1:]  # [0]: before the pin drives
+    falls = [t for t, v in edges if v == 0]
+    first = [(r, f) for r, f in zip(rises, falls[1:]) if f < changed]
+    assert len(first) >= 4 and {f - r for r, f in first} == {3000}, first
+    assert {b[0] - a[0] for a, b in zip(first, first[1:])} == {10_000}
+    last = [(r, f) for r, f in zip(rises, falls[1:]) if r > changed + 1000]
+    assert len(last) >= 2 and {f - r for r, f in last} == {15_000}, last
+    assert {b[0] - a[0] for a, b in zip(last, last[1:])} == {200_000}
+    if sigrok.available():
+        found = texts(trace.decode("pwm"))
+        assert found[:2] == ["30.000000%", "1000.0 μs"], found[:4]
+        assert found[-2:] == ["7.500000%", "20.0 ms"], found[-4:]

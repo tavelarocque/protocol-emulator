@@ -31,6 +31,8 @@ them, so they cannot drift.
 | [`rc5_tx.s`](rc5_tx.s) | RC-5 infrared transmitter, with carrier | 37 |
 | [`wiegand_rx.s`](wiegand_rx.s) | Wiegand receiver | 16 |
 | [`nec_rx.s`](nec_rx.s) | NEC infrared receiver | 33 |
+| [`pwm.s`](pwm.s) | PWM, RC servo pulses | 8 |
+| [`nes_pad.s`](nes_pad.s) | NES gamepad | 7 |
 | [`echo.s`](echo.s) | TX FIFO to RX FIFO, for bring-up | 5 |
 | [`ws2812/`](ws2812) | WS2812 LEDs: the blind firmware test, with its task and hidden test | 16 |
 
