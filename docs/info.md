@@ -64,6 +64,12 @@ demo board wired to the chip's RTL (`test/board_emu`), the closest thing to
 the board short of one; the 1-Wire, PS/2 and CAN classes have run in cocotb
 only.
 
+The drivers for the protocols added on v2.0 (I2S, DMX512, Wiegand, NEC and
+RC-5 infrared, MDIO, DALI, LIN) are in `host/more_protocols.py`: copy it too
+if you use them. They are a second file because MicroPython compiles a
+module whole, and on an RP2040 one file with every driver no longer fits
+in memory.
+
 With the demo board's microcontroller as SPI host: load a firmware image (for
 example the 15-instruction UART transmitter in `test/uart_tx.hex`) into
 addresses 0x00 upwards, set PIN_MODES to 0x0001 (P0 push-pull), write 1 to

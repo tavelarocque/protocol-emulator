@@ -1031,6 +1031,7 @@ import sys  # noqa: E402
 
 sys.path.insert(0, os.path.join(HERE, "..", "host"))
 import protocol_emulator as pe
+import more_protocols as more
 import sigrok  # noqa: E402
 
 try:
@@ -2283,7 +2284,7 @@ async def test_i2s(dut):
     def play():
         # One more frame than is checked: a decoder closes a sample on the
         # word-select edge after it.
-        pe.I2sTx(chip, firmware("i2s_tx"), first=frames[:2]).write(frames[2:] + [(0, 0)])
+        more.I2sTx(chip, firmware("i2s_tx"), first=frames[:2]).write(frames[2:] + [(0, 0)])
 
     await play()
     await ClockCycles(dut.clk, 400)
@@ -2312,7 +2313,7 @@ async def test_dmx512(dut):
 
     @bridge
     def play():
-        dmx = pe.DmxTx(chip, firmware("dmx_tx"))
+        dmx = more.DmxTx(chip, firmware("dmx_tx"))
         for slots in packets:
             dmx.send(slots)
 
@@ -2353,7 +2354,7 @@ async def test_wiegand(dut):
 
     @bridge
     def play():
-        pe.WiegandTx(chip, firmware("wiegand_tx")).send26(facility, card)
+        more.WiegandTx(chip, firmware("wiegand_tx")).send26(facility, card)
 
     await play()
     await ClockCycles(dut.clk, 300_000)
@@ -2385,7 +2386,7 @@ async def test_nec_infrared(dut):
 
     @bridge
     def play():
-        pe.NecTx(chip, firmware("nec_tx")).send(address, command)
+        more.NecTx(chip, firmware("nec_tx")).send(address, command)
 
     await play()
     await ClockCycles(dut.clk, 760_000)
@@ -2526,13 +2527,13 @@ async def test_mdio(dut):
 
     @bridge
     def play():
-        bus = pe.Mdio(chip, firmware("mdio"))
+        bus = more.Mdio(chip, firmware("mdio"))
         bus.write(5, 0, 0x1140)
         got.append(bus.read(5, 2))
         got.append(bus.read(5, 3))
         try:
             bus.read(6, 2)
-        except pe.MdioError:
+        except more.MdioError:
             got.append("nobody")
 
     await play()
@@ -2562,7 +2563,7 @@ async def test_dali(dut):
 
     @bridge
     def play():
-        dali = pe.DaliTx(chip, firmware("dali_tx"))
+        dali = more.DaliTx(chip, firmware("dali_tx"))
         dali.send(0xFF, 0x05)  # broadcast: recall maximum level
         dali.send(0x02, 0xA5)  # short address 1: arc power 165
 
@@ -2611,7 +2612,7 @@ async def test_rc5_infrared(dut):
 
     @bridge
     def play():
-        pe.Rc5Tx(chip, firmware("rc5_tx")).send(0x05, 0x35)
+        more.Rc5Tx(chip, firmware("rc5_tx")).send(0x05, 0x35)
 
     await play()
     await ClockCycles(dut.clk, 280_000)
@@ -2656,7 +2657,7 @@ async def test_lin(dut):
 
     @bridge
     def play():
-        pe.LinMaster(chip, firmware("dmx_tx")).send(0x23, [0x11, 0x22, 0x33, 0x44])
+        more.LinMaster(chip, firmware("dmx_tx")).send(0x23, [0x11, 0x22, 0x33, 0x44])
 
     await play()
     await ClockCycles(dut.clk, 80_000)

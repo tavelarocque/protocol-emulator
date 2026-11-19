@@ -173,6 +173,8 @@ sim/     OCaml tests: ISA, lockstep harness, random and directed differential te
          formal proof, firmware, chip-level tests
 host/    MicroPython driver for the demo board, RP2040 or RP2350 (tested in cocotb, unchanged,
          and in MicroPython on an emulated board: test/board_emu)
+         more_protocols.py: the drivers for the protocols added on v2.0, a module of
+         their own so that each fits the Pico's memory when compiled
 src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v
 test/    cocotb testbench (RTL and gate-level) + generated firmware .hex;
          usbhostslave/ is a third-party USB device core and onewire_slave_model.v
