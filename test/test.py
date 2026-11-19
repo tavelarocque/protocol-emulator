@@ -2471,3 +2471,207 @@ async def test_max7219(dut):
         a, b, _ = found[-1]
         wrong = texts(trace.forced("mosi", a - 20, b, 1).decode(decoder, "max7219"))
         assert wrong[:-1] == want[:-1] and wrong[-1] != want[-1], wrong
+
+
+
+async def mdio_phy(dut, registers, driving, address=5, delay=3):
+    """A PHY written from clause 22 of IEEE 802.3, on MDC (pin 0) and MDIO
+    (pin 1, pulled up). It reads MDIO as MDC rises and, in a read addressed
+    to it, drives the turnaround 0 and the register MSB first, each bit
+    appearing [delay] cycles after a rising edge: 300 ns, the longest the
+    standard allows. [driving]["phy"] is the level the PHY puts on the
+    line."""
+    bits, drive, out, was, cycle, due = [], [], 1, 0, 0, []
+    while True:
+        await RisingEdge(dut.clk)
+        cycle += 1
+        while due and due[0][0] <= cycle:
+            out = due.pop(0)[1]
+        driving["phy"] = out
+        oe, pins = int(dut.uio_oe.value), int(dut.uio_out.value)
+        mdc = pins & 1
+        chip = 0 if (oe >> 1) & 1 and not (pins >> 1) & 1 else 1
+        dut.uio_in.value = (int(dut.uio_in.value) & ~2) | ((chip & out) << 1)
+        if mdc and not was:  # MDC rose on the pin one cycle ago
+            if drive:
+                due.append((cycle + delay - 2, drive.pop(0)))
+            else:
+                bits.append(chip & out)
+                frame = bits[-46:]
+                if len(frame) == 46 and all(frame[:32]) and frame[32:34] == [0, 1]:
+                    number = lambda field: int("".join(map(str, field)), 2)
+                    if frame[34:36] == [1, 0] and number(frame[36:41]) == address:
+                        value = registers.get(number(frame[41:46]), 0xFFFF)
+                        # Released, then 0, then the register, then released.
+                        drive = [1, 0] + [(value >> (15 - k)) & 1 for k in range(16)] + [1]
+                        due.append((cycle + delay - 2, drive.pop(0)))
+                    bits = []
+        was = mdc
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_mdio(dut):
+    """MDIO: a register write and two reads against a PHY that takes the
+    full 300 ns to answer, and a read of a PHY that is not there. sigrok's
+    MDIO decoder reads every frame off the bus."""
+    await reset(dut)
+    dut.dev_mode.value = 0  # an earlier test's device may still be wired to the pins
+    driving = {"phy": 1}
+    # The line is low when either end pulls it low.
+    line = lambda: driving["phy"] & ~(int(dut.uio_oe.value) & ~int(dut.uio_out.value)) >> 1 & 1
+    trace = sigrok.Trace(dut, {"mdc": lambda: int(dut.uio_out.value) & 1, "mdio": line})
+    cocotb.start_soon(mdio_phy(dut, {2: 0x0141, 3: 0x0DD1}, driving))
+    chip = pe.Chip(sim_port(dut))
+    got = []
+
+    @bridge
+    def play():
+        bus = pe.Mdio(chip, firmware("mdio"))
+        bus.write(5, 0, 0x1140)
+        got.append(bus.read(5, 2))
+        got.append(bus.read(5, 3))
+        try:
+            bus.read(6, 2)
+        except pe.MdioError:
+            got.append("nobody")
+
+    await play()
+    await ClockCycles(dut.clk, 100)
+    trace.stop()
+    assert got == [0x0141, 0x0DD1, "nobody"], got
+    if sigrok.available():
+        frames = lambda found: [t for t in texts(found) if t.startswith(("WRITE", "READ"))]
+        found = trace.decode("mdio")
+        want = ["WRITE: 1140 PHYAD: 05 REGAD: 00", "READ:  0141 PHYAD: 05 REGAD: 02",
+                "READ:  0DD1 PHYAD: 05 REGAD: 03", "READ:  FFFF PHYAD: 06 REGAD: 02 ERROR"]
+        assert frames(found) == want, frames(found)
+        # The line held high through the first read's turnaround: an error.
+        first_read = next(a for a, _, text in found if text == "OP: READ")
+        a, b = next((a, b) for a, b, text in found if text == "TA" and a > first_read)
+        wrong = frames(trace.forced("mdio", a, b, 1).decode("mdio"))
+        assert wrong[1].endswith("ERROR") and wrong[2:] == want[2:], wrong
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_dali(dut):
+    """DALI forward frames, read back by sigrok's DALI decoder; every half
+    bit must be the same length, whatever the bits either side of it."""
+    await reset(dut)
+    trace = pin_trace(dut, dali=0)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def play():
+        dali = pe.DaliTx(chip, firmware("dali_tx"))
+        dali.send(0xFF, 0x05)  # broadcast: recall maximum level
+        dali.send(0x02, 0xA5)  # short address 1: arc power 165
+
+    await play()
+    await ClockCycles(dut.clk, 500_000)
+    trace.stop()
+    half = 8 * 521
+    lows = {b - a for a, b in trace.low_pulses("dali")}
+    assert lows == {half, 2 * half}, f"low times {sorted(lows)}"
+    if sigrok.available():
+        want = ["BROADCAST", "Command: 5 (Recall Maximum Level)", "Short address: 1",
+                "Arc Power Level: 165"]
+        found = trace.decode("dali")
+        got = [t for t in texts(found) if t in want]
+        assert got == want, texts(found)
+        # The second half of the last bit of the first frame held low: not
+        # command 5 any more.
+        a, b = next((a, b) for a, b, text in found if text == "Raw data: 05")
+        wrong = texts(trace.forced("dali", b - half, b, 0).decode("dali"))
+        assert "Command: 5 (Recall Maximum Level)" not in wrong, wrong
+
+
+def ir_receiver(dut, pin, hold):
+    """What an IR receiver module makes of the LED on [pin]: its output is
+    active for as long as carrier has been seen within the last [hold]
+    cycles."""
+    since = [hold]
+
+    def level():
+        lit = (int(dut.uio_oe.value) >> pin) & (int(dut.uio_out.value) >> pin) & 1
+        since[0] = 0 if lit else since[0] + 1
+        return 1 if since[0] < hold else 0
+    return level
+
+
+@cocotb.test(timeout_time=400, timeout_unit="ms")
+async def test_rc5_infrared(dut):
+    """RC-5 infrared with its 36 kHz carrier, as the LED is driven. The
+    bursts must be whole numbers of carrier periods with no gap inside
+    them; sigrok's RC-5 decoder, which takes a receiver module's output,
+    is given the LED as such a module would report it."""
+    await reset(dut)
+    trace = sigrok.Trace(dut, {"ir": ir_receiver(dut, 0, 417)})  # 1.5 carrier periods
+    led = pin_trace(dut, led=0)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def play():
+        pe.Rc5Tx(chip, firmware("rc5_tx")).send(0x05, 0x35)
+
+    await play()
+    await ClockCycles(dut.clk, 280_000)
+    trace.stop()
+    led.stop()
+    rises = [t for t, v in led.level("led") if v == 1][1:]  # [0]: before the pin drives
+    bursts, n = [], 1
+    for a, b in zip(rises, rises[1:]):
+        if b - a == 278:  # one carrier period, 36.0 kHz
+            n += 1
+        else:
+            bursts.append(n)
+            n = 1
+    bursts.append(n)
+    # Worked out here from RC-5's rules: a 1 is silence then a burst of 32
+    # periods, a 0 a burst then silence, so where a 1 meets a 0 the two
+    # bursts are one of 64.
+    halves = "".join("01" if bit == "1" else "10" for bit in "111" "00101" "110101")
+    want_bursts = [32 * len(run) for run in halves.split("0") if run]
+    assert bursts == want_bursts, (bursts, want_bursts)
+    if sigrok.available():
+        decoder = "ir_rc5:polarity=active-high"
+        fields = lambda found: [t for t in texts(found) if not t.isdigit()]
+        want = ["Startbit1: 1", "Startbit2: 1", "Togglebit: 1",
+                "Address: 5 (Video cassette recorder 1)", "Command: 53 (Play)"]
+        found = trace.decode(decoder)
+        assert fields(found) == want, fields(found)
+        # The last burst blanked out: not command 53.
+        a, b = next((a, b) for a, b, text in found if text.startswith("Command"))
+        wrong = fields(trace.forced("ir", b - 10_000, b + 1_000, 0).decode(decoder))
+        assert wrong != want, wrong
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_lin(dut):
+    """A LIN frame from the master (break, sync, identifier, four data bytes,
+    checksum) on the DMX512 engine at 19,200 baud: sigrok's LIN decoder, on
+    its UART decoder, must read every field."""
+    await reset(dut)
+    trace = pin_trace(dut, lin=0)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def play():
+        pe.LinMaster(chip, firmware("dmx_tx")).send(0x23, [0x11, 0x22, 0x33, 0x44])
+
+    await play()
+    await ClockCycles(dut.clk, 80_000)
+    trace.stop()
+    if sigrok.available():
+        decoder = "uart:rx=lin:baudrate=19200,lin"
+        # Worked by hand: identifier 0x23 has parity bits 10, so 0xA3 goes on
+        # the wire; 0xA3 + 0x11 + 0x22 + 0x33 + 0x44 with the carries added
+        # back is 0x4E, and the checksum is its complement.
+        want = ["Break condition", "Sync", "ID: 23 Parity: 2 (ok)", "Data: 0x11", "Data: 0x22",
+                "Data: 0x33", "Data: 0x44", "Checksum: 0xB1"]
+        found = trace.decode(decoder, "lin")
+        assert texts(found) == want, texts(found)
+        # One bit of the identifier held low: its parity no longer fits.
+        a = found[2][0]
+        wrong = texts(trace.forced("lin", a + 521, a + 2 * 521, 0).decode(decoder, "lin"))
+        dut._log.info("%s", wrong)
+        assert wrong != want and "ID: 23 Parity: 2 (ok)" not in wrong, wrong

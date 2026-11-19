@@ -28,12 +28,17 @@ is 64 words.
 | DMX512 transmitter | 26 | break, mark after break, start code and slots at 250 kbit/s, two stop bits; the break is counted in the input shift register's bit counter, the only counter left free |
 | Wiegand transmitter | 17 | any frame length; 50 us pulses exactly 1 ms apart, also across word boundaries |
 | NEC infrared transmitter | 25 | the 38 kHz carrier included, so the pin drives an IR LED; leader, 32 bits by pulse distance, final burst |
+| MDIO controller | 7 | clause 22 reads and writes, MDC up to 2.5 MHz; the data line is open-drain, and each word shifted out comes back as the word read meanwhile, so one loop serves both directions |
+| DALI forward frame transmitter | 17 | 1200 bit/s Manchester code with every half bit exactly the same length; the bit loop exists twice, once for each level the bus may be holding while the next bit is fetched |
+| RC-5 infrared transmitter | 37 | the 36 kHz carrier included; looks one bit ahead so that where a 1 meets a 0 their two bursts are one unbroken burst |
 
 Everything from the I2C target down was written after the hardware was
 frozen at v1.4, as firmware alone.
 
-The last four were written on v2.0, in one sitting, each tested by handing
-the recorded pins to sigrok's decoder for that protocol.
+The last seven were written on v2.0, each tested by handing the recorded
+pins to sigrok's decoder for that protocol. MDIO also reads from a PHY
+model written from the standard, one that takes the full 300 ns it is
+allowed to answer.
 
 **Protocols that need no engine of their own.** Some protocols are an
 existing engine at particular settings plus framing on the host, and are
@@ -44,6 +49,7 @@ decoder for the bus:
 |---|---|---|
 | MIDI | UART transmitter, 320 clocks per bit (31,250 baud) | sigrok's MIDI decoder reads the notes |
 | MAX7219 LED driver | SPI controller, 16-bit frames | sigrok's MAX7219 decoder reads each register write |
+| LIN, master frames | DMX512 transmitter (a UART that can send a break), 19,200 baud | sigrok's LIN decoder reads break, sync, identifier, data and checksum, and checks the parity and the checksum |
 
 **The blind test.** The WS2812 driver was written by a programmer (an AI
 agent) given only [`isa.md`](isa.md) and the simulator. It passed a hidden

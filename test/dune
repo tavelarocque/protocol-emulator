@@ -184,3 +184,27 @@
   (with-stdout-to
    nec_tx.hex
    (run %{dep:../bin/firmware_hex.exe} nec_tx))))
+
+(rule
+ (targets mdio.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   mdio.hex
+   (run %{dep:../bin/firmware_hex.exe} mdio))))
+
+(rule
+ (targets dali_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dali_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} dali_tx))))
+
+(rule
+ (targets rc5_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   rc5_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} rc5_tx))))

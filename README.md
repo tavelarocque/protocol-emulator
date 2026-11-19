@@ -116,7 +116,11 @@ are in [`docs/firmware.md`](docs/firmware.md).
 | DMX512 | transmitter | 26 | sigrok's DMX512 decoder |
 | Wiegand | transmitter | 17 | sigrok's Wiegand decoder |
 | NEC infrared | transmitter, 38 kHz carrier included | 25 | sigrok's NEC decoder |
+| MDIO | controller, reads and writes | 7 | a PHY written from IEEE 802.3 clause 22; sigrok's MDIO decoder |
+| DALI | forward frame transmitter | 17 | sigrok's DALI decoder |
+| RC-5 infrared | transmitter, 36 kHz carrier included | 37 | sigrok's RC-5 decoder |
 | MIDI | on the UART transmitter | no new firmware | sigrok's MIDI decoder |
+| LIN | master frames, on the DMX512 transmitter | no new firmware | sigrok's LIN decoder |
 | MAX7219 | on the SPI controller | no new firmware | sigrok's MAX7219 decoder |
 
 The "checked against" models are other people's wherever one exists. For

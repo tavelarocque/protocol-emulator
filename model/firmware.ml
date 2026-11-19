@@ -1772,6 +1772,194 @@ let nec_words ~address ~command =
   [ 341; address lor ((address lxor 0xFF) lsl 8); command lor ((command lxor 0xFF) lsl 8) ]
 ;;
 
+(* MDIO controller (IEEE 802.3 clause 22, the management bus of Ethernet
+   PHYs): a clock and one data line, 32 ones of preamble and then a 32-bit
+   frame, MSB first, of which the PHY drives the last 17 bits in a read.
+
+   Pins: P0 = MDC (side-set, push-pull); P1 = MDIO, open-drain with the
+   bus's pull-up, so writing a 1 releases the line for the PHY. Config:
+   [mdio_config]: sideset_base 0, sideset_count 1; out_base 1, in_base 1;
+   threshold 16; both shift directions MSB first.
+
+   Host protocol: every TX word is 16 bits shifted out, and comes back as an
+   RX word of the 16 bits read on the line at the same time. A frame is
+   four words: 0xFFFF, 0xFFFF, the header ([mdio_header]), and the data to
+   write or 0xFFFF to read. In a read the fourth RX word is the register,
+   and bit 0 of the third is the PHY's turnaround bit: 0 when one answered.
+
+   Timing, in cycles: MDC is 2 low and 2 high (5 low between words, or as
+   long as the host takes); MDIO
+   changes one cycle after MDC falls, which gives a PHY one cycle of setup
+   and two of hold. What is shifted in is the line as it stood one cycle
+   before MDC rose (the synchroniser's two cycles are counted in that), so a
+   PHY has three cycles after one rising edge to drive the bit for the
+   next. At 10 MHz with CLKDIV 1 that is MDC at 2.5 MHz and exactly the
+   300 ns the standard allows a PHY, with nothing to spare; the driver's
+   default is CLKDIV 2, 1.25 MHz, which leaves 300 ns of margin. *)
+let mdio =
+  {|
+        .side_set 1
+next:   pull           side 0
+bit:    out pins, 1    side 0       ; MDC low: the next bit goes out
+        nop            side 1       ; MDC rises
+        in pins, 1     side 1       ; the line as it was just before
+        jmp !osre bit  side 0       ; MDC falls
+        push           side 0
+        jmp next       side 0
+|}
+;;
+
+let mdio_config =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 1
+  ; out_base = 1
+  ; in_base = 1
+  ; threshold = 16
+  ; out_msb_first = true
+  ; in_msb_first = true
+  }
+;;
+
+(* Start 01, then 01 to write or 10 to read, the PHY and register numbers,
+   and the turnaround: 10 driven in a write, released (11) in a read. *)
+let mdio_header ~read ~phy ~reg =
+  (0b01 lsl 14)
+  lor ((if read then 0b10 else 0b01) lsl 12)
+  lor (phy lsl 7)
+  lor (reg lsl 2)
+  lor if read then 0b11 else 0b10
+;;
+
+(* DALI forward frame transmitter (lighting control): 1200 bit/s
+   Manchester code on a bus that idles high. A frame is a start bit (a 1),
+   16 bits MSB first (address byte, command byte) and the bus idle
+   again. A 1 is low for the first half of the bit and high for the second;
+   a 0 the other way round.
+
+   Pins: P0 = the bus level, push-pull (to a DALI driver; high = idle).
+   Config: [dali_tx_config]: sideset_base 0, sideset_count 1; threshold 16;
+   out_msb_first; CLKDIV sets the tick to 1/8 of a half bit: 521 for
+   52.1 us at 10 MHz.
+
+   Host protocol: one TX word per frame, address in bits 15:8 and command
+   in 7:0.
+
+   Timing, in ticks: every half bit is exactly 8, whatever the bits either
+   side of it, and each frame is followed by 256 of idle bus (13.3 ms: DALI
+   asks for 9.2 ms between forward frames).
+
+   The bit loop is written twice, once for a bus that is high and once for
+   one that is low, because fetching the next bit takes two ticks and the
+   bus must hold its level meanwhile. *)
+let dali_tx =
+  {|
+        .side_set 1
+frame:  pull            side 1        ; the bus idles high
+        set y, 16       side 1        ; 16 bits after the start bit
+        nop             side 0 [7]    ; start bit, a 1: the low half
+hi:     jmp y-- get_h   side 1 [5]    ; high half of a 1 (2 more in get_h)
+        jmp stop        side 1
+get_h:  out x, 1        side 1
+        jmp !x zero     side 1
+        jmp hi          side 0 [7]    ; a 1: the low half
+zero:   nop             side 1 [7]    ; a 0: the high half
+lo:     jmp y-- get_l   side 0 [5]    ; low half of a 0 (2 more in get_l)
+        jmp stop        side 0 [1]
+get_l:  out x, 1        side 0
+        jmp !x zero     side 0
+        jmp hi          side 0 [7]    ; a 1: the low half
+stop:   set x, 31       side 1
+idle:   jmp x-- idle    side 1 [7]
+        jmp frame       side 1
+|}
+;;
+
+let dali_tx_config =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 1
+  ; threshold = 16
+  ; out_msb_first = true
+  }
+;;
+
+(* RC-5 infrared transmitter (Philips remote controls), carrier included:
+   14 bits of Manchester code, 1.778 ms each: two start bits, a toggle bit,
+   5 address bits and 6 command bits, MSB first. A 1 is half a bit of
+   silence and then half a bit of 36 kHz carrier; a 0 the other way round.
+
+   Pins: P0 = the LED, push-pull, high = lit. Config: [rc5_tx_config]:
+   sideset_base 0, sideset_count 1; threshold 14; out_msb_first; CLKDIV
+   sets the tick to half a carrier period: 139 for 36.0 kHz at 10 MHz.
+
+   Host protocol: one TX word per frame, the 14 bits in bits 15:2
+   ([rc5_word]).
+
+   Timing, in ticks of 13.9 us: a burst is exactly 32 carrier periods (64
+   ticks, 890 us), and where a 1 is followed by a 0 their two bursts are one
+   unbroken burst of 64 periods, which is why the program looks a bit ahead
+   before each burst. Silences are 64 ticks, or 65 between two 0s. A frame
+   is followed by 89 ms of silence, so frames repeat every 114 ms as RC-5
+   has them. *)
+let rc5_tx =
+  {|
+        .side_set 1
+frame:  pull             side 0
+        set y, 13        side 0        ; 13 more bits after the first
+fetch:  out x, 1         side 0        ; a bit that arrives in silence
+        jmp !x zero      side 0
+one:    set x, 28        side 0        ; a 1: silence first
+s1:     jmp x-- s1       side 0 [1]
+        jmp y-- look     side 0        ; look at the bit after it
+        jmp last         side 0        ; there is none
+look:   out x, 1         side 0
+        jmp !x long      side 0
+        set x, 31        side 0        ; a 1 follows: 32 periods of carrier,
+b1:     nop              side 1        ; then on to that 1's silence
+        jmp x-- b1       side 0
+        jmp one          side 0
+zero:   set x, 31        side 0        ; a 0: carrier first
+b0:     nop              side 1
+        jmp x-- b0       side 0
+        jmp sil          side 0
+long:   set x, 30        side 0        ; a 0 follows a 1: their bursts are
+l1:     nop              side 1        ; one, 64 periods long
+        jmp x-- l1       side 0
+        set x, 31        side 1        ; (the 32nd period, while reloading)
+        nop              side 0
+l2:     nop              side 1
+        jmp x-- l2       side 0
+sil:    set x, 29        side 0        ; the 0's silence
+s0:     jmp x-- s0       side 0 [1]
+        jmp y-- fetch    side 0
+        jmp stop         side 0
+last:   set x, 31        side 0        ; the last bit, a 1: its burst
+b2:     nop              side 1
+        jmp x-- b2       side 0
+stop:   set y, 24        side 0        ; silence after the frame
+gap:    set x, 31        side 0
+g:      jmp x-- g        side 0 [7]
+        jmp y-- gap      side 0
+        jmp frame        side 0
+|}
+;;
+
+let rc5_tx_config =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 1
+  ; threshold = 14
+  ; out_msb_first = true
+  }
+;;
+
+(* Two start bits, the toggle bit (which a remote flips on each new key
+   press), address and command, left-aligned in the word. *)
+let rc5_word ~toggle ~address ~command =
+  ((0b11 lsl 12) lor (Bool.to_int toggle lsl 11) lor (address lsl 6) lor command) lsl 2
+;;
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo
@@ -1794,4 +1982,7 @@ let all =
   ; "dmx_tx", dmx_tx
   ; "wiegand_tx", wiegand_tx
   ; "nec_tx", nec_tx
+  ; "mdio", mdio
+  ; "dali_tx", dali_tx
+  ; "rc5_tx", rc5_tx
   ]

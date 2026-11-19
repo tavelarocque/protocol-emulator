@@ -345,3 +345,202 @@ let%test_unit "NEC infrared: a planted bug (a 1 with too short a silence) is cau
     (nec_receive (nec_run ~source:short ~address:0x04 ~command:0x08 ()))
     ~expect:None
 ;;
+
+(* --- MDIO ------------------------------------------------------------------- *)
+
+(* The model's bus has no PHY on it, only the pull-up, so the line is the
+   chip's own open-drain output and what the chip shifts in is what it
+   shifted out. Returns the pins on every cycle and the RX words. *)
+let mdio_run ?(source = Firmware.mdio) words =
+  let modes =
+    Array.init Isa.num_pins ~f:(fun i ->
+      match i with
+      | 0 -> Isa.Pin_mode.Push_pull
+      | 1 -> Open_drain
+      | _ -> Input)
+  in
+  let m =
+    Isa.create ~program:(Asm.assemble source) ~pin_modes:modes ~threads:[ Firmware.mdio_config ]
+  in
+  let pending = Queue.of_list words in
+  let read = ref [] in
+  let trace =
+    Array.init 600 ~f:(fun _ ->
+      (match Queue.peek pending with
+       | Some v -> if Isa.push_tx m ~thread:0 v then ignore (Queue.dequeue pending : int option)
+       | None -> ());
+      Option.iter (Isa.pop_rx m ~thread:0) ~f:(fun v -> read := v :: !read);
+      Isa.step m ~inputs:0xFF;
+      Isa.pin_out m)
+  in
+  trace, List.rev !read
+;;
+
+let mdio_frame = [ 0xFFFF; 0xFFFF; Firmware.mdio_header ~read:false ~phy:5 ~reg:0; 0x1140 ]
+
+(* What a PHY needs of a frame: MDIO at each rising edge of MDC spells the
+   words out MSB first, and does not move in the cycle before the edge or
+   the cycle after it. *)
+let mdio_as_a_phy_reads_it trace =
+  let rises = edges trace 0 1 in
+  let bits = List.map rises ~f:(fun t -> bit trace 1 t) in
+  let want =
+    List.concat_map mdio_frame ~f:(fun w -> List.init 16 ~f:(fun k -> (w lsr (15 - k)) land 1))
+  in
+  [%equal: int list] bits want
+  && List.for_all rises ~f:(fun t ->
+    bit trace 1 (t - 1) = bit trace 1 t && bit trace 1 (t + 1) = bit trace 1 t)
+;;
+
+let%test_unit "MDIO: the header is start, write or read, PHY, register, turnaround" =
+  [%test_result: int]
+    (Firmware.mdio_header ~read:false ~phy:5 ~reg:0)
+    ~expect:0b0101_00101_00000_10;
+  [%test_result: int]
+    (Firmware.mdio_header ~read:true ~phy:31 ~reg:2)
+    ~expect:0b0110_11111_00010_11
+;;
+
+let%test_unit "MDIO: a write frame as a PHY reads it, and as the chip reads it back" =
+  let trace, read = mdio_run mdio_frame in
+  assert (mdio_as_a_phy_reads_it trace);
+  [%test_result: int list] read ~expect:mdio_frame;
+  (* 2.5 MHz at most: rising edges four cycles apart, seven between words. *)
+  let rises = edges trace 0 1 in
+  let gaps = List.map2_exn (List.drop_last_exn rises) (List.tl_exn rises) ~f:(fun a b -> b - a) in
+  [%test_result: int list] (List.dedup_and_sort ~compare gaps) ~expect:[ 4; 7 ]
+;;
+
+let%test_unit "MDIO: a planted bug (data changing as the clock rises) is caught" =
+  let late =
+    String.substr_replace_first
+      Firmware.mdio
+      ~pattern:"out pins, 1    side 0"
+      ~with_:"out pins, 1    side 1"
+  in
+  assert (not (String.equal late Firmware.mdio));
+  assert (not (mdio_as_a_phy_reads_it (fst (mdio_run ~source:late mdio_frame))))
+;;
+
+(* --- DALI ------------------------------------------------------------------- *)
+
+let dali_half = 8 * 521 (* cycles: half a bit at 1200 bit/s, CLKDIV 521 *)
+
+let dali_run ?(source = Firmware.dali_tx) words =
+  record ~cycles:(List.length words * 350_000) ~pins:1 ~config:{ Firmware.dali_tx_config with clkdiv = 521 } source words
+;;
+
+(* Frames as a DALI receiver finds them: the bus falls from idle, and from
+   there each bit is two half bits read at their middles: low then high is
+   a 1, high then low a 0, anything else an error. A start bit, 16 bits, and
+   then the bus must stay high. *)
+let dali_receive trace =
+  let n = Array.length trace in
+  let frames = ref [] in
+  let t = ref 1 in
+  while !t < n do
+    if bit trace 0 !t = 0 && bit trace 0 (!t - 1) = 1
+    then (
+      let start = !t in
+      let half k = bit trace 0 (min (n - 1) (start + (k * dali_half) + (dali_half / 2))) in
+      let bits =
+        List.init 17 ~f:(fun k ->
+          match half (2 * k), half ((2 * k) + 1) with
+          | 0, 1 -> Some 1
+          | 1, 0 -> Some 0
+          | _ -> None)
+      in
+      let idle = List.for_all [ 34; 35; 36; 37 ] ~f:(fun k -> half k = 1) in
+      (frames
+       := (match Option.all bits with
+           | Some (1 :: data) when idle -> Some (List.fold data ~init:0 ~f:(fun a b -> (a lsl 1) lor b))
+           | _ -> None)
+          :: !frames);
+      t := start + (38 * dali_half))
+    else incr t
+  done;
+  List.rev !frames
+;;
+
+let dali_words = [ 0xFF05; 0x02A5; 0x0000; 0xFFFF; 0x5555; 0xAAAA ]
+
+let%test_unit "DALI: frames decode, and every half bit is the same length" =
+  let trace = dali_run dali_words in
+  [%test_result: int option list] (dali_receive trace) ~expect:(List.map dali_words ~f:Option.some);
+  let lengths = List.map (runs trace 0 0) ~f:snd |> List.dedup_and_sort ~compare in
+  [%test_result: int list] lengths ~expect:[ dali_half; 2 * dali_half ];
+  (* Between frames the bus rests 9.2 ms or more. *)
+  let highs = List.map (runs trace 0 1) ~f:snd in
+  assert (List.for_all highs ~f:(fun h -> h <= 2 * dali_half || h >= 92_000))
+;;
+
+let%test_unit "DALI: a planted bug (a short last half bit after a 0) is caught" =
+  let short = String.substr_replace_first Firmware.dali_tx ~pattern:"jmp stop        side 0 [1]" ~with_:"jmp stop        side 0" in
+  assert (not (String.equal short Firmware.dali_tx));
+  let lengths = List.map (runs (dali_run ~source:short dali_words) 0 0) ~f:snd |> List.dedup_and_sort ~compare in
+  assert (not ([%equal: int list] lengths [ dali_half; 2 * dali_half ]))
+;;
+
+(* --- RC-5 infrared ---------------------------------------------------------- *)
+
+let rc5_run ?(source = Firmware.rc5_tx) ~toggle ~address ~command () =
+  record ~cycles:280_000 ~pins:1 ~config:{ Firmware.rc5_tx_config with clkdiv = 139 } source [ Firmware.rc5_word ~toggle ~address ~command ]
+;;
+
+(* Bursts of carrier as (first cycle, carrier periods): rising edges exactly
+   one carrier period (278 cycles) apart belong to one burst. *)
+let rc5_bursts trace =
+  List.fold (edges trace 0 1) ~init:[] ~f:(fun acc t ->
+    match acc with
+    | (a, n, last) :: rest when t - last = 278 -> (a, n + 1, t) :: rest
+    | _ -> (t, 1, t) :: acc)
+  |> List.rev_map ~f:(fun (a, n, _) -> a, n)
+;;
+
+(* The 14 bits, from RC-5's rules. Each burst must be 32 or 64 carrier
+   periods and each silence between bursts one or two half bits, to within
+   an eighth of one; that gives the half bits in order, lit or dark, after
+   the dark half that begins the first start bit. Dark then lit is a 1, lit
+   then dark a 0. *)
+let rc5_receive trace =
+  let half = 32 * 278 in
+  let rec halves = function
+    | [] -> Some []
+    | (a, n) :: rest ->
+      let lit = List.init (n / 32) ~f:(fun _ -> true) in
+      (match rest with
+       | _ when n <> 32 && n <> 64 -> None
+       | [] -> Some lit
+       | (next, _) :: _ ->
+         let gap = next - (a + (n * 278)) in
+         let k = (gap + (half / 2)) / half in
+         if (k = 1 || k = 2) && abs (gap - (k * half)) <= half / 8
+         then Option.map (halves rest) ~f:(fun tail -> lit @ List.init k ~f:(fun _ -> false) @ tail)
+         else None)
+  in
+  match halves (rc5_bursts trace) with
+  | None -> None
+  | Some after_first ->
+    (* A frame ending in a 0 ends dark, which no burst shows. *)
+    let all = (false :: after_first) @ [ false ] in
+    let bits =
+      List.init 14 ~f:(fun i ->
+        match List.nth all (2 * i), List.nth all ((2 * i) + 1) with
+        | Some false, Some true -> Some 1
+        | Some true, Some false -> Some 0
+        | _ -> None)
+    in
+    Option.map (Option.all bits) ~f:(List.fold ~init:0 ~f:(fun a b -> (a lsl 1) lor b))
+;;
+
+let%test_unit "RC-5: frames decode, every burst whole and every silence in time" =
+  List.iter [ true, 5, 0x35; false, 0, 0; true, 31, 63; false, 21, 42; true, 10, 21 ] ~f:(fun (toggle, address, command) ->
+    let want = (0b11 lsl 12) lor (Bool.to_int toggle lsl 11) lor (address lsl 6) lor command in
+    [%test_result: int option] (rc5_receive (rc5_run ~toggle ~address ~command ())) ~expect:(Some want))
+;;
+
+let%test_unit "RC-5: a planted bug (a joined burst one period long) is caught" =
+  let long = String.substr_replace_first Firmware.rc5_tx ~pattern:"long:   set x, 30" ~with_:"long:   set x, 31" in
+  assert (not (String.equal long Firmware.rc5_tx));
+  [%test_result: int option] (rc5_receive (rc5_run ~source:long ~toggle:true ~address:5 ~command:0x35 ())) ~expect:None
+;;

@@ -183,3 +183,27 @@
   (with-stdout-to
    nec_tx.s
    (run %{dep:../bin/firmware_src.exe} nec_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets mdio.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   mdio.s
+   (run %{dep:../bin/firmware_src.exe} mdio %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets dali_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dali_tx.s
+   (run %{dep:../bin/firmware_src.exe} dali_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets rc5_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   rc5_tx.s
+   (run %{dep:../bin/firmware_src.exe} rc5_tx %{dep:../model/firmware.ml}))))
