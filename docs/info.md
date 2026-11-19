@@ -11,38 +11,49 @@ and verified cycle by cycle against an executable reference model.
 
 The host talks to the chip over SPI (mode 0, MSB first, SCK at most 1/8 of
 the core clock). Each transaction is 24 bits: a read/write bit, a 7-bit
-register address, and 16 data bits. Through it the host loads the 64-word
-program memory (shared by the two threads), configures each thread and the 8
-protocol pins (each input, push-pull or open-drain), enables the threads,
-and moves data through each thread's 4-deep TX and RX FIFOs. The two threads
-run at the same time, each executing one instruction per clock; if both
-write the same pin in the same cycle, thread 1 wins.
+register address, and 16 data bits. Through it the host loads the program
+memories (256 words for each thread, in SRAM, written 64 words at a time),
+configures each thread and the 8 protocol pins (each input, push-pull or
+open-drain), enables the threads, and moves data through each thread's
+4-deep TX and RX FIFOs. The two threads run at the same time, each
+executing one instruction per clock; if both write the same pin in the
+same cycle, thread 1 wins.
+
+A program write goes to the page, and to the memories, that the LOAD
+register names. LOAD resets to "page 0 of both memories", so loading one
+image and never touching LOAD gives two threads that share a program, as
+on v1.4. The memories are not cleared by reset: load a program before
+enabling a thread. A write to the memory of an enabled thread is ignored.
+A jump reaches the 64 words of the page in the thread's PAGE register,
+which START sets and `set page, n` changes; START and TIMEOUT_VECTOR are
+full 8-bit addresses.
 
 Thread 0's registers are at 0x41-0x4F; thread 1 has an identical bank at
-0x51-0x5F. CTRL, PIN_MODES and SYNC_BYPASS are global. Every protocol
+0x51-0x5F. CTRL, PIN_MODES, SYNC_BYPASS and LOAD are global. Every protocol
 pin's input passes through a two-flip-flop synchroniser (two cycles of
 delay) unless its SYNC_BYPASS bit is set; the side-set SPI controller needs
 it set on MISO.
 
 | Address | Register |
 |---|---|
-| 0x00-0x3F | program memory (write) |
+| 0x00-0x3F | program memory (write): word 0-63 of the page, in the memories, that LOAD names |
 | 0x40 | CTRL: bit 0 enables thread 0, bit 1 thread 1; bit 2 CHAIN (thread 0's RX FIFO feeds thread 1's TX FIFO) |
-| 0x41 | START address |
+| 0x41 | START address [7:0] |
 | 0x42 | OUT pins: base [2:0], count [7:4] |
 | 0x43 | SET pins: base [2:0], count [7:4] |
 | 0x44 | IN base [2:0] |
 | 0x45 | THRESHOLD (bits per FIFO word, 1-16) |
-| 0x46 | TIMEOUT_VECTOR |
+| 0x46 | TIMEOUT_VECTOR [7:0] |
 | 0x47 | PIN_MODES, 2 bits per pin: 0 input, 1 push-pull, 2 open-drain |
 | 0x48 | TX FIFO (write) |
 | 0x49 | RX FIFO (read) |
-| 0x4A | STATUS: pc [13:8], enable [7], RX level [6:4], TX level [2:0] |
+| 0x4A | STATUS: pc [15:8], enable [7], RX level [6:4], TX level [2:0] |
 | 0x4B | TIMEOUT: max cycles a timed wait stalls |
 | 0x4C | SIDESET: base pin [2:0], count [5:4] |
 | 0x4D | CLKDIV: the thread runs one cycle in every CLKDIV (0, 1: every cycle) |
 | 0x4E | SYNC_BYPASS (global): 1 bit per pin; set to read that pin without the 2-cycle input synchroniser |
 | 0x4F | SHIFT: bit 0 OUT most significant bit first, bit 1 IN most significant bit first |
+| 0x50 | LOAD (global): page that program writes go to [1:0]; bit 4 write thread 0's memory, bit 5 thread 1's. Resets to 0x30 |
 | 0x51-0x5F | thread 1: same layout as 0x41-0x4F (0x57 and 0x5E unused) |
 
 Status pins: uo[1] thread 0 running, uo[2] thread 0 RX data waiting, uo[3]
@@ -65,7 +76,8 @@ the board short of one; the 1-Wire, PS/2 and CAN classes have run in cocotb
 only.
 
 The drivers for the protocols added on v2.0 (I2S, DMX512, Wiegand and NEC
-infrared in both directions, RC-5 infrared, MDIO, DALI, LIN) are in `host/more_protocols.py`: copy it too
+infrared in both directions, RC-5 infrared, MDIO, DALI, LIN, PWM and
+servo pulses, the NES gamepad) are in `host/more_protocols.py`: copy it too
 if you use them. They are a second file because MicroPython compiles a
 module whole, and on an RP2040 one file with every driver no longer fits
 in memory.

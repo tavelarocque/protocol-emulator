@@ -44,8 +44,8 @@
 <text x="241" y="246" text-anchor="middle" font-size="12">per-thread config,</text>
 <text x="241" y="262" text-anchor="middle" font-size="12">pin modes, CTRL,</text>
 <text x="241" y="278" text-anchor="middle" font-size="12">FIFO access</text>
-<text x="510" y="46" text-anchor="middle" font-weight="600">Program memory: 64 words of 16 bits</text>
-<text x="510" y="64" text-anchor="middle" font-size="12">shared; one read port per thread</text>
+<text x="510" y="46" text-anchor="middle" font-weight="600">Program memory: 256 words per thread</text>
+<text x="510" y="64" text-anchor="middle" font-size="12">two SRAM macros, one for each thread</text>
 <text x="376" y="130" font-weight="600">Thread 0</text>
 <text x="376" y="150" font-size="12">PC, X, Y, OSR, ISR, delay and timeout counters,</text>
 <text x="376" y="166" font-size="12">clock divider. One instruction per clock.</text>

@@ -5,51 +5,60 @@
 An open-source protocol emulator ASIC for the
 [Jane Street protocol emulator competition](https://blog.janestreet.com/protocol-emulator-asic-competition/):
 a tiny CPU whose instructions read pins, write pins and count cycles, so UART,
-SPI and I2C are implemented in firmware loaded after fabrication rather than in
-fixed logic. Written in Hardcaml, designed for tapeout through
-[Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (8x4 tiles).
+SPI, I2C and 25 other protocols are implemented in firmware loaded after
+fabrication rather than in fixed logic. Written in Hardcaml, designed for
+tapeout through [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L
+(8x4 tiles).
 
-> **This branch is v2.0, in progress.** The program memory moves from 64
-> words of flip-flops shared by both threads to an SRAM macro of 256 words
-> for each thread, with a PAGE register for jumps
-> ([`docs/isa.md`](docs/isa.md), revision history). The model, the RTL, the
-> proofs and every test are updated and pass. The text and numbers below
-> still describe v1.4, the chip on `main`, until the v2 layout is
-> characterised.
+> **This branch is v2.0.** `main` holds v1.4, the same chip with 64 words
+> of flip-flop program memory shared by both threads, kept as a fallback.
+> v2.0 gives each thread 256 words in an SRAM macro; every v1.4 program
+> runs on it unchanged ([`docs/isa.md`](docs/isa.md), revision history).
 
 **In ten minutes:** [`docs/submission.md`](docs/submission.md) is the
 one-page summary for judges. This page is the map.
 
 ## Status
 
-- **Complete chip, laid out.** Two threads, 64 words of shared program
-  memory, 8 protocol pins (input, push-pull or open-drain each), loaded
-  over an SPI host port. 0 DRC, 0 LVS, timing met at every corner
+- **Complete chip, laid out.** Two threads, each with 256 words of program
+  memory in its own SRAM macro, 8 protocol pins (input, push-pull or
+  open-drain each), loaded over an SPI host port. LVS and the Tiny Tapeout
+  precheck pass, and timing is met at 50 MHz at every corner
   ([`docs/metrics.md`](docs/metrics.md)).
-- **Ten protocols as firmware**, two running at a time. UART, SPI and I2C as
-  required, in both roles for SPI and I2C; then JTAG, SWD, low-speed USB
-  host (the stretch goal), 1-Wire, WS2812, PS/2 and CAN.
-- **Nine engines added after the hardware froze**, with no RTL change. That
-  is the evidence for flexibility.
-- **Formally proven twice.** The whole chip, pins in to pins out, equals an
-  independent specification; and after every layout the gate netlist
-  equals the RTL.
+- **28 protocols as firmware**, two running at a time. UART, SPI and I2C as
+  required, in both roles for SPI and I2C; low-speed USB host (the stretch
+  goal); JTAG, SWD, 1-Wire, WS2812, PS/2 and CAN; I2S, DMX512, Wiegand, NEC
+  and RC-5 infrared, MDIO, DALI, PWM and a NES gamepad. Nineteen have
+  firmware of their own. Nine more (MIDI, LIN, Modbus RTU and six devices
+  on I2C and SPI) run on those engines with framing in the host driver.
+- **Hardware that did not need to know the protocols.** Nine engines were
+  added to v1.4 with no RTL change. v2.0 changed one thing, the program
+  memory, and eleven more engines followed, again with no RTL change.
+- **Three formal proofs.** The whole chip, pins in to pins out, equals an
+  independent specification; after every layout the gate netlist equals
+  the RTL; and the memory those proofs assume equals IHP's own model of
+  the SRAM macro.
+- **Judged by tools this project did not write.** Device models by other
+  people where one exists; for 21 tests the recorded pins go to sigrok's
+  protocol decoders.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
-- **Not yet done:** no FPGA or silicon run, and one slow-corner slew
-  warning. The full list is "What is not shown" in
-  [`docs/submission.md`](docs/submission.md).
+- **Not yet done:** no FPGA or silicon run, and signoff warnings for slew
+  and capacitance that are not yet explained. The full list is "What is
+  not shown" in [`docs/submission.md`](docs/submission.md).
 
 ## Architecture
 
 ![Block diagram: host, SPI port and registers, program memory, two threads with FIFOs, and the pins](docs/img/architecture.svg)
 
-[`docs/chip.html`](docs/chip.html) is the laid-out chip in 3D: every one of
+[`docs/chip.html`](docs/chip.html) is a laid-out chip in 3D: every one of
 the 101,866 cells where the tools placed it (17,925 of logic; the rest are
 the fill and decoupling cells that pack the empty rows), coloured by its block,
 with the reference model running real firmware in the page and lighting
-the flip-flops that hold a 1. It is one self-contained file with no network
-access: download it and open it in a browser, or
+the flip-flops that hold a 1. It shows the v1.4 layout, with the program
+memory as the block of flip-flops that v2.0 replaced by two SRAM macros;
+the v2.0 layout has not been rendered yet. It is one self-contained file
+with no network access: download it and open it in a browser, or
 [view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/chip.html).
 
 The instruction set ([`docs/isa.md`](docs/isa.md)) follows the RP2040's PIO:
@@ -57,9 +66,11 @@ The instruction set ([`docs/isa.md`](docs/isa.md)) follows the RP2040's PIO:
 - every instruction takes one cycle, plus a 0-15 cycle delay field
 - side-set: up to 3 pins driven from the delay field alongside any instruction
 - shift registers feed and drain 4-deep host FIFOs
-- two threads, each with its own PC, registers, FIFOs and configuration,
-  running every cycle from one shared program memory; when both write a pin
+- two threads, each with its own PC, registers, FIFOs, configuration and
+  256-word program memory, both running every cycle; when both write a pin
   in the same cycle, thread 1 wins
+- a jump reaches the 64 words of its page; a PAGE register per thread, set
+  by `set page`, chooses which of the four pages that is
 - a clock divider per thread, and CHAIN, which feeds thread 0's output
   straight into thread 1
 - a two-flip-flop synchroniser on every protocol pin input, bypassable per
@@ -86,6 +97,7 @@ It departs from PIO where PIO is weakest for protocol emulation:
 | Bit timing | fractional clock divider | counter loops, value supplied by the host at run time |
 | Program loading | internal bus | SPI port, so any external host can load firmware |
 | Undefined encodings | n/a | none: every 16-bit word is a defined instruction |
+| Program memory | 32 words, shared by four state machines | 256 words per thread, in SRAM |
 
 
 Each revision of the instruction set came from writing a protocol and
@@ -95,9 +107,10 @@ history.
 ## Protocols
 
 Assembly for each is in [`examples/`](examples); descriptions and limits
-are in [`docs/firmware.md`](docs/firmware.md).
+are in [`docs/firmware.md`](docs/firmware.md). Each thread has 256 words;
+the largest engine uses 63.
 
-| Protocol | Role | Instructions (of 64) | Checked against |
+| Protocol | Role | Instructions | Checked against |
 |---|---|---|---|
 | UART | TX and RX, full duplex | 15 + 15 | cocotbext-uart |
 | SPI | controller, to 5 Mbit/s | 26 | picosoc's SPI flash |
@@ -131,8 +144,11 @@ are in [`docs/firmware.md`](docs/firmware.md).
 The "checked against" models are other people's wherever one exists. For
 SWD, PS/2 and CAN the device model is written here from the standard, so
 the pins are also recorded and handed to sigrok's protocol decoders, which
-this project did not write ([`test/sigrok.py`](test/sigrok.py)). WS2812
-has only its data-sheet timing test.
+this project did not write ([`test/sigrok.py`](test/sigrok.py)). Every
+protocol from I2S down is judged the same way, by sigrok's decoder for it.
+In all but two of those tests (DS1307 and PWM) one bit is then forced on
+the recorded wire, and the decoder's verdict must change. WS2812 has only
+its data-sheet timing test.
 
 ## Verification
 
@@ -141,7 +157,7 @@ report: design decisions and their alternatives, how the layers of evidence
 chain into a claim about the chip, the real bugs found, and what is not
 covered. [`docs/verification-layers.md`](docs/verification-layers.md) has
 every layer and every planted bug, and [`docs/bug-ledger.md`](docs/bug-ledger.md)
-tells seven real bugs and which layer found each.
+tells eleven real bugs and which layer found each.
 
 The specification is executable: [`model/isa.ml`](model/isa.ml) is a
 reference model with no dependency on the hardware, so the two cannot share
@@ -150,24 +166,27 @@ a bug.
 | Question | Answer | How |
 |---|---|---|
 | Does the RTL match the specification? | Proven, for the whole chip | SAT equivalence (Hardcaml_verify + Z3) of one clock of the top level against an independent spec, for every state and every input |
-| Does the silicon netlist match the RTL? | Proven, after every layout | Yosys equivalence over every output and all 1,796 flip-flops ([`gl_equiv/`](gl_equiv)) |
+| Does the silicon netlist match the RTL? | Proven, after every layout | Yosys equivalence over every output, all 796 flip-flops and every pin of the two memories ([`gl_equiv/`](gl_equiv)) |
+| Is the memory in the proofs the memory on the chip? | Proven against IHP's model of the macro | Yosys: the flip-flop description the tests and proofs use equals IHP's behavioural model of the SRAM, tied off as the chip ties it ([`formal/`](formal)). That the silicon macro matches IHP's model is IHP's to guarantee |
 | Is every instruction defined? | Yes, all 65,536 words | exhaustive round trips, and the spec's datapath matched on every word |
-| Do the protocols work? | Each judged by an independent oracle | third-party device models in cocotb, on the RTL and the gate netlist |
+| Do the protocols work? | Each judged by an independent oracle | third-party device models and sigrok's decoders in cocotb, on the RTL and the gate netlist |
 | Does the host driver work? | The same file, unchanged | in cocotb, then in MicroPython on an emulated board (rp2040js) wired to the RTL |
-| Would the tests notice a bug? | 86 planted bugs, all caught | kept in the repo; the suite fails if one survives |
+| Would the tests notice a bug? | 103 planted bugs, all caught | kept in the repo; the suite fails if one survives |
 | Did the random tests reach everything? | Coverage is counted | any instruction, stall or timeout never seen fails the build |
 
 Generated files cannot drift: CI regenerates the Verilog, the firmware
 images, the example programs and the timing diagrams, and fails if a
 committed copy differs.
 
-The hardware is frozen at v1.4. Everything after it is firmware, testing
-and documentation, none of which can put the chip at risk.
+The hardware has changed once since v1.4, for the program memory (v2.0).
+Everything else since is firmware, testing and documentation, none of
+which can put the chip at risk.
 
 ## Repository
 
 ```
-hw/      Hardcaml RTL: pe_core (two threads), tiny_fifo, top (SPI port + registers)
+hw/      Hardcaml RTL: pe_core (two threads and their memories), tiny_fifo,
+         top (SPI port + registers)
 model/   reference model, assembler, firmware, UART oracles (no dependency on hw/)
 bin/     pe_sim: assemble a .s file, or run it on the reference model and print
          the pins as they change (`dune exec bin/pe_sim.exe -- run -help`);
@@ -180,11 +199,16 @@ host/    MicroPython driver for the demo board, RP2040 or RP2350 (tested in coco
          and in MicroPython on an emulated board: test/board_emu)
          more_protocols.py: the drivers for the protocols added on v2.0, a module of
          their own so that each fits the Pico's memory when compiled
-src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v
+src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v;
+         config.json, pdn_cfg.tcl and sram_bb.v place and power the SRAM macros
+         (from Tiny Tapeout's SRAM example, Apache-2.0)
 test/    cocotb testbench (RTL and gate-level) + generated firmware .hex;
+         sram_model/ is IHP's behavioural model of the SRAM macro;
          usbhostslave/ is a third-party USB device core and onewire_slave_model.v
          a third-party 1-Wire device model (both LGPL, test only)
 gl_equiv/ Yosys proof that the post-layout netlist equals the RTL (run in CI)
+formal/  Yosys proof that the memory the tests and proofs use equals IHP's
+         model of the SRAM macro (run in CI)
 docs/    submission.md (one-page summary), design-and-verification.md (the report),
          figures.py and img/ (diagrams drawn from the reference model),
          chip.html (the layout in 3D, one self-contained page),
@@ -197,7 +221,7 @@ docs/    submission.md (one-page summary), design-and-verification.md (the repor
 
 With the tools below installed, `./reproduce.sh` re-runs every check that
 needs no layout build and prints one pass or fail line per claim (about 15
-minutes for the OCaml suite and proof, then the cocotb suite).
+minutes for the OCaml suite and proofs, then about 25 for the cocotb suite).
 
 Uses a dedicated opam switch on OCaml 5.3.0 (Hardcaml's waveform viewer does
 not build on 5.4 yet).
@@ -222,9 +246,11 @@ then `node run_usb.mjs` there (see `test/board_emu/README.md`).
 
 ## Metrics
 
-The submitted layout, on Tiny Tapeout's ttihp27a flow (8x4 tiles, 25 ns
-target): 17,925 standard cells, 20.8% utilisation, 0.97 m of wire, setup
-slack +6.85 ns at the slow corner, hold +0.12 ns, 0 DRC and 0 LVS errors.
-The chip is specified for 10 MHz. One slew warning remains at the slow
-corner. History, the warning and what was tried:
-[`docs/metrics.md`](docs/metrics.md).
+The v2.0 layout, on Tiny Tapeout's ttihp27a flow (8x4 tiles, 20 ns
+target): 10,359 standard cells and two SRAM macros, 13.4% utilisation,
+0.44 m of wire, setup and hold met at every corner with about 4 ns to
+spare between flip-flops at the slow one, LVS and the Tiny Tapeout
+precheck passing, laid out in 20 to 30 minutes. The firmware here runs the chip
+at 10 MHz (12 MHz for USB). Slew and capacitance warnings remain and are
+not yet explained. The comparison with v1.4, the clock sweep and the
+warnings: [`docs/metrics.md`](docs/metrics.md).

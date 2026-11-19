@@ -6,7 +6,7 @@ runs, and opens with that firmware's documentation: pins, thread
 configuration, and what the host's FIFO words mean. `dune build` regenerates
 them, so they cannot drift.
 
-| File | Protocol | Instructions (of 64) |
+| File | Protocol | Instructions |
 |---|---|---|
 | [`uart_tx.s`](uart_tx.s) | UART transmitter, 8N1 | 15 |
 | [`uart_rx.s`](uart_rx.s) | UART receiver, with framing-error recovery | 15 |
@@ -37,7 +37,7 @@ them, so they cannot drift.
 | [`ws2812/`](ws2812) | WS2812 LEDs: the blind firmware test, with its task and hidden test | 16 |
 
 Two-thread images (full-duplex UART, SPI beside UART, the I2C-to-SPI
-bridge, the USB host, PS/2, CAN) place two of these in one memory; see
+bridge, the USB host, PS/2, CAN) place two of these in one image; see
 `Two_protocols`, `Bridge`, `Uart_duplex`, `Usb_host`, `Ps2` and `Can` in
 `model/firmware.ml`.
 

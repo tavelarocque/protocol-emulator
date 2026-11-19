@@ -2,8 +2,9 @@
 
 Every protocol engine, what it does and what it cost. The assembly is in
 [`examples/`](../examples), one file per engine, generated from the source
-the tests run: [`model/firmware.ml`](../model/firmware.ml). Program memory
-is 64 words.
+the tests run: [`model/firmware.ml`](../model/firmware.ml). Each thread
+has 256 words of program memory, in four pages of 64; every engine here
+fits in one page.
 
 ## Engines
 
@@ -36,10 +37,11 @@ is 64 words.
 | PWM, and RC servo pulses | 8 | high time and period each exact to the tick; the two counts live in the two shift registers, which leaves X free to count |
 | NES gamepad | 7 | read as the console reads it: latch, then eight clocks, a button read as each clock falls |
 
-Everything from the I2C target down was written after the hardware was
-frozen at v1.4, as firmware alone.
+Everything from the I2C target down to CAN was written after the hardware
+was frozen at v1.4, as firmware alone.
 
-The last eleven were written on v2.0. The transmitters are each tested by
+The last eleven were written on v2.0, whose only hardware change is the
+program memory; they too needed no change to the RTL. The transmitters are each tested by
 handing the recorded pins to sigrok's decoder for that protocol; the two
 receivers by sources written from the protocol's rules, with remotes off
 speed, frames cut short and, for NEC, repeat codes. MDIO also reads from a PHY
@@ -74,9 +76,14 @@ test of the LEDs' data-sheet timing on its first submission, in about five
 minutes. Task, notes and the hidden test:
 [`examples/ws2812`](../examples/ws2812).
 
-## Two programs in one memory
+## Two programs at once
 
-The assembler places a program at any origin, so two fit in one image:
+On v1.4 the two threads shared one memory of 64 words, so two programs
+had to fit in it together. On v2.0 each thread has 256 words of its own,
+and the host chooses with the LOAD register which memory a program is
+written to. Left alone, LOAD writes both, so a v1.4 image with two
+programs at different origins loads and runs as it always did. These are
+such images:
 
 - full-duplex UART, TX and RX on the two threads
 - side-set SPI beside UART
@@ -84,7 +91,7 @@ The assembler places a program at any origin, so two fit in one image:
   byte read over I2C out over SPI, no host in the data path
 - the USB host, PS/2 and CAN, each a pair of programs
 
-## How the instruction set got to v1.4
+## How the instruction set got here
 
 Each revision came from building something.
 
@@ -95,3 +102,4 @@ Each revision came from building something.
 | the I2C-to-SPI bridge | the I2C controller's delay loops were a third of its size | a clock divider per thread |
 | a review for silicon rather than simulation | the protocol pins had no input synchronisers | a two-flip-flop synchroniser per pin, bypassable |
 | every SPI host | bit-reversing bytes was an interface wart | a shift direction per thread |
+| the I2C target, and a CAN node that acknowledges | 64 shared words held one large program and nothing beside it, and a flip-flop memory could not be made larger | 256 words per thread in SRAM, and a PAGE register for jumps (v2.0) |

@@ -3,7 +3,7 @@
 Random differential testing is the backbone of this project's verification:
 400 random two-thread programs, each run for 300 cycles in lockstep against
 the reference model. It is very good at instruction-level behaviour and poor
-at combinations. A uniformly random 64-word program almost never sets up the
+at combinations. A uniformly random program almost never sets up the
 exact interplay of two threads, a clock divider, CHAIN and the FIFOs that a
 real protocol bridge relies on. This document describes how those gaps were
 found and closed, and how the result is kept honest.
@@ -54,49 +54,56 @@ found and closed, and how the result is kept honest.
 ## Results
 
 The random trials run 120,000 cycles (400 programs of 300). The directed
-suite is 10 scenarios, each run under 3 seeds for 200 to 400 cycles, about
-12,000 cycles in all.
+suite is 12 scenarios, each run under 3 seeds for 160 to 400 cycles, about
+13,000 cycles in all.
 
 | Cross bin | Random trials | Directed suite |
 |---|---:|---:|
-| pins: both threads write the same pin | 5,269 | 399 |
-| chain: move into thread 1 TX holding 0 | 129 | 12 |
-| chain: move into thread 1 TX holding 1 | 40 | 36 |
-| chain: move into thread 1 TX holding 2 | 23 | 33 |
-| chain: move into thread 1 TX holding 3 | 29 | 1,230 |
+| pins: both threads write the same pin | 6,295 | 399 |
+| chain: move into thread 1 TX holding 0 | 127 | 12 |
+| chain: move into thread 1 TX holding 1 | 61 | 36 |
+| chain: move into thread 1 TX holding 2 | 39 | 33 |
+| chain: move into thread 1 TX holding 3 | 55 | 1,230 |
 | chain: move in a cycle thread 1 pulls | **1** | 420 |
-| chain: move in a cycle thread 0 pushes | 10 | 558 |
-| chain: thread 0 PUSH stalled behind a full chain | 1,149 | 1,626 |
-| divider: timed wait expires on a divided thread | 375 | 42 |
-| divider: delay counted on a divided thread | 8,997 | 534 |
-| divider: side-set on a divided thread | 14,455 | 780 |
-| enable: disabled during a delay | 177 | 9 |
-| enable: disabled during a timed wait | 44 | 6 |
-| enable: disabled between divider ticks | 196 | 6 |
-| side-set: driven during a stall | 42,230 | 351 |
-| fifo: both threads stalled on FIFOs | 2,714 | 1,176 |
+| chain: move in a cycle thread 0 pushes | 7 | 558 |
+| chain: thread 0 PUSH stalled behind a full chain | 1,046 | 1,626 |
+| divider: timed wait expires on a divided thread | 216 | 42 |
+| divider: delay counted on a divided thread | 9,756 | 534 |
+| divider: side-set on a divided thread | 14,486 | 780 |
+| enable: disabled during a delay | 163 | 9 |
+| enable: disabled during a timed wait | 39 | 6 |
+| enable: disabled between divider ticks | 190 | 6 |
+| side-set: driven during a stall | 45,049 | 351 |
+| fifo: both threads stalled on FIFOs | 3,442 | 1,176 |
 
 The two bins random testing almost never reached, a word crossing the chain
 in the same cycle that thread 1 pulls or thread 0 pushes, are the
 simultaneous-access cases a FIFO is most likely to get wrong. Random trials
-hit them 1 and 10 times; the directed suite hits them hundreds of times, with
+hit them 1 and 7 times; the directed suite hits them hundreds of times, with
 about 10% of the simulated cycles.
 
-Planted RTL bugs caught by the directed suite (all 10; random trials needed
-up to 16 programs to catch the slowest):
+Planted RTL bugs caught by the directed suite (all 13; random trials needed
+up to 27 programs to catch the slowest):
 
 | Bug | Directed scenarios that catch it |
 |---|---:|
-| X never decrements (thread 1) | 1 of 10 |
-| Wait timeout ignores its budget (thread 1) | 3 of 10 |
-| Delay field ignored (thread 1) | 4 of 10 |
-| SET writes one pin too many (thread 1) | 2 of 10 |
-| PUSH not right-justified (thread 1) | 2 of 10 |
-| Pin priority inverted | 1 of 10 |
-| Thread 1 fetches from thread 0's PC | 10 of 10 |
-| CHAIN moves a word into a full FIFO | 3 of 10 |
-| PUSH ignores the IN shift direction (thread 1) | 1 of 10 |
-| Synchroniser bypass read with inverted polarity | 2 of 10 |
+| X never decrements (thread 1) | 1 of 12 |
+| Wait timeout ignores its budget (thread 1) | 3 of 12 |
+| Delay field ignored (thread 1) | 4 of 12 |
+| SET writes one pin too many (thread 1) | 4 of 12 |
+| PUSH not right-justified (thread 1) | 2 of 12 |
+| Pin priority inverted | 1 of 12 |
+| Thread 1 fetches from thread 0's PC | 12 of 12 |
+| CHAIN moves a word into a full FIFO | 3 of 12 |
+| PUSH ignores the IN shift direction (thread 1) | 1 of 12 |
+| Synchroniser bypass read with inverted polarity | 2 of 12 |
+| A jump ignores PAGE | 1 of 12 |
+| A host write lands in a running thread's memory | 1 of 12 |
+| No hold after a write to a thread's memory | 1 of 12 |
+
+The last three bugs and the two scenarios written for them (one jumps
+between pages, one rewrites a thread's program while it is stopped, while
+it runs, and just before it starts) came with v2.0's program memory.
 
 **The checks rejected a generated test.** The first version of the
 streaming scenario used two-instruction loops for both producer and

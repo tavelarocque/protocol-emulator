@@ -8,7 +8,9 @@
 #
 # Needs: opam with the packages in the README, z3, python3, Icarus Verilog,
 # and `pip install -r test/requirements.txt`. With sigrok-cli installed, the
-# cocotb stage also has sigrok's decoders judge SWD, PS/2 and CAN. The board
+# cocotb stage also has sigrok's decoders judge SWD, PS/2, CAN and every
+# protocol added on v2.0. With yowasp-yosys installed (pip), the memory the
+# proofs use is proven equal to IHP's model of the SRAM macro. The board
 # emulation (Verilator,
 # Node 22) and the RTL-to-netlist proof (a layout build's netlist) run only
 # in CI; section 8 of docs/design-and-verification.md has their commands.
@@ -40,6 +42,7 @@ if [ "$mode" != quick ]; then
 stage ocaml    "ISA, lockstep, coverage, firmware and the whole-chip proof" dune runtest --force
 fi
 stage examples "every example program assembles"                           examples
+stage memory   "the memory in the proofs equals IHP's model of the SRAM"   python3 formal/sram_equiv.py
 stage figures  "timing diagrams match the reference model"                 python3 docs/figures.py --check
 stage blind    "blind-written WS2812 firmware passes its hidden test"      blind
 stage drift    "generated files match the committed copies"                git diff --exit-code src/ test/ examples/

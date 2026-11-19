@@ -2,8 +2,9 @@
 
 Every real bug the verification found is in the table in
 [`design-and-verification.md`](design-and-verification.md), section 5.
-This page tells seven of them in full, chosen because each was found by a
-different layer and would have been missed by the others. A check that has
+This page tells eleven of them in full, chosen because each was found by a
+different layer and would have been missed by the others. The last four
+are from v2.0. A check that has
 found nothing has not been shown to work; these are what the checks found.
 
 ## 1. A handshake over a thousand times too late, visible only on the emulated board
@@ -135,3 +136,85 @@ synchroniser is bypassable per pin.
 
 *Found by:* review. *Lesson:* some bugs are outside what the tests can
 express, and the report says which ([section 7](design-and-verification.md)).
+
+## 8. The proof that passed without running
+
+v2.0 moved the program memory into SRAM macros, and the first layout came
+back with every check green, the netlist proof among them. That job had
+taken 20 seconds. On v1.4 it took minutes.
+
+The log showed a Python traceback. One of the planted netlist bugs picked
+"flip-flop 900", a choice made when the netlist had 1,796 flip-flops; v2.0
+has 796. The script crashed before proving anything. The workflow piped
+its output through `tee` to keep a copy, and a shell pipeline reports the
+exit status of its last command, so the step reported `tee`'s success. An
+earlier trial layout had "passed" the same way.
+
+The step now sets `pipefail`, the planted bugs take their positions from
+the netlist they are given, and a proof that ends with no verdict counts
+as a failure whichever outcome was wanted.
+
+*Found by:* reading the log of a job that had passed, because it was too
+fast. *Lesson:* a check that cannot report its own crash is not a check.
+A green result should be read at least once.
+
+## 9. The solver that ran out of stack
+
+With the crash fixed, half of the netlist proof still gave nothing on the
+real netlist: the induction step proved all 1,082 pairs, and the base case
+ended with neither "proved" nor a counterexample. On a small stand-in
+netlist, synthesised here, both halves passed.
+
+The new diagnostic showed the log stopping inside one Yosys pass,
+`equiv_miter`, with "wasm trap: call stack exhausted". That pass walks the
+circuit by recursion, CI runs the WebAssembly build of Yosys, whose stack
+is small and fixed, and the layout netlist was deep enough to exhaust it
+where the stand-in was not. Adding a chain of 4,000 flip-flops to the
+stand-in reproduced it exactly: same log, same place.
+
+The base case now builds the same comparison from ordinary passes that do
+not recurse, and it proves on the real netlist. The planted wrong reset
+value is still found.
+
+*Found by:* making the check say why it had no answer, then reproducing
+the failure on something small. *Lesson:* a tool can fail on size alone,
+and the real netlist is the only input of its size.
+
+## 10. The receiver that only a fast remote could break
+
+The NEC infrared receiver read frames correctly in every test with a
+remote at the nominal speed. The model test then swept the remote from 23%
+slow to 23% fast, since real remotes run from ceramic resonators and
+drift. Fast remotes failed: from the 17th bit on, every bit arrived one
+place early.
+
+The receiver sent its first 16 bits to the host straight after reading
+the 16th. Those two extra clock ticks were enough, with the remote running
+fast and the next bit a 0, to miss the start of the next burst. The word
+is now sent during the silence before a read, and the path that sends and
+the path that does not take exactly the same time.
+
+*Found by:* a source with its speed swept across the range real devices
+have. *Lesson:* the same one as the PS/2 story. At typical timing the bug
+does not exist.
+
+## 11. The driver that outgrew the board
+
+The driver is tested unchanged in cocotb, which runs it in ordinary
+Python on a laptop. Eight protocol classes were added to it for v2.0 and
+every cocotb test passed.
+
+The board check then failed before running anything: "MemoryError: memory
+allocation failed, allocating 12520 bytes". MicroPython compiles a module
+whole, in the microcontroller's own memory, and on an RP2040 the one file
+no longer fitted. On a real board the driver would not have loaded at
+all.
+
+The v2.0 protocols' drivers are now a second file,
+`host/more_protocols.py`, loaded after the first. The board check runs
+every class in it under MicroPython and under ordinary Python and
+requires the two to ask the chip for exactly the same things.
+
+*Found by:* MicroPython on the emulated board. *Lesson:* "the same file,
+unchanged" is only a claim about the board if the file is also run where
+the board runs it.

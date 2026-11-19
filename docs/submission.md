@@ -8,14 +8,16 @@ full report.
 
 ![Block diagram of the chip](img/architecture.svg)
 
-The laid-out chip in 3D, with the reference model running firmware on it:
+A laid-out chip in 3D, with the reference model running firmware on it:
 [`chip.html`](chip.html) (one self-contained file; download and open it, or
 [view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/chip.html)).
+It shows v1.4's layout; v2.0's, with the program memory in two SRAM macros,
+has not been rendered yet.
 
 The chip is a small CPU whose instructions read pins, write pins and count
-clock cycles. A protocol is a program of at most 64 instructions, loaded
-over SPI after fabrication. Nothing in the hardware knows what UART, SPI or
-I2C is.
+clock cycles. A protocol is a program, loaded over SPI after fabrication;
+the largest here is 63 instructions. Nothing in the hardware knows what
+UART, SPI or I2C is.
 
 The evidence that this is general is what happened after the hardware was
 frozen at v1.4. Nine protocol engines were then added, each as firmware alone, with
@@ -41,12 +43,22 @@ first submission. The seven things the programmer found unclear in the
 document are fixed. Task, notes and hidden test:
 [`examples/ws2812`](../examples/ws2812).
 
+v2.0 then changed one thing in the hardware, the program memory: 256 words
+for each thread in an SRAM macro, where v1.4 had 64 words of flip-flops
+shared by both. Every v1.4 program runs on it unchanged. Eleven more
+engines followed, again as firmware alone: I2S, DMX512, Wiegand and NEC
+infrared in both directions, RC-5 infrared, MDIO, DALI, PWM and a NES
+gamepad. Nine further protocols needed no firmware at all, only framing in
+the host driver on an engine the chip already had: MIDI, LIN, Modbus RTU,
+and six devices on I2C and SPI. That makes 28 protocols, every one but
+WS2812 with a test judged by something this project did not write.
+
 ## What it is, and what is different
 
-Two threads run at once from one 64-word program memory, over 8 protocol
-pins that are each input, push-pull or open-drain. Every instruction takes
-one clock plus a 0 to 15 clock delay. Written in Hardcaml; laid out on IHP
-130 nm CMOS5L, 8x4 Tiny Tapeout tiles.
+Two threads run at once, each from its own 256-word program memory, over 8
+protocol pins that are each input, push-pull or open-drain. Every
+instruction takes one clock plus a 0 to 15 clock delay. Written in
+Hardcaml; laid out on IHP 130 nm CMOS5L, 8x4 Tiny Tapeout tiles.
 
 The instruction set follows the RP2040's PIO and departs from it where PIO
 is weakest for emulating protocols:
@@ -70,7 +82,7 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 
 ## What it runs
 
-| Protocol | Role | Instructions (of 64) |
+| Protocol | Role | Instructions |
 |---|---|---|
 | UART | TX and RX, full duplex on the two threads | 15 + 15 |
 | SPI | controller (5 Mbit/s at 10 MHz) and device | 26, 23 |
@@ -82,6 +94,19 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 | PS/2 | host, both directions | 11 + 21 |
 | CAN | transmitter and listen-only receiver | 19 + 27 |
 | WS2812 LEDs | driver | 16 |
+| I2S | transmitter, 16-bit stereo | 11 |
+| DMX512 | transmitter | 26 |
+| Wiegand | transmitter and receiver | 17, 16 |
+| NEC infrared | transmitter with its 38 kHz carrier; receiver | 25, 33 |
+| RC-5 infrared | transmitter with its 36 kHz carrier | 37 |
+| MDIO | controller, reads and writes | 7 |
+| DALI | forward frame transmitter | 17 |
+| PWM, RC servo | generator, exact to the cycle | 8 |
+| NES gamepad | host | 7 |
+| MIDI, Modbus RTU | on the UART transmitter | no new firmware |
+| LIN | master frames, on the DMX512 transmitter | no new firmware |
+| 24Cxx EEPROM, DS1307 clock, LM75 sensor | on the I2C controller | no new firmware |
+| SPI NOR flash, WS2801 LEDs, MAX7219 | on the SPI controller | no new firmware |
 
 ![SPI controller waveform from the reference model](img/spi.svg)
 
@@ -94,38 +119,48 @@ runs a program on the reference model and prints the pins.
 1. **An executable specification.** A reference model with no dependency on
    the hardware; the RTL is compared with it every cycle over 400 random
    two-thread programs.
-2. **Two formal proofs.** The whole chip's RTL, pins to pins, is proven
+2. **Three formal proofs.** The whole chip's RTL, pins to pins, is proven
    equivalent to an independent specification (SAT, Z3). After every
-   layout, the post-layout gate netlist is proven equal to the RTL (Yosys,
-   all 1,796 flip-flops).
+   layout, the post-layout gate netlist is proven equal to the RTL (Yosys:
+   every output pin, all 796 flip-flops and every pin of the two memories).
+   And the memory those two proofs assume is proven equal to IHP's own
+   model of the SRAM macro.
 3. **Judges written by other people.** Every protocol except WS2812 is
    checked by something this project did not write. Device models:
    picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
-   USB device, sockit_owm's 1-Wire slave. For SWD, PS/2 and CAN, whose
-   device models are written here, the recorded pins go to sigrok's
-   protocol decoders, with a fault planted on the wire to show each
-   decoder's verdict can change.
-4. **Tests that are themselves tested.** 86 bugs are planted in the RTL,
+   USB device, sockit_owm's 1-Wire slave. For SWD, PS/2, CAN and every
+   protocol added on v2.0, the recorded pins go to sigrok's protocol
+   decoders, 21 tests in all, 19 of them with a fault planted on the wire
+   to show the decoder's verdict can change.
+4. **Tests that are themselves tested.** 103 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
-5. **The gates, not only the RTL.** All 28 chip-level tests pass on the
-   post-layout netlist.
+5. **The gates, not only the RTL.** All 49 chip-level tests pass on the
+   post-layout netlist, with IHP's model of the SRAM in place of the macros.
 6. **The software that will run on the board.** The MicroPython driver is
    tested unchanged in cocotb, and in MicroPython on an emulated demo
-   board, where a real timing bug in the USB
-   handshake was found and fixed.
+   board, where a real timing bug in the USB handshake was found and
+   fixed, and where the driver was found too large to compile on the
+   board's microcontroller and was split.
 
 ## Layout
 
 | | |
 |---|---|
 | Tiles | 8x4 |
-| Standard cells | 17,925, 20.8% utilisation |
-| Clock target | 25 ns (40 MHz); the chip runs at 10 to 12 MHz |
-| Setup slack, slow corner | +6.85 ns |
-| Hold slack, worst corner | +0.12 ns |
-| DRC, LVS, antenna | 0 violations; Tiny Tapeout precheck passes |
+| Standard cells | 10,359, and two SRAM macros; 13.4% utilisation |
+| Flip-flops | 796 |
+| Clock target | 20 ns (50 MHz); the firmware here runs the chip at 10 to 12 MHz |
+| Setup, slow corner | met, about 4 ns to spare between flip-flops |
+| Hold, every corner | met |
+| LVS, antenna | pass; Tiny Tapeout precheck (IHP's KLayout rule deck) passes |
+| Layout time | 20 to 30 minutes |
+
+The same RTL was also laid out at 25 ns and at 16 ns and met timing at
+every corner both times; 20 ns keeps a margin. v1.4, with its program in
+flip-flops, was 17,925 cells and met 25 ns. The comparison is in
+[`metrics.md`](metrics.md).
 
 ## What is not shown
 
@@ -133,14 +168,25 @@ Stated here so nobody has to find it.
 
 - **No silicon and no FPGA run yet.** Everything above is simulation, formal
   proof and an emulated board.
-- **One signoff warning.** At the slow corner only (1.08 V, 125 C), 36 pins
-  on 9 nets exceed the cell library's slew limit, by at most 33%. Two
-  repairs were tried and did not clear it; see
-  [`metrics.md`](metrics.md).
+- **Signoff warnings, not yet explained.** The v2.0 layout has
+  maximum-slew and maximum-capacitance warnings at all three corners.
+  Setup and hold are met everywhere. The SRAM macros' pins are the
+  suspect, and that is not confirmed ([`metrics.md`](metrics.md)).
+- **50 MHz is static timing analysis only.** No test runs the chip above
+  12 MHz.
+- **The SRAM macro itself is trusted.** The proofs and the tests use IHP's
+  behavioural model of it. That the silicon macro behaves as that model
+  says is IHP's to guarantee.
 - **USB is low speed, host only**, and needs a 12 MHz core clock.
 - **CAN is not a full node.** It sends, arbitrates and listens, but does not
-  acknowledge other nodes' frames or send error frames: decoding a frame as
-  it arrives does not fit beside the rest in 64 instructions.
+  acknowledge other nodes' frames or send error frames. On v1.4 the
+  decoding that takes did not fit in the memory; on v2.0 there is room,
+  and the firmware has not been written.
+- **The I2C controller cannot send a repeated START.** It starts a
+  transfer only after a STOP, so a device that insists on one between
+  setting a register pointer and reading is out of reach.
+- **Several of the v2.0 protocols transmit only:** I2S, DMX512, DALI,
+  RC-5, MIDI, LIN and Modbus RTU. Wiegand and NEC infrared go both ways.
 - **The blind firmware test used an AI agent, not a person.**
 - More in section 7 of the report, "What is not covered".
 
@@ -172,7 +218,7 @@ the report sets out the rules.
 | Architecture and instruction set | [`isa.md`](isa.md), [`info.md`](info.md), README |
 | Assembler or toolchain, example programs | `model/asm.ml`, `bin/pe_sim.ml`, [`examples/`](../examples) |
 | Verification write-up | [`design-and-verification.md`](design-and-verification.md) |
-| Host and program loading | SPI port, [`info.md`](info.md); `host/protocol_emulator.py` |
+| Host and program loading | SPI port, [`info.md`](info.md); `host/protocol_emulator.py`, `host/more_protocols.py` |
 | How AI tools were used | above, and section 6 of the report |
 
 ## Reproduce
