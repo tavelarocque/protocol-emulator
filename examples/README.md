@@ -29,6 +29,8 @@ them, so they cannot drift.
 | [`mdio.s`](mdio.s) | MDIO controller (Ethernet PHY management) | 7 |
 | [`dali_tx.s`](dali_tx.s) | DALI forward frame transmitter | 17 |
 | [`rc5_tx.s`](rc5_tx.s) | RC-5 infrared transmitter, with carrier | 37 |
+| [`wiegand_rx.s`](wiegand_rx.s) | Wiegand receiver | 16 |
+| [`nec_rx.s`](nec_rx.s) | NEC infrared receiver | 33 |
 | [`echo.s`](echo.s) | TX FIFO to RX FIFO, for bring-up | 5 |
 | [`ws2812/`](ws2812) | WS2812 LEDs: the blind firmware test, with its task and hidden test | 16 |
 

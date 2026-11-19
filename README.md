@@ -114,8 +114,8 @@ are in [`docs/firmware.md`](docs/firmware.md).
 | I2C to SPI | bridge, no host in the data path | 25 + 26 | the I2C and SPI oracles together |
 | I2S | transmitter, 16-bit stereo | 11 | sigrok's I2S decoder |
 | DMX512 | transmitter | 26 | sigrok's DMX512 decoder |
-| Wiegand | transmitter | 17 | sigrok's Wiegand decoder |
-| NEC infrared | transmitter, 38 kHz carrier included | 25 | sigrok's NEC decoder |
+| Wiegand | transmitter and receiver | 17 + 16 | sigrok's Wiegand decoder; a reader written from the protocol's rules |
+| NEC infrared | transmitter, 38 kHz carrier included; receiver | 25 + 33 | sigrok's NEC decoder; a remote written from the protocol's rules, 15% fast and slow |
 | MDIO | controller, reads and writes | 7 | a PHY written from IEEE 802.3 clause 22; sigrok's MDIO decoder |
 | DALI | forward frame transmitter | 17 | sigrok's DALI decoder |
 | RC-5 infrared | transmitter, 36 kHz carrier included | 37 | sigrok's RC-5 decoder |

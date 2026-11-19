@@ -31,12 +31,16 @@ is 64 words.
 | MDIO controller | 7 | clause 22 reads and writes, MDC up to 2.5 MHz; the data line is open-drain, and each word shifted out comes back as the word read meanwhile, so one loop serves both directions |
 | DALI forward frame transmitter | 17 | 1200 bit/s Manchester code with every half bit exactly the same length; the bit loop exists twice, once for each level the bus may be holding while the next bit is fetched |
 | RC-5 infrared transmitter | 37 | the 36 kHz carrier included; looks one bit ahead so that where a 1 meets a 0 their two bursts are one unbroken burst |
+| Wiegand receiver | 16 | any frame length; looks at both lines at once by copying all eight pins and peeling off the first two, so pulses down to a microsecond are seen |
+| NEC infrared receiver | 33 | on an IR receiver module's output; reads each bit once, 1.3 units after its burst; tolerates a remote 20% fast or slow, ignores repeat codes, and never lets a frame cut short put the host's pairs of words out of step |
 
 Everything from the I2C target down was written after the hardware was
 frozen at v1.4, as firmware alone.
 
-The last seven were written on v2.0, each tested by handing the recorded
-pins to sigrok's decoder for that protocol. MDIO also reads from a PHY
+The last nine were written on v2.0. The transmitters are each tested by
+handing the recorded pins to sigrok's decoder for that protocol; the two
+receivers by sources written from the protocol's rules, with remotes off
+speed, frames cut short and, for NEC, repeat codes. MDIO also reads from a PHY
 model written from the standard, one that takes the full 300 ns it is
 allowed to answer.
 

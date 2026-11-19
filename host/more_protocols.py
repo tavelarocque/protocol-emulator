@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: © 2026 Tave La Rocque
 # SPDX-License-Identifier: Apache-2.0
 #
-# Drivers for the protocols added on v2.0: I2S, DMX512, Wiegand, NEC and
-# RC-5 infrared, MDIO, DALI and LIN. Each takes a Chip from
+# Drivers for the protocols added on v2.0: I2S, DMX512, Wiegand and NEC
+# infrared (to send and to receive), RC-5 infrared, MDIO, DALI and LIN. Each takes a Chip from
 # protocol_emulator.py and a firmware image, as the drivers there do.
 #
 # They are a module of their own because of the Pico's memory: MicroPython
@@ -218,3 +218,101 @@ class LinMaster:
         self.chip.push(1 | (0x55 << 1))
         for byte in [pid] + list(data) + [total ^ 0xFF]:
             self.chip.push(byte << 1)
+
+
+class WiegandError(Exception):
+    pass
+
+
+class WiegandRx:
+    """Wiegand receiver (wiegand_rx.hex): D0 on pin 0 and D1 on pin 1, which
+    the firmware requires. The bus supplies the pull-ups."""
+
+    def __init__(self, chip, image):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(in_base=0, threshold=16, in_msb_first=True)
+        chip.set_pin_modes({0: pe.INPUT, 1: pe.INPUT})
+        chip.run()
+
+    def expect(self, bits):
+        """Tell the chip how long the next frame is; it then waits for it."""
+        self.bits = bits
+        self.chip.push(bits - 1)
+
+    def read(self, patience=20000):
+        """The frame asked for with [expect], first bit first. [patience]:
+        how many looks at the chip before giving up on a frame that stopped
+        short, whose bits are then thrown away."""
+        bits = self.bits
+        words = []
+        for _ in range(patience):
+            word = self.chip.try_pop()
+            if word is not None:
+                words.append(word)
+                if 16 * len(words) >= bits:
+                    break
+        else:
+            self.chip.stop()  # a stopped thread forgets what it had shifted in
+            self.chip.run()
+            raise WiegandError("no complete frame of %d bits" % bits)
+        frame = []
+        for k, word in enumerate(words):
+            width = min(16, bits - 16 * k)
+            frame += [(word >> (width - 1 - i)) & 1 for i in range(width)]
+        return frame
+
+    def read26(self, patience=20000):
+        """After expect(26): the frame as (facility code, card number), its
+        two parity bits checked."""
+        frame = self.read(patience)
+        data = frame[1:25]
+        if frame[0] != sum(data[:12]) & 1 or frame[25] != 1 ^ (sum(data[12:]) & 1):
+            raise WiegandError("parity")
+        number = lambda field: sum(b << (len(field) - 1 - i) for i, b in enumerate(field))
+        return number(data[:8]), number(data[8:])
+
+
+class NecError(Exception):
+    pass
+
+
+class NecRx:
+    """NEC infrared receiver (nec_rx.hex): an IR receiver module's output,
+    low while it sees carrier, on pin 0."""
+
+    START = 4  # Firmware.nec_rx_start
+
+    def __init__(self, chip, image, clock_hz=10_000_000):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        # A tick is 1/16 of 562.5 us.
+        chip.configure(start=self.START, in_base=0, threshold=16, timeout=128,
+                       timeout_vector=0, clkdiv=(9 * clock_hz + 128_000) // 256_000)
+        chip.set_pin_modes({0: pe.INPUT})
+        chip.run()
+
+    def read(self, patience=200000):
+        """Wait for a frame; return (address, command). The address is 8 bits
+        when its second byte is the complement of its first, 16 otherwise
+        (the extended form). Raises NecError for a frame cut short or a
+        command that fails its complement."""
+        words = []
+        for _ in range(patience):
+            word = self.chip.try_pop()
+            if word is not None:
+                words.append(word)
+                if len(words) == 2:
+                    break
+        else:
+            raise NecError("no frame")
+        address, command = words
+        if command == 0:
+            raise NecError("frame cut short")
+        if (command ^ (command >> 8)) & 0xFF != 0xFF:
+            raise NecError("command 0x%04X fails its complement" % command)
+        if (address ^ (address >> 8)) & 0xFF == 0xFF:
+            address &= 0xFF
+        return address, command & 0xFF

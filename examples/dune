@@ -207,3 +207,22 @@
   (with-stdout-to
    rc5_tx.s
    (run %{dep:../bin/firmware_src.exe} rc5_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets wiegand_rx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   wiegand_rx.s
+   (run
+    %{dep:../bin/firmware_src.exe}
+    wiegand_rx
+    %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets nec_rx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   nec_rx.s
+   (run %{dep:../bin/firmware_src.exe} nec_rx %{dep:../model/firmware.ml}))))

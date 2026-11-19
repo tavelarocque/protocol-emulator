@@ -208,3 +208,19 @@
   (with-stdout-to
    rc5_tx.hex
    (run %{dep:../bin/firmware_hex.exe} rc5_tx))))
+
+(rule
+ (targets wiegand_rx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   wiegand_rx.hex
+   (run %{dep:../bin/firmware_hex.exe} wiegand_rx))))
+
+(rule
+ (targets nec_rx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   nec_rx.hex
+   (run %{dep:../bin/firmware_hex.exe} nec_rx))))

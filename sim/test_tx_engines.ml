@@ -544,3 +544,144 @@ let%test_unit "RC-5: a planted bug (a joined burst one period long) is caught" =
   assert (not (String.equal long Firmware.rc5_tx));
   [%test_result: int option] (rc5_receive (rc5_run ~source:long ~toggle:true ~address:5 ~command:0x35 ())) ~expect:None
 ;;
+
+(* --- Receivers --------------------------------------------------------------- *)
+
+(* The RX words a receiver produces while its input pins follow [levels]
+   (one entry per cycle, all eight pins), with [words] fed to its TX FIFO. *)
+let receive ?(words = []) ~config source levels =
+  let m =
+    Isa.create
+      ~program:(Asm.assemble source)
+      ~pin_modes:(Array.create ~len:Isa.num_pins Isa.Pin_mode.Input)
+      ~threads:[ config ]
+  in
+  let pending = Queue.of_list words in
+  let read = ref [] in
+  Array.iter levels ~f:(fun pins ->
+    (match Queue.peek pending with
+     | Some v -> if Isa.push_tx m ~thread:0 v then ignore (Queue.dequeue pending : int option)
+     | None -> ());
+    Option.iter (Isa.pop_rx m ~thread:0) ~f:(fun v -> read := v :: !read);
+    Isa.step m ~inputs:pins);
+  List.rev !read
+;;
+
+(* Pin levels over time from (level of the eight pins, cycles) runs. *)
+let waveform runs = Array.concat (List.map runs ~f:(fun (pins, n) -> Array.create ~len:n pins))
+
+(* A reader's lines: idle, then for each bit a low pulse on D0 (pin 0) for
+   a 0 or D1 (pin 1) for a 1, then idle again. *)
+let wiegand_lines ?(pulse = 500) ?(interval = 10_000) bits =
+  waveform
+    (((0xFF, 200) :: List.concat_map bits ~f:(fun b -> [ 0xFF land lnot (1 lsl b), pulse; 0xFF, interval - pulse ]))
+     @ [ 0xFF, 200 ])
+;;
+
+(* What the host makes of the words: 16 bits a word, the first received at
+   the top, the last word holding what is left. *)
+let wiegand_bits_of ~n words =
+  List.concat_mapi words ~f:(fun k w ->
+    let width = min 16 (n - (16 * k)) in
+    List.init width ~f:(fun i -> (w lsr (width - 1 - i)) land 1))
+;;
+
+let wiegand_receive_frame ?(source = Firmware.wiegand_rx) ?pulse ?interval bits =
+  let n = List.length bits in
+  receive ~words:[ n - 1 ] ~config:Firmware.wiegand_rx_config source (wiegand_lines ?pulse ?interval bits)
+  |> wiegand_bits_of ~n
+;;
+
+let%test_unit "Wiegand receiver: frames of 1 to 40 bits, pulses of 1 us to 100 us" =
+  List.iter [ 1; 2; 15; 16; 17; 26; 31; 32; 33; 34; 40 ] ~f:(fun n ->
+    List.iter [ 10, 400; 200, 2_500; 1_000, 5_000 ] ~f:(fun (pulse, interval) ->
+      let bits = List.init n ~f:(fun i -> ((i * 5) + (n * 3)) / 7 land 1) in
+      [%test_result: int list] (wiegand_receive_frame ~pulse ~interval bits) ~expect:bits))
+;;
+
+let%test_unit "Wiegand receiver: one frame after another, each asked for" =
+  let a = List.init 26 ~f:(fun i -> (0x2CE58B5 lsr i) land 1) in
+  let b = List.init 26 ~f:(fun i -> (0x13A0F5C lsr i) land 1) in
+  let words =
+    receive
+      ~words:[ 25; 25 ]
+      ~config:Firmware.wiegand_rx_config
+      Firmware.wiegand_rx
+      (Array.append (wiegand_lines ~interval:2_000 a) (wiegand_lines ~interval:2_000 b))
+  in
+  [%test_result: int list] (wiegand_bits_of ~n:26 (List.take words 2)) ~expect:a;
+  [%test_result: int list] (wiegand_bits_of ~n:26 (List.drop words 2)) ~expect:b
+;;
+
+let%test_unit "Wiegand receiver: a planted bug (D1 never looked at) is caught" =
+  let blind =
+    String.substr_replace_first Firmware.wiegand_rx ~pattern:"jmp x-- poll        ; high" ~with_:"jmp poll            ; high"
+  in
+  assert (not (String.equal blind Firmware.wiegand_rx));
+  let bits = List.init 26 ~f:(fun i -> (0x2CE58B5 lsr i) land 1) in
+  assert (not ([%equal: int list] (wiegand_receive_frame ~source:blind ~interval:2_000 bits) bits))
+;;
+
+(* A receiver module's output for an NEC frame, low while it sees carrier:
+   16 units of burst, 8 of silence, then for each of [bits] bits of [value],
+   LSB first, a burst of one unit and a silence of one (a 0) or three (a 1),
+   and a last burst. [unit]: cycles in NEC's 562.5 us. *)
+let nec_module_output ?(unit = 5625) ?(bits = 32) value =
+  let burst n = 0xFE, n * unit
+  and silence n = 0xFF, n * unit in
+  waveform
+    ([ silence 2; burst 16; silence 8 ]
+     @ List.concat (List.init bits ~f:(fun k -> [ burst 1; silence (if (value lsr k) land 1 = 1 then 3 else 1) ]))
+     @ [ burst 1; silence 12 ])
+;;
+
+let nec_rx ?(source = Firmware.nec_rx) levels =
+  receive ~config:{ Firmware.nec_rx_config with clkdiv = 352 } source levels
+;;
+
+let%test_unit "NEC receiver: the start address is where a frame is looked for" =
+  let program = Asm.assemble Firmware.nec_rx in
+  assert (
+    match program.(Firmware.nec_rx_start).op, program.(Firmware.nec_rx_start + 1).op with
+    | Mov _, Wait _ -> true
+    | _ -> false)
+;;
+
+let%test_unit "NEC receiver: frames from remotes 23% slow to 23% fast" =
+  List.iter [ 4300; 4500; 4800; 5100; 5625; 6100; 6400; 6750; 6900 ] ~f:(fun unit ->
+    List.iter [ 0xF708FB04; 0x00FFFF00; 0xFF0000FF; 0x5AA51234; 0x0000FFFF; 0xFFFF0000 ] ~f:(fun value ->
+      [%test_result: int list]
+        (nec_rx (nec_module_output ~unit value))
+        ~expect:[ value land 0xFFFF; value lsr 16 ]))
+;;
+
+let%test_unit "NEC receiver: a repeat code is ignored and does not spoil the next frame" =
+  let unit = 5625 in
+  let repeat = waveform [ 0xFF, 2 * unit; 0xFE, 16 * unit; 0xFF, 4 * unit; 0xFE, unit; 0xFF, 12 * unit ] in
+  [%test_result: int list] (nec_rx repeat) ~expect:[];
+  [%test_result: int list]
+    (nec_rx (Array.append repeat (nec_module_output 0xF708FB04)))
+    ~expect:[ 0xFB04; 0xF708 ]
+;;
+
+let%test_unit "NEC receiver: a frame cut short never leaves the pairs of words out of step" =
+  List.iter (List.range 0 31) ~f:(fun bits ->
+    let cut = nec_module_output ~bits 0xF708FB04 in
+    let words = nec_rx (Array.append cut (nec_module_output 0x5AA51234)) in
+    (* The cut frame's last burst reads as one more bit, so the first word
+       has gone to the host once 16 real bits were sent: then zeros stand
+       where the command belongs. With 31 real bits the frame would be
+       complete, and right. *)
+    let cut_words = if bits >= 16 then [ 0xFB04; 0 ] else [] in
+    [%test_result: int list] words ~expect:(cut_words @ [ 0x1234; 0x5AA5 ]))
+;;
+
+let%test_unit "NEC receiver: a planted bug (bits read too late) is caught by a fast remote" =
+  let late = String.substr_replace_first Firmware.nec_rx ~pattern:"read:   nop [15]" ~with_:"read:   nop [15]\n        nop [9]" in
+  assert (not (String.equal late Firmware.nec_rx));
+  assert (
+    not
+      ([%equal: int list]
+         (nec_rx ~source:late (nec_module_output ~unit:4500 0xFF0000FF))
+         [ 0x00FF; 0xFF00 ]))
+;;

@@ -1960,6 +1960,126 @@ let rc5_word ~toggle ~address ~command =
   ((0b11 lsl 12) lor (Bool.to_int toggle lsl 11) lor (address lsl 6) lor command) lsl 2
 ;;
 
+(* Wiegand receiver: the reader's side of [wiegand_tx], taking the bits a
+   card reader or keypad sends on D0 and D1.
+
+   Pins: P0 = D0, P1 = D1, inputs, with the pull-ups the bus has. They must
+   be pins 0 and 1: the program looks at both lines at once by copying all
+   eight pins and taking the first two. Config: [wiegand_rx_config]:
+   in_base 0, threshold 16, in_msb_first.
+
+   Host protocol, one frame at a time:
+     TX word : N - 1, for a frame of N bits; the thread then waits for it
+     RX      : ceil(N / 16) words, 16 bits each and whatever is left in the
+               last, the first bit received in the top bit of each
+
+   The lines are looked at every 5 cycles, so a pulse of a microsecond is
+   seen at 10 MHz (readers send 20 us and more). The bit is D0's level
+   during the pulse: low in a 0's pulse, high in a 1's. A frame that stops
+   short leaves its bits waiting for the rest; the host notices by the
+   time it takes, and stops and starts the thread to clear them. *)
+let wiegand_rx =
+  {|
+frame:  pull                ; N - 1
+        mov y, osr
+poll:   mov osr, pins       ; all eight pins as they are now
+        out x, 1            ; D0
+        jmp !x pulse        ; low: a 0 is arriving
+        out x, 1            ; D1
+        jmp x-- poll        ; high as well: look again
+pulse:  in pins, 1          ; D0 is the bit
+        wait 1 pin 0        ; until the pulse is over
+        wait 1 pin 1
+        jmp y-- more
+        push                ; that was the last bit: send what is left
+        jmp frame
+more:   jmp !isrf poll
+        push                ; 16 bits: send them
+        jmp poll
+|}
+;;
+
+let wiegand_rx_config =
+  { Isa.Thread_config.default with in_base = 0; threshold = 16; in_msb_first = true }
+;;
+
+(* NEC infrared receiver: the other end of [nec_tx], on the output of an IR
+   receiver module, which is low while it sees carrier.
+
+   Pins: P0 = the module's output (the program tests pin 0 by number).
+   Config: [nec_rx_config]: start = [nec_rx_start]; in_base 0; threshold
+   16; timeout 128, timeout_vector 0; CLKDIV sets the tick to 1/16 of NEC's
+   562.5 us unit: 352 for 35.2 us at 10 MHz.
+
+   Host protocol: RX words come in pairs. A frame is the address in bits
+   7:0 with its complement (or the high address byte) in 15:8, then the
+   command and its complement. A frame that was cut short after its first
+   word is completed with 0x0000, which no command word can be, so the
+   pairs never slip. Checking the complements is the host's part.
+
+   How a frame is told from everything else, times in units of 562.5 us:
+     - its first burst must still be there after 5 units (the leader is 16;
+       a bit's burst is 1);
+     - the silence after it must still be there after 4.5 units (it is 8;
+       a repeat code's is 4, and is ignored);
+     - each bit is read about 1.3 units after its burst ends: silence
+       still, a 1 (whose silence is 3 units); the next burst already, a 0
+       (1 unit). The thread is back waiting for that burst to end well
+       before it does: a remote may run 20% fast or slow, with room to
+       spare;
+     - a wait of more than 8 units for a bit's burst to begin or end
+       abandons the frame, through the timeout vector. X remembers whether
+       a word has gone to the host yet. *)
+let nec_rx =
+  {|
+abort:  jmp !x start            ; cut short before any word went: start again
+        mov isr, null
+        in null, 16
+        push                    ; after one: zeros in the command's place
+start:  mov isr, null           ; nothing received yet
+        wait 0 pin 0            ; a burst begins
+        set x, 4
+lead:   jmp x-- lead [15]       ; 5 units later
+        mov osr, pins
+        out x, 1
+        jmp !x leader           ; still there: a frame's leading burst
+        jmp start               ; gone: something else
+leader: wait 1 pin 0            ; the leading burst ends
+        set x, 3
+gap:    jmp x-- gap [15]        ; 4.5 units later
+        nop [4]
+        mov osr, pins
+        out x, 1
+        jmp !x start            ; a burst already: a repeat code
+        set x, 0                ; no word sent yet
+        set y, 31               ; 32 bits
+bit:    wait 0 pin 0 timeout    ; the bit's burst begins
+        wait 1 pin 0 timeout    ; and ends
+        jmp !isrf same          ; 16 bits waiting? Send them now, in the
+        push                    ; silence, not after a read, when the next
+        set x, 1                ; burst may already be on its way out
+        jmp read
+same:   nop [2]                 ; (as long as sending takes)
+read:   nop [15]                ; about 1.3 units after the burst
+        in pins, 1              ; silence still: a 1. The next burst: a 0
+        jmp y-- bit
+        push                    ; the second word
+        jmp start
+|}
+;;
+
+let nec_rx_start = 4
+
+let nec_rx_config =
+  { Isa.Thread_config.default with
+    start = nec_rx_start
+  ; in_base = 0
+  ; threshold = 16
+  ; timeout = 128
+  ; timeout_vector = 0
+  }
+;;
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo
@@ -1985,4 +2105,6 @@ let all =
   ; "mdio", mdio
   ; "dali_tx", dali_tx
   ; "rc5_tx", rc5_tx
+  ; "wiegand_rx", wiegand_rx
+  ; "nec_rx", nec_rx
   ]

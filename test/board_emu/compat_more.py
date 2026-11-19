@@ -11,9 +11,10 @@
 class _Recorder:
     """Stands in for protocol_emulator.Chip. [line] is what pop returns."""
 
-    def __init__(self, line=0xFFFE):
+    def __init__(self, line=0xFFFE, words=()):
         self.log = []
         self.line = line
+        self.words = list(words)  # what try_pop finds, in order
 
     def stop(self):
         self.log.append("stop")
@@ -38,6 +39,13 @@ class _Recorder:
 
     def pop(self):
         return self.line
+
+    def try_pop(self):
+        # Every third look finds a word, as when frames are still arriving.
+        self.looks = getattr(self, "looks", 0) + 1
+        if self.looks % 3 or not self.words:
+            return None
+        return self.words.pop(0)
 
 
 def _show(name, chip):
@@ -95,3 +103,30 @@ _l.send(0x23, [0x11, 0x22, 0x33, 0x44])
 _l.send(0x3C, [0xFF] * 8)
 print("lin ids", [LinMaster.protected_id(k) for k in range(64)])
 _show("lin", _chip)
+
+_chip = _Recorder(words=[0xCE58, 0x03CB, 0x1234, 0xABCD, 0x0002, 0xCA58, 0x03CB, 0x0001])
+_w = WiegandRx(_chip, _image)
+_w.expect(26)
+print("wiegand rx", _w.read26())
+_w.expect(34)
+print("wiegand rx", _w.read())
+_w.expect(26)
+try:
+    print("wiegand rx", _w.read26())
+except WiegandError as e:
+    print("wiegand rx error:", e)
+_w.expect(26)
+try:
+    print("wiegand rx", _w.read(patience=5))
+except WiegandError as e:
+    print("wiegand rx error:", e)
+_show("wiegand rx", _chip)
+
+_chip = _Recorder(words=[0xFB04, 0xF708, 0x1234, 0x5AA5, 0xFB04, 0x0000, 0xFB04, 0x1234])
+_n = NecRx(_chip, _image, clock_hz=12_000_000)
+for _ in range(5):
+    try:
+        print("nec rx", _n.read(patience=30))
+    except NecError as e:
+        print("nec rx error:", e)
+_show("nec rx", _chip)

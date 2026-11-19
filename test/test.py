@@ -2676,3 +2676,148 @@ async def test_lin(dut):
         wrong = texts(trace.forced("lin", a + 521, a + 2 * 521, 0).decode(decoder, "lin"))
         dut._log.info("%s", wrong)
         assert wrong != want and "ID: 23 Parity: 2 (ok)" not in wrong, wrong
+
+
+# --- Receivers: sources written here from each protocol's rules ---------------
+
+
+def drive_pin(dut, k, level):
+    dut.uio_in.value = (int(dut.uio_in.value) & ~(1 << k)) | (level << k)
+
+
+async def wiegand_send(dut, bits, pulse=500, interval=10_000):
+    """A reader sending [bits] on D0 (pin 0) and D1 (pin 1): a low pulse of
+    [pulse] cycles on D0 for a 0 and on D1 for a 1, [interval] cycles from
+    one pulse to the next."""
+    for b in bits:
+        drive_pin(dut, b, 0)
+        await ClockCycles(dut.clk, pulse)
+        drive_pin(dut, b, 1)
+        await ClockCycles(dut.clk, interval - pulse)
+
+
+def wiegand26(facility, card):
+    data = [(facility >> (7 - k)) & 1 for k in range(8)] + [(card >> (15 - k)) & 1 for k in range(16)]
+    return [sum(data[:12]) & 1] + data + [1 ^ (sum(data[12:]) & 1)]
+
+
+@cocotb.test(timeout_time=400, timeout_unit="ms")
+async def test_wiegand_receive(dut):
+    """Wiegand frames from a reader: a 26-bit card, a 34-bit frame with the
+    shortest pulses readers send, and a frame that stops short, which must
+    be thrown away without spoiling the one after it."""
+    await reset(dut)
+    dut.dev_mode.value = 0  # an earlier test's device may still be wired to the pins
+    dut.uio_in.value = 0xFF
+    chip = pe.Chip(sim_port(dut))
+    rx = []
+
+    @bridge
+    def start():
+        rx.append(more.WiegandRx(chip, firmware("wiegand_rx")))
+
+    @bridge
+    def expect(bits):
+        rx[0].expect(bits)
+
+    @bridge
+    def read26():
+        try:
+            return rx[0].read26(patience=20)
+        except more.WiegandError as e:
+            return str(e)
+
+    @bridge
+    def read():
+        return rx[0].read(patience=20)
+
+    await start()
+    await expect(26)
+    await wiegand_send(dut, wiegand26(0x9C, 0xB1E5))  # 50 us pulses, 1 ms apart
+    assert await read26() == (0x9C, 0xB1E5)
+
+    long = [(0x2A5C3F19B >> k) & 1 for k in range(34)]
+    await expect(34)
+    await wiegand_send(dut, long, pulse=200, interval=2_500)  # 20 us pulses
+    assert await read() == long
+
+    await expect(26)
+    await wiegand_send(dut, wiegand26(0x9C, 0xB1E5)[:10])
+    assert await read26() == "no complete frame of 26 bits"
+
+    await expect(26)
+    await wiegand_send(dut, wiegand26(0x01, 0x0203), pulse=1000, interval=5_000)
+    assert await read26() == (0x01, 0x0203)
+
+
+async def nec_send(dut, address_word, command_word, unit=5625, bits=32, repeat=False):
+    """An IR receiver module's output (pin 0, low while it sees carrier) for
+    an NEC frame: 16 units of burst and 8 of silence, then for each bit, LSB
+    first, a burst of one unit and silence of one (a 0) or three (a 1), and a
+    last burst. [unit]: cycles in 562.5 us. [repeat]: a repeat code instead,
+    16 units of burst, 4 of silence and a burst."""
+    async def burst(units):
+        drive_pin(dut, 0, 0)
+        await ClockCycles(dut.clk, units * unit)
+        drive_pin(dut, 0, 1)
+
+    await burst(16)
+    await ClockCycles(dut.clk, (4 if repeat else 8) * unit)
+    if not repeat:
+        value = address_word | (command_word << 16)
+        for k in range(bits):
+            await burst(1)
+            await ClockCycles(dut.clk, (3 if (value >> k) & 1 else 1) * unit)
+    await burst(1)
+
+
+@cocotb.test(timeout_time=600, timeout_unit="ms")
+async def test_nec_receive(dut):
+    """NEC frames from a receiver module: a plain frame, a repeat code (which
+    must be ignored), an extended-address frame from a remote running 15%
+    slow, a frame that stops after 20 bits, and a frame from one 15% fast,
+    whose zeros come at a word boundary, where the receiver is busiest."""
+    await reset(dut)
+    dut.dev_mode.value = 0  # an earlier test's device may still be wired to the pins
+    dut.uio_in.value = 0xFF
+    chip = pe.Chip(sim_port(dut))
+    rx = []
+
+    @bridge
+    def start():
+        rx.append(more.NecRx(chip, firmware("nec_rx")))
+
+    @bridge
+    def read():
+        try:
+            return rx[0].read(patience=4)
+        except more.NecError as e:
+            return str(e)
+
+    @bridge
+    def waiting():
+        return chip.status()["rx_level"]
+
+    pair = lambda byte: byte | ((byte ^ 0xFF) << 8)
+    rest = ClockCycles(dut.clk, 12 * 5625)  # longer than the 8 units that abandon a frame
+    await start()
+    await nec_send(dut, pair(0x04), pair(0x08))
+    await rest
+    assert await read() == (0x04, 0x08)
+
+    await nec_send(dut, 0, 0, repeat=True)
+    await rest
+    assert await waiting() == 0, "a repeat code was taken for a frame"
+
+    await nec_send(dut, 0x1234, pair(0xA5), unit=6470)
+    await rest
+    assert await read() == (0x1234, 0xA5)
+
+    await nec_send(dut, pair(0x04), pair(0x08), bits=20)
+    await rest
+    assert await read() == "frame cut short"
+
+    await nec_send(dut, pair(0xFF), pair(0x00), unit=4780)
+    await rest
+    assert await read() == (0xFF, 0x00)
+    assert await waiting() == 0
