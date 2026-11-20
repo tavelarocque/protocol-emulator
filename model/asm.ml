@@ -20,6 +20,14 @@
    [Isa.Instruction.to_string] produces this same syntax, and the test suite
    checks that disassembling then reassembling any 16-bit word round-trips.
 
+   Three directives, each on a line of its own:
+
+     .side_set N   the top N bits of every delay field are side-set values
+     .align        fill with [nop] up to the next page boundary; the lines
+                   below are in that page, and are reached with PAGE set to it
+     .page N       the lines below are reached with PAGE = N (after a jump
+                   away, say); nothing is assembled
+
    Both threads run from one shared program memory, so a program can be
    assembled to run from any [origin]: labels then resolve to absolute
    addresses from there. [link] places several programs in one image. *)
@@ -91,10 +99,19 @@ let parse_mov_loc ~line = function
   | s -> error ~line (sprintf "bad MOV operand %S" s)
 ;;
 
-let assemble ?(origin = 0) (source : string) : Instruction.t array =
+(* The program, and where each label is. *)
+let assemble_with_labels ?(origin = 0) (source : string)
+  : Instruction.t array * (string * int) list
+  =
   (* Pass 1: strip comments, peel off labels, assign addresses. *)
   let labels = Hashtbl.create (module String) in
   let body = Queue.create () in
+  (* Instructions so far: [body] also holds the [.page] lines, for pass 2. *)
+  let count = ref 0 in
+  let instruction line text =
+    Queue.enqueue body (line, text);
+    incr count
+  in
   (* [.side_set N]: from here on, the top N bits of every instruction's
      delay field are side-set values, given as [side V]. Must match the
      thread's SIDESET count register. *)
@@ -107,10 +124,21 @@ let assemble ?(origin = 0) (source : string) : Instruction.t array =
       | [ ".side_set"; n ] ->
         (match Int.of_string_opt n with
          | Some n when n >= 0 && n <= 3 ->
-           if Queue.length body > 0
+           if !count > 0
            then error ~line ".side_set must come before the first instruction";
            side_set := n
          | _ -> error ~line ".side_set takes 0 to 3");
+        ""
+      | [ ".align" ] ->
+        (* Fill to the page boundary. The fill is never meant to be run, and
+           [nop] is harmless if it is. *)
+        while (origin + !count) % page_size <> 0 do
+          instruction line (if !side_set > 0 then "nop side 0" else "nop")
+        done;
+        Queue.enqueue body (line, sprintf ".page %d" ((origin + !count) / page_size));
+        ""
+      | [ ".page"; _ ] ->
+        Queue.enqueue body (line, text);
         ""
       | _ -> text
     in
@@ -120,19 +148,19 @@ let assemble ?(origin = 0) (source : string) : Instruction.t array =
         let lbl = String.strip lbl in
         if Hashtbl.mem labels lbl then error ~line (sprintf "duplicate label %S" lbl);
         (* A label names the address of the next instruction. *)
-        Hashtbl.set labels ~key:lbl ~data:(origin + Queue.length body);
+        Hashtbl.set labels ~key:lbl ~data:(origin + !count);
         String.strip rest
       | _ -> text
     in
-    if not (String.is_empty text) then Queue.enqueue body (line, text));
+    if not (String.is_empty text) then instruction line text);
   let body = Queue.to_list body in
-  if origin < 0 || origin + List.length body > program_size
+  if origin < 0 || origin + !count > program_size
   then
     raise_s
       [%message
         "program does not fit"
           (origin : int)
-          ~instructions:(List.length body : int)
+          ~instructions:(!count : int)
           (program_size : int)];
   (* Pass 2: parse each instruction.
 
@@ -145,7 +173,15 @@ let assemble ?(origin = 0) (source : string) : Instruction.t array =
      that reaches a line with PAGE set some other way must say so with its
      own [set page]. *)
   let page = ref (origin / page_size) in
-  List.map body ~f:(fun (line, text) ->
+  List.filter_map body ~f:(fun (line, text) ->
+    match tokens text with
+    | [ ".page"; n ] ->
+      (match Int.of_string_opt n with
+       | Some n when n >= 0 && n < num_pages -> page := n
+       | _ -> error ~line (sprintf ".page takes 0 to %d" (num_pages - 1)));
+      None
+    | _ ->
+    Some (
     let num tok =
       match Int.of_string_opt tok with
       | Some v -> v
@@ -221,8 +257,16 @@ let assemble ?(origin = 0) (source : string) : Instruction.t array =
     (* Encoding range-checks every field. *)
     (try ignore (Instruction.encode instr : int) with
      | exn -> error ~line (Exn.to_string exn));
-    instr)
+    instr))
   |> Array.of_list
+  |> fun program -> program, Hashtbl.to_alist labels
+;;
+
+let assemble ?origin source = fst (assemble_with_labels ?origin source)
+
+(* The address of [label] in [source] assembled at [origin]. *)
+let label ?origin source name =
+  List.Assoc.find_exn (snd (assemble_with_labels ?origin source)) name ~equal:String.equal
 ;;
 
 (* One memory image from programs assembled at their origins. Words no

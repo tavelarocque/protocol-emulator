@@ -9,6 +9,9 @@
    and the node start in the same bit, the lower identifier must win, the
    loser must stop without disturbing a bit, and send again afterwards.
 
+   The chip's transmitter makes its frames itself, from the identifier and
+   the data: the stuffing and the CRC the node checks are the firmware's.
+
    Checked: every frame the chip sends reaches the node intact and is
    acknowledged; every frame the node sends is recorded by the receiver and
    decodes to what was sent; the chip's bits are each exactly 80 cycles; it
@@ -204,7 +207,8 @@ type outcome =
 
 (* The chip sends [chip_frames] in order, sending again whenever it loses
    arbitration; the node sends [node_frames]. *)
-let run ?(rx = Firmware.can_rx) ?(tx = Firmware.can_tx) ?node:(nd = None) ~chip_frames ~node_frames () =
+let run ?(clkdiv = clkdiv) ?(rx = Firmware.can_rx) ?(tx = Firmware.can_tx) ?node:(nd = None) ~chip_frames ~node_frames () =
+  let bit_cycles = 10 * clkdiv in
   let rx_code = Pe_model.Asm.assemble ~origin:0 rx in
   let tx_origin = Array.length rx_code in
   let m =
@@ -215,7 +219,7 @@ let run ?(rx = Firmware.can_rx) ?(tx = Firmware.can_tx) ?node:(nd = None) ~chip_
         [ Can.rx_config ~clkdiv
         ; { (Can.tx_config ~clkdiv) with
             start = tx_origin
-          ; timeout_vector = tx_origin + Firmware.can_tx_lost
+          ; timeout_vector = Can.tx_lost ~origin:tx_origin tx
           }
         ]
   in
@@ -231,6 +235,7 @@ let run ?(rx = Firmware.can_rx) ?(tx = Firmware.can_tx) ?node:(nd = None) ~chip_
   and in_flight = ref None
   and prev_tx = ref true
   and last_edge = ref None
+  and first_edge = ref None
   and stopped_at = ref None
   and cycle = ref 0 in
   let node_busy () =
@@ -247,9 +252,8 @@ let run ?(rx = Firmware.can_rx) ?(tx = Firmware.can_tx) ?node:(nd = None) ~chip_
     (* The host: one frame at a time, its words as the FIFO takes them. *)
     (match !in_flight, !todo with
      | None, (id, data) :: _ ->
-       let bits = Can.frame_bits ~id ~data in
-       List.iter (Can.tx_words bits) ~f:(Queue.enqueue pending);
-       in_flight := Some (List.length bits);
+       List.iter (Can.tx_words ~id ~data) ~f:(Queue.enqueue pending);
+       in_flight := Some (List.length data);
        stopped_at := None
      | _ -> ());
     (match Queue.peek pending with
@@ -259,7 +263,7 @@ let run ?(rx = Firmware.can_rx) ?(tx = Firmware.can_tx) ?node:(nd = None) ~chip_
       Queue.enqueue results r;
       if not (Queue.is_empty pending) then violate "result %d before the frame's words were taken" r;
       (* acknowledged or never acknowledged: done. Otherwise send it again. *)
-      if r = 0 || r = Can.frame_end then todo := List.tl_exn !todo;
+      if r = Can.acknowledged || r = Can.not_acknowledged then todo := List.tl_exn !todo;
       in_flight := None);
     Option.iter (Isa.pop_rx m ~thread:0) ~f:(fun w ->
       if w = Can.frame_end
@@ -277,7 +281,8 @@ let run ?(rx = Firmware.can_rx) ?(tx = Firmware.can_tx) ?node:(nd = None) ~chip_
     then (
       Option.iter !last_edge ~f:(fun e ->
         if (c - e) % bit_cycles <> 0 && c - e < 12 * bit_cycles
-        then violate "chip TXD edges %d cycles apart" (c - e));
+        then violate "chip TXD edges %d cycles apart, %d bits after its first" (c - e) ((c - Option.value !first_edge ~default:c) / bit_cycles));
+      if Option.is_none !first_edge then first_edge := Some c;
       last_edge := Some c);
     prev_tx := chip_tx;
     Option.iter nd ~f:(fun n -> tick n ~bus);
@@ -309,15 +314,28 @@ let%expect_test "CRC-15/CAN check value, and a frame's bits" =
     |}]
 ;;
 
+(* What the board driver has as numbers (Can in host/protocol_emulator.py). *)
+let%expect_test "addresses and the CRC polynomial, as the driver has them" =
+  printf
+    "receiver %d words, its vector %d; transmitter %d words from %d, its vector %d; CRC polynomial 0x%04x\n"
+    (Array.length Can.rx)
+    Firmware.can_rx_same
+    (Array.length Can.tx)
+    Can.tx_origin
+    (Can.tx_lost Firmware.can_tx)
+    Can.crc_poly;
+  [%expect {| receiver 19 words, its vector 14; transmitter 91 words from 19, its vector 55; CRC polynomial 0x4cd1 |}]
+;;
+
 let random_frame rng =
   ( Random.State.int rng 0x800
   , List.init (Random.State.int rng 9) ~f:(fun _ -> List.random_element_exn ~random_state:rng [ 0; 0xFF; Random.State.int rng 256 ]) )
 ;;
 
 (* Everything a run must satisfy, whoever won each arbitration. *)
-let check ?rx ?tx ~bit ~contend ~chip_frames ~node_frames () =
+let check ?clkdiv ?rx ?tx ~bit ~contend ~chip_frames ~node_frames () =
   let nd = node ~bit ~contend in
-  let r = run ?rx ?tx ~node:(Some nd) ~chip_frames ~node_frames () in
+  let r = run ?clkdiv ?rx ?tx ~node:(Some nd) ~chip_frames ~node_frames () in
   let sort = List.sort ~compare:[%compare: int * int list] in
   let all = sort (chip_frames @ node_frames) in
   let heard = List.filter_map r.heard ~f:Fn.id in
@@ -333,8 +351,8 @@ let check ?rx ?tx ~bit ~contend ~chip_frames ~node_frames () =
     && List.for_all heard ~f:(fun (id, d, ack) ->
       Bool.equal ack (List.mem chip_frames (id, d) ~equal:[%equal: frame])
       || List.mem node_frames (id, d) ~equal:[%equal: frame])
-    && List.count r.results ~f:(fun w -> w = 0) = List.length chip_frames
-    && not (List.mem r.results Can.frame_end ~equal:Int.equal)
+    && List.count r.results ~f:(fun w -> w = Can.acknowledged) = List.length chip_frames
+    && List.for_all r.results ~f:(fun w -> w = Can.acknowledged || w = Can.stopped)
   in
   r, ok
 ;;
@@ -383,7 +401,86 @@ let%expect_test "no other node: sent, and nobody acknowledged" =
         ~results:(List.map r.results ~f:(sprintf "0x%04x") : string list)
         (r.heard : (int * int list * bool) option list)
         (r.violations : string list)];
-  [%expect {| ((results (0xffff)) (r.heard (((291 (222 173) false)))) (r.violations ())) |}]
+  [%expect {| ((results (0x0001)) (r.heard (((291 (222 173) false)))) (r.violations ())) |}]
+;;
+
+(* The transmitter's own corners, each to the node: every length (the end of
+   the data is found from the OSR not being empty, which rests on 18 + 8 n
+   never being a multiple of 15), and a stuff bit after the last bit of a
+   field, where the count of bits runs out first. *)
+let%expect_test "every length; a stuff bit after the last bit of the data, and of the CRC" =
+  let body id data =
+    (0 :: Can.msb_first ~width:11 id) @ [ 0; 0; 0 ] @ Can.msb_first ~width:4 (List.length data) @ List.concat_map data ~f:(Can.msb_first ~width:8)
+  in
+  (* The stuffer's fifth equal bit is the last of [bits], at [level]: the
+     stuff bit comes after the field has ended. *)
+  let ends_on_run bits level =
+    let _, _, stuffed =
+      List.fold bits ~init:(-1, 0, false) ~f:(fun (last, run, _) b ->
+        let run = if b = last then run + 1 else 1 in
+        if run = 5 then 1 - b, 1, true else b, run, false)
+    in
+    stuffed && List.last_exn bits = level
+  in
+  let rng = Random.State.make [| 15 |] in
+  let find f =
+    let rec go () =
+      let id, data = random_frame rng in
+      if f id data then id, data else go ()
+    in
+    go ()
+  in
+  let crc_of id data = Can.msb_first ~width:15 (Can.crc15 (body id data)) in
+  let cases =
+    List.init 9 ~f:(fun n -> sprintf "%d bytes" n, (0x2A5 + n, List.init n ~f:(fun k -> (37 * (k + n)) land 0xFF)))
+    @ [ "data ends on five recessive", find (fun id data -> (not (List.is_empty data)) && ends_on_run (body id data) 1)
+      ; "data ends on five dominant", find (fun id data -> (not (List.is_empty data)) && ends_on_run (body id data) 0)
+      ; "CRC ends on five recessive", find (fun id data -> ends_on_run (body id data @ crc_of id data) 1)
+      ; "CRC ends on five dominant", find (fun id data -> ends_on_run (body id data @ crc_of id data) 0)
+      ]
+  in
+  List.iter cases ~f:(fun (name, frame) ->
+    let r, ok = check ~bit:80 ~contend:false ~chip_frames:[ frame ] ~node_frames:[] () in
+    printf "%-28s %s\n" name (if ok then "received and acknowledged" else Sexp.to_string [%sexp (frame : frame), (r.results : int list), (r.violations : string list)]));
+  [%expect {|
+    0 bytes                      received and acknowledged
+    1 bytes                      received and acknowledged
+    2 bytes                      received and acknowledged
+    3 bytes                      received and acknowledged
+    4 bytes                      received and acknowledged
+    5 bytes                      received and acknowledged
+    6 bytes                      received and acknowledged
+    7 bytes                      received and acknowledged
+    8 bytes                      received and acknowledged
+    data ends on five recessive  received and acknowledged
+    data ends on five dominant   received and acknowledged
+    CRC ends on five recessive   received and acknowledged
+    CRC ends on five dominant    received and acknowledged
+    |}]
+;;
+
+(* The fastest clock ratios: the transmitter's CLKDIV 1 and 2, a bit of 20
+   and of 40 core clocks, which is 1 Mbit/s at 20 MHz and at 40 MHz. The
+   node's clock is the chip's here: one core clock is already 5% or 2.5%
+   of a bit. *)
+let%expect_test "20 and 40 core clocks a bit" =
+  List.iter [ 2; 4 ] ~f:(fun clkdiv ->
+    let rng = Random.State.make [| clkdiv |] in
+    let good = ref 0 in
+    for trial = 1 to 40 do
+      let chip_frames = List.init (1 + Random.State.int rng 3) ~f:(fun _ -> random_frame rng) in
+      let node_frames =
+        List.init (Random.State.int rng 3) ~f:(fun _ -> random_frame rng)
+        |> List.filter ~f:(fun (id, _) -> not (List.exists chip_frames ~f:(fun (i, _) -> i = id)))
+      in
+      let _, ok = check ~clkdiv ~bit:(10 * clkdiv) ~contend:(trial % 2 = 0) ~chip_frames ~node_frames () in
+      if ok then incr good
+    done;
+    printf "%d core clocks a bit: %d of 40 runs good\n" (10 * clkdiv) !good);
+  [%expect {|
+    20 core clocks a bit: 40 of 40 runs good
+    40 core clocks a bit: 40 of 40 runs good
+    |}]
 ;;
 
 let%expect_test "planted firmware bugs: each is caught" =
@@ -413,16 +510,22 @@ let%expect_test "planted firmware bugs: each is caught" =
     ; "frame ended after 4 recessive bits", caught ~rx:(rx ~pattern:"set y, 7" ~with_:"set y, 3") ()
     ; ( "receiver a tick short when no word is pushed"
       , caught ~rx:(rx ~pattern:"nf:     jmp smp [1]" ~with_:"nf:     jmp smp") () )
-    ; "transmitter's bits 11 ticks long", caught ~tx:(tx ~pattern:"mov pins, x [2]" ~with_:"mov pins, x [3]") ()
+    ; "transmitter's bits 21 ticks long", caught ~tx:(tx ~pattern:"zo:     out x, 1 [1]" ~with_:"zo:     out x, 1 [2]") ()
     ; ( "transmitter never checks the bus"
-      , caught
-          ~tx:(tx ~pattern:"wait 1 pin 0 timeout    ; recessive: the bus" ~with_:"nop                     ; recessive: the bus")
-          () )
-    ; "transmitter does not wait for an idle bus", caught ~tx:(tx ~pattern:"set y, 10" ~with_:"set y, 0") ()
-    ; ( "words of a stopped frame left in the FIFO"
-      , caught ~tx:(tx ~pattern:"jmp y-- d\n" ~with_:"nop\n") () )
-    ; ( "ACK reported as never acknowledged"
-      , caught ~tx:(tx ~pattern:"in y, 16                ; mid-frame" ~with_:"in x, 16                ; mid-frame") () )
+      , caught ~tx:(tx ~pattern:"ow:     wait 1 pin 0 timeout [3]" ~with_:"ow:     nop [3]") () )
+    ; "transmitter does not wait for an idle bus", caught ~tx:(tx ~pattern:"set y, 24" ~with_:"set y, 0") ()
+    ; "bits of a stopped frame left in the FIFO", caught ~tx:(tx ~pattern:"jmp y-- d\n" ~with_:"nop\n") ()
+    ; ( "the ACK slot read a bit late"
+      , caught ~tx:(tx ~pattern:"nop [12]                ; 1..13" ~with_:"nop [15]\n        nop [15]") () )
+    ; "no stuff bit after five dominant bits", caught ~tx:(tx ~pattern:"jmp !isrf zc" ~with_:"jmp zc") ()
+    ; ( "a stuff bit after four recessive bits"
+      , caught ~tx:(tx ~pattern:"in null, 11             ; 3\n        jmp y-- o" ~with_:"in null, 12\n        jmp y-- o") () )
+    ; "the CRC not started again for the next frame", caught ~tx:(tx ~pattern:"mov crc, null" ~with_:"nop") ()
+    ; "a CRC of 14 bits", caught ~tx:(tx ~pattern:"set y, 14 [6]" ~with_:"set y, 13 [6]") ()
+    ; "the data's end taken for the CRC's", caught ~tx:(tx ~pattern:"jmp !osre de1" ~with_:"jmp tail") ()
+    ; "the vector leaves PAGE as it was", caught ~tx:(tx ~pattern:"lost:   set page, 0" ~with_:"lost:   nop") ()
+    ; ( "a field that ends on a stuff bit carries on"
+      , caught ~tx:(tx ~pattern:"jmp x0 [3]" ~with_:"jmp z [3]") () )
     ]
     ~f:(fun (name, caught) -> printf "%-46s %s\n" name (if caught then "caught" else "MISSED"));
   [%expect {|
@@ -430,10 +533,17 @@ let%expect_test "planted firmware bugs: each is caught" =
     receiver's run of recessive bits never reset   caught
     frame ended after 4 recessive bits             caught
     receiver a tick short when no word is pushed   caught
-    transmitter's bits 11 ticks long               caught
+    transmitter's bits 21 ticks long               caught
     transmitter never checks the bus               caught
     transmitter does not wait for an idle bus      caught
-    words of a stopped frame left in the FIFO      caught
-    ACK reported as never acknowledged             caught
+    bits of a stopped frame left in the FIFO       caught
+    the ACK slot read a bit late                   caught
+    no stuff bit after five dominant bits          caught
+    a stuff bit after four recessive bits          caught
+    the CRC not started again for the next frame   caught
+    a CRC of 14 bits                               caught
+    the data's end taken for the CRC's             caught
+    the vector leaves PAGE as it was               caught
+    a field that ends on a stuff bit carries on    caught
     |}]
 ;;

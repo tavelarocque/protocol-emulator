@@ -32,7 +32,7 @@ no change to the RTL:
 | Low-speed USB host, with clock recovery (a stretch goal) | nothing new; a 12 MHz clock | 49 |
 | 1-Wire, with ROM search | nothing new | 25 |
 | PS/2 host, receiving and sending on the two threads | nothing new | 11 + 21 |
-| CAN transmitter and listen-only receiver, to 1 Mbit/s | nothing new | 19 + 27 |
+| CAN transmitter and listen-only receiver, to 1 Mbit/s | nothing new | 19 + 27 (89 since the transmitter makes the whole frame, on v2.1's CRC register) |
 | WS2812 LEDs | nothing new | 16 |
 
 The last was a blind test. A programmer who had never seen the project (an
@@ -115,7 +115,7 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 | Low-speed USB | host, with clock recovery | 49 |
 | 1-Wire | bus controller, ROM search | 25 |
 | PS/2 | host, both directions | 11 + 21 |
-| CAN | transmitter and listen-only receiver | 19 + 27 |
+| CAN | transmitter, with bit stuffing and CRC on the chip, and listen-only receiver | 19 + 89 |
 | 10BASE-T Ethernet, 10 Mbit/s | transmitter with link pulses; receiver with clock recovery | 70, 14 |
 | WS2812 LEDs | driver | 16 |
 | I2S | transmitter, 16-bit stereo | 11 |
@@ -158,7 +158,7 @@ runs a program on the reference model and prints the pins.
    fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
    receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
    sender has its own clock, 100 ppm off, and jitter on every edge.
-4. **Tests that are themselves tested.** 119 bugs are planted in the RTL,
+4. **Tests that are themselves tested.** 126 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
@@ -212,10 +212,14 @@ Stated here so nobody has to find it.
   IHP's behavioural models of them. That the silicon macros behave as
   those models say is IHP's to guarantee.
 - **USB is low speed, host only**, and needs a 12 MHz core clock.
-- **CAN is not a full node.** It sends, arbitrates and listens, but does not
-  acknowledge other nodes' frames or send error frames. On v1.4 the
-  decoding that takes did not fit in the memory; on v2.0 there is room,
-  and the firmware has not been written.
+- **CAN is not a full node.** It sends, making the whole frame on the chip
+  (bit stuffing, CRC, arbitration, the ACK slot), and it listens, but it
+  does not acknowledge other nodes' frames or send error frames. That
+  takes a receiver that decodes the frame as it arrives, on a clock
+  recovered from the bus. The bit sampler recovers such a clock only up to
+  16 core clocks a bit, and at that ratio the host port cannot carry the
+  frames; a thread doing it alone needs every path through the decoder to
+  take the same number of ticks, with four registers. Neither is done.
 - **The I2C controller cannot send a repeated START.** It starts a
   transfer only after a STOP, so a device that insists on one between
   setting a register pointer and reading is out of reach.

@@ -168,4 +168,7 @@ _out.append([_ow.ds18b20_temperature(r) for r in _roms])
 _one = OneWire(_OneWireBus(_devs[:1]), [])
 _out.append([list(_one.read_rom()), _one.ds18b20_temperature(), OneWire(_OneWireBus([]), []).reset()])
 _out.append(onewire_crc8(bytes([0x02, 0x1C, 0xB8, 0x01, 0, 0, 0])))
+# CAN: the transmitter's words for a frame, and a recorded frame decoded.
+_out.append([Can.tx_words(0x555, [0x00, 0xFF]), Can.tx_words(0x7FF, []), Can.tx_words(0, list(range(8)))])
+_out.append(Can.decode([int(c) for c in "01010101010100000110000010000111110111001000010110001101"]))
 print(repr(_out))

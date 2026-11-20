@@ -320,7 +320,10 @@ about pages, and runs the same in any of them; that is every program
 written before v2.0. A longer program crosses to another page by falling
 into it or with `set page, n` then `jmp`, two instructions. The assembler
 follows PAGE down the listing and rejects a jump to a label in any other
-page.
+page. It follows the listing, not the flow of control, so two directives
+say what it cannot see: `.page n` on a line of its own means the lines
+below are reached with PAGE = n, and `.align` fills with `nop` to the next
+page boundary and means the same of that page.
 
 | cond | Syntax | Holds when |
 |---|---|---|

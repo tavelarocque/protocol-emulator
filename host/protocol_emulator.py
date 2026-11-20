@@ -52,6 +52,8 @@ TIMEOUT = 0x4B
 SIDESET = 0x4C
 CLKDIV = 0x4D
 SHIFT = 0x4F
+CRC_POLY = 0x61  # a thread's CRC polynomial: the low half, then the high half
+CRC_INIT = 0x63  # and what the register starts from, the same way
 BANK = 0x10  # thread 1's registers are thread 0's plus this
 FIFO_DEPTH = 4
 PROGRAM_WORDS = 256  # in each thread's memory
@@ -838,27 +840,35 @@ class Can:
     acknowledge other nodes' frames, so the bus needs at least one node that
     does, and it sends no error frames.
 
-    The engines own the bit timing, arbitration and the ACK slot; framing,
-    CRC and bit stuffing are here. The host has to keep up: a word of 16
-    bits each way per 16 bit times while a frame is on the bus, so use the
-    PIO port (PioPort) above a few kbit/s."""
+    To send, the host gives the identifier and the data, and the chip makes
+    the frame: bit stuffing, the CRC, arbitration and the ACK slot. The
+    receiver hands over the bits as they were on the wire, and taking the
+    stuffing out and checking the CRC of a frame heard is here. The host
+    has to keep up: a word each way per 15 bit times while a frame is on
+    the bus, so use the PIO port (PioPort) above a few kbit/s."""
 
-    RX_WORDS, RX_SAME, TX_LOST = 19, 14, 19
+    RX_WORDS, RX_SAME, TX_LOST = 19, 14, 55
     FRAME_END = 0xFFFF
+    CRC15 = 0x4CD1  # 0x4599 with its 15 bits reversed: the register shifts right
+    ACKED, NOT_ACKED = 0, 1  # the transmitter's result; anything else: stopped
 
     def __init__(self, chip, image, clock_hz=10_000_000, bitrate=125_000):
-        clkdiv = clock_hz // (10 * bitrate)
-        if clkdiv < 1 or clkdiv * 10 * bitrate != clock_hz:
-            raise ValueError("the core clock must be 10 x bitrate x a whole number")
+        clkdiv = clock_hz // (20 * bitrate)
+        if clkdiv < 1 or clkdiv * 20 * bitrate != clock_hz:
+            raise ValueError("the core clock must be 20 x bitrate x a whole number")
         self.chip = chip
         self._words, self._frames = [], []
         chip.stop()
         chip.load(image)
+        # The receiver's bit is 10 ticks and the transmitter's 20.
         chip.configure(thread=0, start=0, in_base=0, threshold=15, timeout=4,
-                       timeout_vector=self.RX_SAME, clkdiv=clkdiv, out_msb_first=True)
+                       timeout_vector=self.RX_SAME, clkdiv=2 * clkdiv, out_msb_first=True)
         chip.configure(thread=1, start=self.RX_WORDS, out_base=1, out_count=1,
-                       threshold=16, timeout=0,
-                       timeout_vector=self.RX_WORDS + self.TX_LOST, clkdiv=clkdiv)
+                       set_base=1, set_count=1, in_base=0, threshold=15, timeout=0,
+                       timeout_vector=self.TX_LOST, clkdiv=clkdiv, auto=1)
+        for k, w in enumerate((self.CRC15, 0)):
+            chip.write(CRC_POLY + BANK + k, w)
+            chip.write(CRC_INIT + BANK + k, 0)
         chip.set_pin_modes({1: PUSH_PULL})
         chip.run(threads=(0, 1))
 
@@ -873,31 +883,24 @@ class Can:
         return crc
 
     @staticmethod
-    def _stuff(bits):
-        """A bit of the opposite level after every five equal bits."""
-        out, last, run = [], -1, 0
-        for b in bits:
-            run = run + 1 if b == last else 1
-            last = b
-            out.append(b)
-            if run == 5:
-                last, run = 1 - b, 1
-                out.append(last)
-        return out
-
-    @classmethod
-    def frame_bits(cls, ident, data):
-        """A data frame on the wire (1 = recessive), from its start-of-frame
-        bit to its ACK delimiter."""
+    def tx_words(ident, data):
+        """The transmitter's words for a data frame: how many bits less
+        one, then the bits from the identifier to the end of the data, 15
+        to a word, the first in bit 0. The start-of-frame bit, the stuffing
+        and the CRC are the chip's."""
         if not 0 <= ident < 0x800 or len(data) > 8:
             raise ValueError("11-bit identifier, at most 8 bytes")
-        body = [0] + [(ident >> (10 - k)) & 1 for k in range(11)] + [0, 0, 0]
-        body += [(len(data) >> (3 - k)) & 1 for k in range(4)]
+        bits = [(ident >> (10 - k)) & 1 for k in range(11)] + [0, 0, 0]
+        bits += [(len(data) >> (3 - k)) & 1 for k in range(4)]
         for byte in data:
-            body += [(byte >> (7 - k)) & 1 for k in range(8)]
-        crc = cls._crc15(body)
-        body += [(crc >> (14 - k)) & 1 for k in range(15)]
-        return cls._stuff(body) + [1, 1, 1]
+            bits += [(byte >> (7 - k)) & 1 for k in range(8)]
+        words = [len(bits) - 1]
+        for k in range(0, len(bits), 15):
+            w = 0
+            for j, b in enumerate(bits[k:k + 15]):
+                w |= b << j
+            words.append(w)
+        return words
 
     @classmethod
     def decode(cls, levels):
@@ -972,13 +975,7 @@ class Can:
     def send(self, ident, data, attempts=8):
         """Sends a data frame, again each time it loses arbitration. True
         if a node acknowledged it, False if none did."""
-        bits = self.frame_bits(ident, data)[1:]  # the engine sends the SOF
-        words = [len(bits) - 1]
-        for k in range(0, len(bits), 16):
-            w = 0
-            for j, b in enumerate(bits[k:k + 16]):
-                w |= b << j
-            words.append(w)
+        words = self.tx_words(ident, data)
         for _ in range(attempts):
             for w in words:
                 while self.chip.status(thread=1)["tx_level"] >= FIFO_DEPTH:
@@ -989,9 +986,9 @@ class Can:
             while r is None:
                 self._pump()
                 r = self.chip.try_pop(thread=1)
-            if r == 0:
+            if r == self.ACKED:
                 return True
-            if r == self.FRAME_END:
+            if r == self.NOT_ACKED:
                 return False
         raise CanError("arbitration lost %d times" % attempts)
 

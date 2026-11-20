@@ -992,18 +992,20 @@ module Ps2 = struct
 end
 
 (* CAN (ISO 11898 classical CAN, through a transceiver): a transmitter and a
-   listen-only receiver, on the two threads. Firmware alone, on the finished
-   hardware. What it is not: a full node. It does not acknowledge other
-   nodes' frames or send error frames, which need the frame decoded as it
-   arrives; that does not fit in what is left of 64 instructions.
+   listen-only receiver, on the two threads. Firmware alone. The
+   transmitter makes the whole frame from the identifier and the data: bit
+   stuffing, CRC, arbitration, the ACK slot. What the pair is not: a full
+   node. It does not acknowledge other nodes' frames or send error frames,
+   which need the frame decoded as it arrives, on a clock recovered from
+   the bus, in the receiver.
 
    Pins: P0 = RXD (input, through the synchroniser), P1 = TXD (push-pull;
-   0 is dominant). A bit is 10 ticks, so CLKDIV = core clock / (10 x bit
-   rate): 8 for 125 kbit/s at 10 MHz, 1 for 1 Mbit/s. As with USB, the host
-   does everything above the wire (identifier, length, CRC15, bit stuffing:
-   [Can.frame_bits] here, Can in the board driver) and the engines own what
-   the host is too slow for: bit timing, arbitration, the ACK slot, and
-   resynchronisation.
+   0 is dominant). The receiver's bit is 10 ticks, so its CLKDIV = core
+   clock / (10 x bit rate): 8 for 125 kbit/s at 10 MHz. The transmitter's
+   is 20 ticks, at half that CLKDIV, so the core clock is 20 x the bit rate
+   x a whole number. The receiver hands the host what was on the wire, and
+   the host removes the stuffing and checks the frame ([Can.decode] here,
+   Can in the board driver).
 
    The receiver, [can_rx], on thread 0, records every frame on the bus, the
    transmitter's own included. It waits for a start of frame (RXD falling on
@@ -1026,24 +1028,7 @@ end
    least, and the watch reaches 2 ticks either side of where the edge is
    due, so the sender's clock may differ by 2%; CAN allows 1.58%.
 
-   The transmitter, [can_tx], on thread 1. TX words: N - 1, then the N bits
-   of a frame after its start-of-frame bit, up to its ACK delimiter,
-   stuffed, 16 to a word, the first in bit 0 ([Can.tx_words]). It waits
-   until the bus has been recessive for 11 bit times, looks once more, and
-   2 ticks later is driving the start-of-frame bit itself; then the N bits
-   at exactly 10 ticks each. A node that started in those 2 ticks is at
-   most a quarter of a bit ahead, and the two arbitrate as CAN intends. Six
-   ticks into every recessive bit it has sent, the transmitter reads RXD: if
-   the bus is dominant, another node is driving, and it stops at once and
-   leaves the bus alone. One RX word reports where:
-     0       in the ACK slot: a receiver acknowledged the frame
-     0xFFFF  never: the frame went out and nobody acknowledged it
-     k       N - 2 - k bits in: arbitration lost to a frame with a lower
-             identifier (or another node signalled an error); send it again
-   A wait with TIMEOUT = 0 is the branch on RXD; [can_tx_lost] is the vector,
-   used while waiting for an idle bus as well, which X being 0 tells apart.
-   After stopping it still takes the rest of the frame's words from the TX
-   FIFO, so the next command is read as one. *)
+   The transmitter, [can_tx], on thread 1, is described below. *)
 let can_rx =
   {|
 idle:   wait 1 pin 0            ; the bus recessive...
@@ -1070,42 +1055,153 @@ same:   jmp y-- chk             ; timeout vector: still recessive, no edge
 
 let can_rx_same = 14
 
-(* CAN: the transmitter, on thread 1. Pins, the TX words and the result
-   word are described at [can_rx] (examples/can_rx.s). Config:
-   [Can.tx_config]. *)
+(* CAN: the transmitter, on thread 1, with the framing on the chip: it
+   stuffs the bits, computes the CRC, arbitrates and reads the ACK slot.
+   Config: [Can.tx_config].
+
+   A bit is 20 ticks here (the receiver's is 10, so this thread's CLKDIV is
+   half the receiver's). Ticks are counted from the instruction that drives
+   a bit, tick 0; the next bit is driven at tick 20, along every path.
+
+   TX words: N - 1, then the N bits from the identifier to the end of the
+   data, as they are before stuffing and with no CRC, 15 to a word, the
+   first in bit 0 ([Can.tx_words]). Both must be in the FIFO before the bus
+   is looked at, so the first bit never waits for the host; after that a
+   word is needed every 15 bit times. One frame at a time: the next one's
+   words must not be there until this one has reported.
+
+   Stuffing. The last level sent is which of the two loops the thread is
+   in, [z] after a dominant bit and [o] after a recessive one. The length
+   of the run is the ISR's shift count: 11 after the first bit of a run,
+   one more for each equal bit, and at 15, the threshold, the ISR counts as
+   full: five equal bits, so the next bit is their opposite and is not
+   taken from the OSR. The CRC register follows OUT, so it sees every bit
+   of the frame and no stuff bit.
+
+   The CRC. When Y runs out a field has ended. The 15 bits a word holds
+   never end with the data (18 + 8 n is not a multiple of 15 for n up to
+   8), so the OSR not empty means the data has just ended: the CRC
+   register is moved to the OSR and goes out through the same loops, bit
+   15 of it never sent. The OSR empty means that was the CRC.
+
+   Arbitration. Fourteen ticks into every recessive bit it has sent, stuff
+   bits included, the thread reads RXD. (One bit goes unread: a fifth
+   recessive bit that is also the last of the data or of the CRC, where
+   arbitration is long over.) Dominant: another node is driving,
+   and it stops at once, takes the rest of the frame's bits from the FIFO
+   unsent, and reports. The wait with TIMEOUT = 0 is that branch;
+   [can_tx_lost] is the vector, used while waiting for an idle bus as well,
+   which X being 0 tells apart. A wait that times out does not change
+   PAGE, so the vector sets it.
+
+   One RX word reports:
+     0   a receiver acknowledged the frame
+     1   the frame went out and nobody acknowledged it
+     2   stopped: arbitration lost, or the bus dominant under a recessive
+         bit. Send it again. *)
 let can_tx =
   {|
 next:   pull                    ; N - 1
+        mov isr, osr            ; kept in the ISR while the bus is watched
+        pull                    ; the first 15 bits, here before the frame starts
         set x, 0                ; X = 0 marks "waiting for the bus"
-quiet:  set y, 10               ; the bus recessive for 11 bit times
-q:      wait 1 pin 0 timeout [8]
+quiet:  set y, 24               ; the bus recessive for 11 bit times: 25 looks
+q:      wait 1 pin 0 timeout [7]
         jmp y-- q
         wait 1 pin 0 timeout    ; a last look, then at once
-        mov pins, x [2]         ; the start-of-frame bit (X is 0)
-        out y, 16               ; N - 1, kept in the OSR until now
-loop:   jmp !osre pad
-        pull
-bit:    jmp !x skip             ; the last bit sent: dominant, nothing to check
-        wait 1 pin 0 timeout    ; recessive: the bus must be recessive too
-send:   out x, 1 [1]
-        mov pins, x [2]         ; drive TXD
-        jmp y-- loop
-        in y, 16                ; all sent, never stopped: 0xFFFF
-        jmp fin
-pad:    jmp bit
-skip:   jmp send
-lost:   jmp !x quiet            ; timeout vector. Waiting for the bus: count again
-        in y, 16                ; mid-frame: stop sending. Y says where
-d:      jmp !osre d2            ; take the rest of the frame's words, unsent
-        pull
-d2:     out null, 1
-        jmp y-- d
-fin:    push
+        mov pins, x             ; 0: the start-of-frame bit (X is 0)
+        mov y, isr              ; 1: N - 1
+        mov crc, null           ; 2: the CRC from zero
+        mov isr, null           ; 3
+        in null, 11             ; 4: a run of one dominant bit
+        set page, 1 [11]        ; 5..16
+        jmp zo                  ; 17
+        .page 0
+end0:   jmp !osre de0           ; 7: a field has ended, on a dominant bit
+        jmp tail                ; 8: it was the CRC
+de0:    mov osr, crc            ; 8: it was the data. The CRC goes out next
+        set y, 14 [6]           ; 9..15
+        set page, 1             ; 16
+        jmp zo                  ; 17
+        .page 0
+end1:   jmp !osre de1           ; 7: the same, on a recessive bit
+        jmp tail
+de1:    mov osr, crc            ; 8
+        set y, 14 [2]           ; 9..11
+        set page, 1             ; 12
+        jmp ow                  ; 13: this bit is checked like any other
+        .page 0
+tail:   nop [10]                ; 9..19
+        set pins, 1             ; 0: the CRC delimiter
+        nop [15]                ; 1..16
+        nop [3]                 ; 17..20: the ACK slot begins
+        nop [12]                ; 1..13
+        mov isr, null           ; 14
+        in pins, 1              ; 15: RXD in the ACK slot
+        push                    ; 0 if a receiver drove it
         jmp next
+lost:   set page, 0             ; timeout vector: PAGE may be either
+        jmp !x quiet            ; waiting for the bus: count again
+d:      out null, 1             ; mid-frame: the rest of its bits, unsent
+        jmp y-- d
+        set x, 2
+        mov isr, null
+        in x, 16
+        push
+        jmp next
+        .align
+z:      nop [12]                ; 5..17: the last bit sent was dominant
+zo:     out x, 1 [1]            ; 18..19: the next bit; the CRC takes it
+        mov pins, x             ; 0
+        jmp !x zs               ; 1
+        mov isr, null           ; 2: recessive now, a run of one
+        in null, 11             ; 3
+        jmp y-- o               ; 4
+        set page, 0             ; 5
+        jmp end1                ; 6
+        .page 1
+zs:     in null, 1              ; 2: one more dominant bit
+        jmp !isrf zc            ; 3
+        mov isr, null [13]      ; 4..17: five. A recessive stuff bit is next
+        in null, 11 [1]         ; 18..19
+        set pins, 1             ; 0
+        set x, 1 [2]            ; 1..3: X says what is on TXD, for the vector
+        jmp y-- o               ; 4
+        set page, 0             ; 5
+        jmp end1                ; 6
+        .page 1
+zc:     jmp y-- z               ; 4
+x0:     set page, 0             ; 5
+        jmp end0                ; 6
+        .page 1
+o:      nop [8]                 ; 5..13: the last bit sent was recessive
+ow:     wait 1 pin 0 timeout [3] ; 14..17: so the bus must be recessive too
+        out x, 1 [1]            ; 18..19
+        mov pins, x             ; 0
+        jmp !x oz               ; 1
+        in null, 1              ; 2: one more recessive bit
+        jmp !isrf oc            ; 3
+        jmp y-- os              ; 4: five. A dominant stuff bit is next
+        mov isr, null [12]      ; 5..17: and the field ends with it
+        in null, 11 [1]         ; 18..19
+        set pins, 0             ; 0
+        jmp x0 [3]              ; 1..4
+os:     mov isr, null [8]       ; 5..13
+        wait 1 pin 0 timeout [3] ; 14..17
+        in null, 11 [1]         ; 18..19
+        set pins, 0             ; 0
+        jmp z [3]               ; 1..4
+oz:     mov isr, null           ; 2: dominant now, a run of one
+        in null, 11             ; 3
+        jmp y-- z               ; 4
+        set page, 0             ; 5
+        jmp end0                ; 6
+        .page 1
+oc:     jmp y-- o               ; 4
+        set page, 0             ; 5
+        jmp end1                ; 6
 |}
 ;;
-
-let can_tx_lost = 19
 
 module Can = struct
   let rx_origin = 0
@@ -1113,6 +1209,14 @@ module Can = struct
   let tx_origin = rx_origin + Array.length rx
   let tx = Asm.assemble ~origin:tx_origin can_tx
   let image = Asm.link [ rx_origin, rx; tx_origin, tx ]
+
+  (* The transmitter's timeout vector. *)
+  let tx_lost ?(origin = tx_origin) source = Asm.label ~origin source "lost"
+
+  (* The CRC register's polynomial for CRC-15/CAN: 0x4599 with its 15 bits
+     reversed, since the register shifts right. Bit 0 is then the CRC's
+     most significant bit, the first sent. *)
+  let crc_poly = List.fold (List.range 0 15) ~init:0 ~f:(fun acc k -> acc lor (((0x4599 lsr k) land 1) lsl (14 - k)))
 
   (* [clkdiv]: core clock / (10 x bit rate). *)
   let rx_config ~clkdiv =
@@ -1127,17 +1231,31 @@ module Can = struct
     }
   ;;
 
+  (* [clkdiv] is the receiver's, and must be even: the transmitter's bit is
+     20 ticks, so it runs at half of it. *)
   let tx_config ~clkdiv =
+    assert (clkdiv % 2 = 0);
     { Isa.Thread_config.default with
       start = tx_origin
     ; out_base = 1
     ; out_count = 1
-    ; threshold = 16
+    ; set_base = 1
+    ; set_count = 1
+    ; in_base = 0
+    ; threshold = 15
+    ; autopull = true
     ; timeout = 0
-    ; timeout_vector = tx_origin + can_tx_lost
-    ; clkdiv
+    ; timeout_vector = tx_lost can_tx
+    ; clkdiv = clkdiv / 2
+    ; crc_poly
+    ; crc_init = 0
     }
   ;;
+
+  (* The transmitter's RX word. *)
+  let acknowledged = 0
+  let not_acknowledged = 1
+  let stopped = 2
 
   (* P1 push-pull, the rest inputs. *)
   let mode_bits = 0b01_00
@@ -1176,13 +1294,17 @@ module Can = struct
     List.rev stuffed @ [ 1; 1; 1 ]
   ;;
 
-  (* The transmitter's words for [frame_bits]: the start-of-frame bit is its
-     own. *)
-  let tx_words bits =
-    let bits = List.tl_exn bits in
-    let n = List.length bits in
-    (n - 1)
-    :: List.map (List.chunks_of bits ~length:16) ~f:(fun chunk ->
+  (* The transmitter's words for a data frame: the bits from the identifier
+     to the end of the data, 15 to a word. The start-of-frame bit, the
+     stuffing and the CRC are the chip's. *)
+  let tx_words ~id ~data =
+    let n = List.length data in
+    assert (id >= 0 && id < 0x800 && n <= 8);
+    let bits =
+      msb_first ~width:11 id @ [ 0; 0; 0 ] @ msb_first ~width:4 n @ List.concat_map data ~f:(msb_first ~width:8)
+    in
+    (List.length bits - 1)
+    :: List.map (List.chunks_of bits ~length:15) ~f:(fun chunk ->
       List.foldi chunk ~init:0 ~f:(fun k acc b -> acc lor (b lsl k)))
   ;;
 

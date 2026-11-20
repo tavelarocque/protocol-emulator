@@ -44,7 +44,7 @@ anyone likes.
 | A PAGE register for jumps (v2.0) | Widening the jump address | `jmp` holds 6 bits and every 16-bit word is already a defined instruction. A page register, set by an encoding that was a NOP until then, leaves every v1.4 program encoding and running as before |
 | A packet buffer in a third SRAM, which the chip plays into a thread's FIFO or records from one, a word a cycle (v2.1) | Deeper FIFOs; a faster host port | An Ethernet frame is up to 12,144 bits with no pause, 625,000 words a second, and the host port moves about 260,000 at 50 MHz. FIFOs deep enough for a frame would be a memory anyway. A buffer that only moves words into and out of the FIFOs the threads already have leaves every instruction as it was, and serves any protocol whose data outruns the host |
 | Autopull and autopush: a shift register that refills or empties itself (v2.1) | PULL and PUSH instructions, as every engine before used | At four clocks a bit there is no cycle to spend fetching a word. Off unless a thread's configuration asks for it |
-| A CRC register per thread with the polynomial, start value and inversion in registers, taking one bit for each shift instruction (v2.1) | The CRC in the host driver, as for USB and CAN; a CRC-32 block for Ethernet alone; a register taking a whole word a cycle | The judges ask for the CRC on the chip. A register with a programmable polynomial serves every serial CRC: the tests confirm the published check values of CRC-32, CRC-16/USB and CRC-15/CAN. One bit per instruction is how a serial protocol shifts anyway, and the version that took 16 bits a cycle made the datapath proof run for minutes without finishing; this one proves in about one |
+| A CRC register per thread with the polynomial, start value and inversion in registers, taking one bit for each shift instruction (v2.1) | The CRC in the host driver, as USB's still is and CAN's was; a CRC-32 block for Ethernet alone; a register taking a whole word a cycle | The judges ask for the CRC on the chip. A register with a programmable polynomial serves every serial CRC: the tests confirm the published check values of CRC-32, CRC-16/USB and CRC-15/CAN. One bit per instruction is how a serial protocol shifts anyway, and the version that took 16 bits a cycle made the datapath proof run for minutes without finishing; this one proves in about one |
 | A bit sampler: clock recovery for one pin, in hardware, from samples on both clock edges (v2.2) | Clock recovery in firmware, as the USB engine does it; a fixed Ethernet receiver | Low-speed USB has 8 clocks to the bit. 10 Mbit Ethernet at 40 MHz has 4, and at some alignments of the two clocks 4 samples a bit leave no margin at all. Both edges give 8. The block does the timing and waits for a sync word, and nothing else: its three timing numbers are registers, so it recovers other Manchester and NRZ codes, and the frame is still firmware's. It changes no instruction: the threads see the recovered bit and a pulse on two pins |
 | SPI host port, 24-bit transactions | A UART or a parallel bus | Any microcontroller can drive SPI: the demo board's RP2350 (or the older boards' RP2040) can bit-bang it from MicroPython, or run it from PIO where timing matters (USB) |
 | Two-flip-flop synchronisers on every protocol input, bypassable per pin | No synchronisers | Found in a review for silicon, which simulation cannot find (ISA v1.3). The bypass exists because side-set SPI samples MISO one clock after SCK falls, and a test shows it fails with the extra two cycles |
@@ -80,7 +80,7 @@ The freeze put that claim to the test. Since v1.4, with no hardware change:
 | WS2812 LED driver, written blind: by an AI agent given only `docs/isa.md`, the simulator and the LEDs' timing, never the repository; it passed a hidden data-sheet timing test on its first submission (`examples/ws2812`) | 16 words | side-set on P0, 13-cycle bits; the host sends each frame's bit count first so the firmware ends it with a 310 us latch |
 | 1-Wire bus engine (reset and presence, read and write time slots), with the ROM commands, ROM search and CRC8 in the host driver: a protocol the chip was not designed for, added once the hardware was finished | 25 words | open-drain DQ; CLKDIV set to the core clock in MHz so a tick is 1 us, and Y loops of 16 us for the long waits; a slot that writes a 1 and samples is a read, so one 8-instruction slot does both |
 | PS/2 host for keyboards and mice: a receiver that never stops listening on one thread, a transmitter on the other; added after 1-Wire, on the same finished hardware | 11 + 21 words | open-drain DATA and CLK; wait timeouts to abandon a frame the device gave up; a spare pin driven by the receiver's side-set and read by the transmitter's `wait`, so that one thread tells the other a frame is under way |
-| CAN: a transmitter that arbitrates and reads the ACK slot, and a listen-only receiver; not a full node (it does not acknowledge other nodes' frames or send error frames, which need the frame decoded as it arrives) | 19 + 27 words | a wait with a zero timeout as the branch that reads the bus after every recessive bit sent; a timed wait as the watch for the edge to resynchronise on; `mov osr, isr` and an OUT with the other shift direction to branch on the bit just recorded |
+| CAN: a transmitter that arbitrates and reads the ACK slot, and a listen-only receiver; not a full node (it does not acknowledge other nodes' frames or send error frames, which need the frame decoded as it arrives). Since v2.1's CRC register the transmitter makes the whole frame: bit stuffing and CRC-15 on the chip | 19 + 27 words; 19 + 89 with the framing | a wait with a zero timeout as the branch that reads the bus after every recessive bit sent; a timed wait as the watch for the edge to resynchronise on; `mov osr, isr` and an OUT with the other shift direction to branch on the bit just recorded. In the transmitter: the last level sent is which of two loops it is in, the run of equal bits is the ISR's shift count, and stuff bits are written without an OUT, so the CRC register never sees them |
 | Host driver for the demo board | 1,298 lines of MicroPython | the register map only; for USB, a 7-instruction PIO program (RP2040 or RP2350) that runs the host port |
 
 None of these is mentioned in the ISA's design or its revisions, which were
@@ -371,7 +371,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 119 in all:
+fails if any survives. There are 126 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -389,7 +389,7 @@ fails if any survives. There are 119 in all:
 | USB firmware (4 sending, 3 receiving) | 7 | `sim/test_usb.ml` |
 | 1-Wire firmware | 6 | `sim/test_onewire.ml` |
 | PS/2 firmware (3 receiving, 6 sending) | 9 | `sim/test_ps2.ml` |
-| CAN firmware (4 receiving, 5 sending) | 9 | `sim/test_can.ml` |
+| CAN firmware (4 receiving, 12 sending) | 16 | `sim/test_can.ml` |
 | JTAG, SWD, 1-Wire, PS/2, CAN and host drivers | 8 | `test_driver_planted_bugs` in `test/test.py` |
 | USB driver | 2 | `test_usb_driver_planted_bugs` in `test/test.py` |
 | Driver on the emulated board | 2 | `test/board_emu`: `run_usb.mjs --mutant push-after-start`, `run_board.mjs --mutant cpython-only-call` |
@@ -405,7 +405,7 @@ count as a catch. The host-port and register-file bugs are a parameter of
 `hw/top.ml`, off by default, following `hw/pe_core.ml`; the generated
 Verilog is byte-identical with or without the parameter in the source.
 
-All 119 are caught. Two candidates turned out not to be bugs, and the
+All 126 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -451,6 +451,7 @@ Thirteen of these are told in full in [`bug-ledger.md`](bug-ledger.md).
 | The first PIO port was fed one word at a time by MicroPython, which starved it: a short packet's handshake came 9.95 bit times after the data, and a zero-length packet's would have come after 33 | the emulated board's slack measurement; each batch is now queued with the state machine stopped, then started |
 | The PS/2 transmitter could inhibit after the device counted its frame as sent, so a byte arrived twice; and it changed DATA in the cycle the receiver sampled it | random runs against a device with its timing drawn from the legal range; fixed in firmware with a busy flag on a spare pin and a 3 us delay |
 | The CAN transmitter left a lost frame's words in the FIFO, corrupting the next frame; its first bit could start misaligned; the receiver resynchronised in one direction only and dropped a bit when it pushed a word | random runs against a node with its clock up to 1.25% off that arbitrates in half the runs; all fixed in firmware |
+| The CAN transmitter with the framing on the chip left its bit loop a tick late on one of six ways out, so one bit in a frame lasted 21 ticks | the check, on every random frame, that the chip's edges on TXD are a whole number of bit times apart; fixed in firmware before it was committed |
 | The RTL-to-netlist check crashed on v2.0's netlist (a planted bug picked flip-flop 900 of 796; it was written for v1.4's 1,796) and CI reported it green in 20 seconds, having proved nothing: the step piped its output through `tee`, which hid the exit status | reading the log of a passing job; the step now sets `pipefail`, the planted bugs assume no flip-flop count, and a run with no verdict is a failure |
 | With that fixed, the base case of the same proof ended with no verdict: Yosys's `equiv_miter` recursed through the whole netlist and overflowed the stack of the WebAssembly build CI uses | the check now printing why a proof gave no result; reproduced with a chain of 4,000 flip-flops, and the miter rebuilt a way that does not recurse |
 | The NEC receiver pushed its first word to the host straight after the 16th bit, and that push made it miss the start of the next burst from a remote running fast | a model remote swept from 23% slow to 23% fast; the push moved into the silence, with both paths the same length |
@@ -586,9 +587,15 @@ answer it.
   four clocks a bit are beyond a thread, and that firmware is not
   written. Ethernet above 10 Mbit is out of reach of a 50 MHz chip.
 - **What the firmware does not do yet.** A full CAN node: acknowledging
-  other nodes' frames means decoding a frame as it arrives. On v1.4 that
-  did not fit beside the rest in 64 words; v2.0 has the room and the
-  firmware is not written, so the chip sends, arbitrates and listens. The
+  other nodes' frames means decoding a frame as it arrives, on a clock
+  recovered from the bus. On v1.4 that did not fit beside the rest in 64
+  words. v2.0 has the room, and the transmitter now stuffs its own bits
+  and makes its own CRC, but the receiver is harder than room: the bit
+  sampler recovers a clock only up to 16 core clocks a bit, where the host
+  port cannot carry the frames, and a thread doing it alone must take the
+  same number of ticks along every path through the decoder with four
+  registers to hold a run length, a field count, a level and the data.
+  That firmware is not written, so the chip sends, arbitrates and listens. The
   I2C controller starts a transfer only after a STOP, so it cannot send a
   repeated START. Of the protocols added on v2.0, I2S, DMX512, DALI,
   RC-5, MIDI, LIN and Modbus RTU are transmit only.

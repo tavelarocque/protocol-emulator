@@ -1868,6 +1868,27 @@ CAN_NODE_BIT = 162
 CAN_VECTOR = "01010101010100000110000010000111110111001000010110001111"
 
 
+def can_frame_bits(ident, data):
+    """A data frame on the wire (1 = recessive), from its start-of-frame
+    bit to its ACK delimiter: what the node sends. Written here, apart
+    from the chip's stuffing and CRC, which are firmware."""
+    body = [0] + [(ident >> (10 - k)) & 1 for k in range(11)] + [0, 0, 0]
+    body += [(len(data) >> (3 - k)) & 1 for k in range(4)]
+    for byte in data:
+        body += [(byte >> (7 - k)) & 1 for k in range(8)]
+    crc = pe.Can._crc15(body)
+    body += [(crc >> (14 - k)) & 1 for k in range(15)]
+    out, last, run = [], -1, 0
+    for b in body:
+        run = run + 1 if b == last else 1
+        last = b
+        out.append(b)
+        if run == 5:
+            last, run = 1 - b, 1
+            out.append(last)
+    return out + [1, 1, 1]
+
+
 class CanNode:
     def __init__(self):
         self.got, self.to_send, self.sent = [], [], 0
@@ -1953,7 +1974,7 @@ async def can_node(dut, node):
 def _can_session(chip, node):
     can = pe.Can(chip, firmware("can"), bitrate=62_500)
     acked = can.send(0x123, [1, 2, 3])
-    node.to_send.append(pe.Can.frame_bits(0x321, [0xAA, 0x55, 0x00, 0xFF]))
+    node.to_send.append(can_frame_bits(0x321, [0xAA, 0x55, 0x00, 0xFF]))
     heard = []
     while len(heard) < 2:
         f = can.receive()
@@ -1967,7 +1988,7 @@ async def test_can(dut):
     """The driver sends a frame that a node receives and acknowledges, then
     hears the node's own frame; and with no node, its frame goes
     unacknowledged."""
-    assert "".join(map(str, pe.Can.frame_bits(0x555, [0x00, 0xFF]))) == CAN_VECTOR
+    assert "".join(map(str, can_frame_bits(0x555, [0x00, 0xFF]))) == CAN_VECTOR
     await reset(dut)
     node = CanNode()
     task = cocotb.start_soon(can_node(dut, node))
@@ -2018,16 +2039,14 @@ async def test_can(dut):
     assert await alone() == (False, (0x7FF, [], False))
 
 
-def _can_stuff_after_six(bits):
-    out, last, run = [], -1, 0
-    for b in bits:
-        run = run + 1 if b == last else 1
-        last = b
-        out.append(b)
-        if run == 6:
-            last, run = 1 - b, 1
-            out.append(last)
-    return out
+def _can_words_sixteen_bits(tx_words):
+    def words(ident, data):
+        right = tx_words(ident, data)
+        bits = [(w >> k) & 1 for w in right[1:] for k in range(15)][:right[0] + 1]
+        return [right[0]] + [sum(b << j for j, b in enumerate(bits[k:k + 16]))
+                             for k in range(0, len(bits), 16)]
+
+    return staticmethod(words)
 
 
 async def _can_send_ok(dut):
@@ -2059,8 +2078,8 @@ DRIVER_BUGS = [
      lambda _: _onewire_search_never_revisits, _onewire_search_two_ok),
     ("PS/2 parity even, not odd", pe.Ps2, "_odd_parity",
      lambda _: staticmethod(_ps2_even_parity), _ps2_identify_ok),
-    ("CAN stuff bit after six equal bits", pe.Can, "_stuff",
-     lambda _: staticmethod(_can_stuff_after_six), _can_send_ok),
+    ("CAN frame's bits packed 16 to a word", pe.Can, "tx_words",
+     _can_words_sixteen_bits, _can_send_ok),
 ]
 
 

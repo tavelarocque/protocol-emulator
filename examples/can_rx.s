@@ -3,18 +3,20 @@
 ; are definitions in model/firmware.ml.
 ;
 ; CAN (ISO 11898 classical CAN, through a transceiver): a transmitter and a
-; listen-only receiver, on the two threads. Firmware alone, on the finished
-; hardware. What it is not: a full node. It does not acknowledge other
-; nodes' frames or send error frames, which need the frame decoded as it
-; arrives; that does not fit in what is left of 64 instructions.
+; listen-only receiver, on the two threads. Firmware alone. The
+; transmitter makes the whole frame from the identifier and the data: bit
+; stuffing, CRC, arbitration, the ACK slot. What the pair is not: a full
+; node. It does not acknowledge other nodes' frames or send error frames,
+; which need the frame decoded as it arrives, on a clock recovered from
+; the bus, in the receiver.
 ;
 ; Pins: P0 = RXD (input, through the synchroniser), P1 = TXD (push-pull;
-; 0 is dominant). A bit is 10 ticks, so CLKDIV = core clock / (10 x bit
-; rate): 8 for 125 kbit/s at 10 MHz, 1 for 1 Mbit/s. As with USB, the host
-; does everything above the wire (identifier, length, CRC15, bit stuffing:
-; [Can.frame_bits] here, Can in the board driver) and the engines own what
-; the host is too slow for: bit timing, arbitration, the ACK slot, and
-; resynchronisation.
+; 0 is dominant). The receiver's bit is 10 ticks, so its CLKDIV = core
+; clock / (10 x bit rate): 8 for 125 kbit/s at 10 MHz. The transmitter's
+; is 20 ticks, at half that CLKDIV, so the core clock is 20 x the bit rate
+; x a whole number. The receiver hands the host what was on the wire, and
+; the host removes the stuffing and checks the frame ([Can.decode] here,
+; Can in the board driver).
 ;
 ; The receiver, [can_rx], on thread 0, records every frame on the bus, the
 ; transmitter's own included. It waits for a start of frame (RXD falling on
@@ -37,24 +39,7 @@
 ; least, and the watch reaches 2 ticks either side of where the edge is
 ; due, so the sender's clock may differ by 2%; CAN allows 1.58%.
 ;
-; The transmitter, [can_tx], on thread 1. TX words: N - 1, then the N bits
-; of a frame after its start-of-frame bit, up to its ACK delimiter,
-; stuffed, 16 to a word, the first in bit 0 ([Can.tx_words]). It waits
-; until the bus has been recessive for 11 bit times, looks once more, and
-; 2 ticks later is driving the start-of-frame bit itself; then the N bits
-; at exactly 10 ticks each. A node that started in those 2 ticks is at
-; most a quarter of a bit ahead, and the two arbitrate as CAN intends. Six
-; ticks into every recessive bit it has sent, the transmitter reads RXD: if
-; the bus is dominant, another node is driving, and it stops at once and
-; leaves the bus alone. One RX word reports where:
-;   0       in the ACK slot: a receiver acknowledged the frame
-;   0xFFFF  never: the frame went out and nobody acknowledged it
-;   k       N - 2 - k bits in: arbitration lost to a frame with a lower
-;           identifier (or another node signalled an error); send it again
-; A wait with TIMEOUT = 0 is the branch on RXD; [can_tx_lost] is the vector,
-; used while waiting for an idle bus as well, which X being 0 tells apart.
-; After stopping it still takes the rest of the frame's words from the TX
-; FIFO, so the next command is read as one.
+; The transmitter, [can_tx], on thread 1, is described below.
 idle:   wait 1 pin 0            ; the bus recessive...
         wait 0 pin 0            ; ...then a start of frame
         set y, 7 [5]

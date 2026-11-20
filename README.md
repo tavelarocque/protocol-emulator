@@ -146,7 +146,7 @@ the largest engine, Ethernet transmit, uses 70.
 | 10BASE-T Ethernet | transmitter with link pulses, and receiver, 10 Mbit/s | 70 + 14 | a receiver and a sender written from IEEE 802.3, the sender's clock 100 ppm off and its edges jittered; `zlib`'s CRC-32 |
 | WS2812 | driver | 16 | a hidden data-sheet timing test; sigrok's WS281x decoder |
 | PS/2 | host, both directions | 11 + 21 | a device written from the protocol's rules; sigrok's PS/2 decoder |
-| CAN | transmitter and listen-only receiver | 19 + 27 | a node written from ISO 11898-1; sigrok's CAN decoder |
+| CAN | transmitter that stuffs the bits and makes the CRC on the chip; listen-only receiver | 19 + 89 | a node written from ISO 11898-1; sigrok's CAN decoder |
 | I2C to SPI | bridge, no host in the data path | 25 + 26 | the I2C and SPI oracles together |
 | I2S | transmitter, 16-bit stereo | 11 | sigrok's I2S decoder |
 | DMX512 | transmitter | 26 | sigrok's DMX512 decoder |
@@ -197,7 +197,7 @@ a bug.
 | Is every instruction defined? | Yes, all 65,536 words | exhaustive round trips, and the spec's datapath matched on every word |
 | Do the protocols work? | Each judged by an independent oracle | third-party device models and sigrok's decoders in cocotb, on the RTL and the gate netlist |
 | Does the host driver work? | The same file, unchanged | in cocotb, then in MicroPython on an emulated board (rp2040js) wired to the RTL |
-| Would the tests notice a bug? | 119 planted bugs, all caught | kept in the repo; the suite fails if one survives |
+| Would the tests notice a bug? | 126 planted bugs, all caught | kept in the repo; the suite fails if one survives |
 | Did the random tests reach everything? | Coverage is counted | any instruction, stall or timeout never seen fails the build |
 
 Generated files cannot drift: CI regenerates the Verilog, the firmware
