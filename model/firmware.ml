@@ -2293,6 +2293,113 @@ let eth_tx_words bytes =
     | _ -> assert false)
 ;;
 
+(* 10BASE-T receive: the other half of [eth_tx], for one thread with the
+   bit sampler in front of it.
+
+   The sampler does what no program here is fast enough for: it finds the
+   middle of each bit on the wire (clock recovery), reads the bit there
+   (Manchester decoding) and lets nothing through until the preamble's last
+   byte, 0xD5, has gone by. What reaches this program is the frame, a bit at
+   a time: the bit on pin 2 and a one-cycle pulse on pin 3 as each arrives,
+   never fewer than three cycles apart.
+
+   The program takes each bit with one IN. Every 16 make a word, pushed by
+   itself, and the CRC register follows them, FCS included, so that after a
+   good frame it holds the same number whatever the frame was (0xDEBB20E3).
+   X counts the bits. When no pulse comes for TIMEOUT ticks the frame is
+   over, and the program pushes three more words: the count, as 0x10000
+   minus the number of bits, and the CRC register's two halves. An odd last
+   byte gets a word of its own first. With the buffer recording, the host
+   reads back the frame and those three words when it likes.
+
+   Config: [eth_rx_config]; sampler: [eth_rx_sampler]. The clock is 40 MHz,
+   as for [eth_tx], or 50 MHz with [eth_rx_sampler_50]. *)
+let eth_rx_origin = 0
+let eth_rx_data_pin = 2
+
+let eth_rx =
+  {|
+rx:     mov crc, null           ; the CRC starts from its initial value
+        mov x, null
+        jmp x-- first           ; X = 0xFFFF: it counts the bits, downwards
+first:  wait 1 pin 3            ; a frame's first bit
+bit:    in pins, 1              ; take it; the CRC register follows
+        wait 1 pin 3 timeout    ; the next bit, or the end of the frame
+        jmp x-- bit
+eof:    mov y, crc              ; what is left in the CRC register, low half:
+                                ;   reading it stops it following the INs
+        in null, 8              ; an odd last byte becomes a word of its own
+        in x, 16                ; then three more words: the bit count,
+        in y, 16                ;   the CRC register's low half
+        mov y, crc
+        in y, 16                ;   and its high half
+        jmp rx
+|}
+;;
+
+(* [eof] above: where the thread goes when a frame's bits stop. *)
+let eth_rx_eof = eth_rx_origin + 7
+
+let eth_rx_config =
+  { Isa.Thread_config.default with
+    start = eth_rx_origin
+  ; in_base = eth_rx_data_pin
+  ; threshold = 16
+  ; autopush = true
+  ; timeout_vector = eth_rx_eof
+  ; timeout = 8
+  ; crc_poly = 0xEDB88320
+  ; crc_init = 0xFFFF_FFFF
+  ; crc_in = true
+  }
+;;
+
+(* The sampler for 10 Mbit Manchester on a 40 MHz clock: 8 samples to the
+   bit. The edge between two bits shows 4 samples after the one in the
+   middle, or 5 if it is late; the next middle edge 8 after, give or take.
+   Edges are accepted from 6 on. Twelve samples without one end the frame. *)
+let eth_rx_sampler =
+  { Isa.Sampler_config.enable = true
+  ; pin = eth_rx_data_pin
+  ; invert = false
+  ; sync_enable = true
+  ; sync = 0xD5
+  ; misses = 0
+  ; blank = 5
+  ; sample = 1
+  ; wrap = 11
+  }
+;;
+
+(* The same on a 50 MHz clock, 10 samples to the bit: edges accepted from 8
+   on. More margin, but [eth_tx] cannot run on this clock. *)
+let eth_rx_sampler_50 = { eth_rx_sampler with blank = 7; sample = 2; wrap = 14 }
+let eth_rx_image () = Asm.link [ eth_rx_origin, Asm.assemble ~origin:eth_rx_origin eth_rx ]
+
+(* The residue: what the CRC register holds after a frame and its FCS. *)
+let eth_rx_residue = 0xDEBB20E3
+
+(* What [eth_rx] pushed for one frame, read back: the frame's bytes (FCS
+   included) and whether the CRC register ended at the residue. An error
+   says why the words are not one whole frame. *)
+let eth_rx_frame (words : int list) =
+  match List.rev words with
+  | crc_hi :: crc_lo :: count :: data when List.length words >= 3 ->
+    let bits = (0x10000 - count) land 0xFFFF in
+    let data = List.rev data in
+    if bits % 8 <> 0
+    then Error (sprintf "%d bits is not a whole number of bytes" bits)
+    else (
+      let bytes = bits / 8 in
+      if List.length data <> (bytes + 1) / 2
+      then Error (sprintf "%d bytes counted but %d words" bytes (List.length data))
+      else (
+        let all = List.concat_map data ~f:(fun w -> [ w land 0xFF; w lsr 8 ]) in
+        (* An odd last byte is alone in the low half of its word. *)
+        Ok (List.take all bytes, (crc_hi lsl 16) lor crc_lo = eth_rx_residue)))
+  | _ -> Error "fewer than three words"
+;;
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo

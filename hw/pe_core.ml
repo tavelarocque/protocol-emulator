@@ -91,6 +91,54 @@ module Thread_out = struct
   [@@deriving hardcaml]
 end
 
+(* The bit sampler's registers, and the one input that is its own: the pin
+   it listens to as the falling clock edge found it. The top level has the
+   flip-flop that takes that sample; everything here runs on rising edges. *)
+module Sampler_in = struct
+  type 'a t =
+    { enable : 'a
+    ; pin : 'a [@bits 3]
+      (* the input; the threads see the recovered bit here and a pulse for
+         each one on the next pin *)
+    ; invert : 'a
+    ; sync_enable : 'a (* pass bits on only once [sync] has been seen *)
+    ; misses : 'a [@bits 3]
+      (* bit times in a row without an edge before the carrier is lost; 7:
+         never *)
+    ; blank : 'a [@bits 5]
+      (* the three timing numbers count samples, two to a clock cycle. An
+         edge is accepted once the phase has reached [blank]. *)
+    ; sample : 'a [@bits 5] (* the phase at which a bit is taken *)
+    ; wrap : 'a [@bits 5] (* the phase at which a bit time has gone by with no edge *)
+    ; sync : 'a [@bits 8]
+    ; fall : 'a (* [pin] at the falling edge in the middle of the cycle *)
+    }
+  [@@deriving hardcaml]
+end
+
+(* Its state. [data] and [strobe] are what the threads see on its two pins. *)
+module Sampler_state = struct
+  type 'a t =
+    { last : 'a (* the previous sample *)
+    ; phase : 'a [@bits 5] (* samples since the last accepted edge *)
+    ; missed : 'a [@bits 3]
+    ; carrier : 'a
+    ; synced : 'a
+    ; history : 'a [@bits 8] (* the last 8 recovered bits, first lowest *)
+    ; data : 'a
+    }
+  [@@deriving hardcaml]
+end
+
+module Sampler_out = struct
+  type 'a t =
+    { state : 'a Sampler_state.t
+    ; strobe : 'a
+    ; mid : 'a (* the falling-edge sample, a cycle on *)
+    }
+  [@@deriving hardcaml]
+end
+
 module I = struct
   type 'a t =
     { clock : 'a
@@ -117,6 +165,7 @@ module I = struct
          while the buffer is left to the host, like [buf_read]. *)
     ; buf_data : 'a [@bits 16]
     ; buf_read : 'a (* the host has taken the word at the pointer, which moves on *)
+    ; smp : 'a Sampler_in.t [@rtlprefix "smp_"]
     ; t0 : 'a Thread_in.t [@rtlprefix "t0_"]
     ; t1 : 'a Thread_in.t [@rtlprefix "t1_"]
     }
@@ -132,6 +181,7 @@ module O = struct
     ; pads_oe : 'a [@bits 8]
     ; buf_ptr : 'a [@bits buffer_bits]
     ; buf_word : 'a [@bits 16] (* the word at the pointer *)
+    ; smp : 'a Sampler_out.t [@rtlprefix "smp_"]
     ; t0 : 'a Thread_out.t [@rtlprefix "t0_"]
     ; t1 : 'a Thread_out.t [@rtlprefix "t1_"]
     }
@@ -175,6 +225,13 @@ module Mutation = struct
     | Play_past_end (* the buffer plays on when the pointer has reached the end *)
     | Record_keeps_host_pop (* the host can still pop the FIFO the buffer records from *)
     | Play_after_write (* a word is played in the cycle after a write, before the memory has read it *)
+    | Sampler_samples_swapped
+      (* the sampler takes each cycle's falling-edge sample before the
+         rising-edge sample that came first *)
+    | Sampler_blank_one_short (* it accepts an edge one sample too soon *)
+    | Sampler_passes_before_sync (* it passes bits on before the sync word has been seen *)
+    | Sampler_keeps_carrier (* a bit time with no edge too many does not lose the carrier *)
+    | Sampler_pulse_on_wrong_pin (* its pulse shows on the pin before the data pin, not after *)
   [@@deriving sexp_of, enumerate, equal]
 end
 
@@ -678,6 +735,50 @@ let program_memory (memory : Memory.t) ~clock ~n ~we ~addr ~data =
     ~data
 ;;
 
+(* The bit sampler given one sample: its state after it, and whether the
+   sample was a bit that is passed on. *)
+let sampler_sample ?mutation (c : Signal.t Sampler_in.t) (s : Signal.t Sampler_state.t) level =
+  let is m = Option.value_map mutation ~default:false ~f:(Mutation.equal m) in
+  let edge = level ^: s.last in
+  let late_enough =
+    if is Sampler_blank_one_short
+    then uresize s.phase 6 +:. 1 >=: uresize c.blank 6
+    else s.phase >=: c.blank
+  in
+  let accept = edge &: late_enough in
+  let at_wrap = s.phase >=: c.wrap in
+  (* A bit time with no edge: carry on at the same pace if that is allowed
+     once more, otherwise the carrier is gone. *)
+  let forever = c.misses ==:. 7 in
+  let carry_on =
+    at_wrap &: s.carrier &: if is Sampler_keeps_carrier then vdd else forever |: (s.missed <: c.misses)
+  in
+  let phase = mux2 (accept |: carry_on) (zero 5) (mux2 at_wrap s.phase (s.phase +:. 1)) in
+  let missed = mux2 accept (zero 3) (mux2 (carry_on &: ~:forever) (s.missed +:. 1) s.missed) in
+  let carrier = accept |: mux2 at_wrap carry_on s.carrier in
+  let take = carrier &: (phase ==: c.sample) in
+  let bit = level ^: c.invert in
+  let pass =
+    (* The planted bug keeps the input in the circuit, so that the
+       equivalence checker can still pair it with the spec's. *)
+    take
+    &:
+    if is Sampler_passes_before_sync
+    then c.sync_enable |: ~:(c.sync_enable)
+    else s.synced |: ~:(c.sync_enable)
+  in
+  let shifted = bit @: select s.history 7 1 in
+  ( { Sampler_state.last = level
+    ; phase
+    ; missed
+    ; carrier
+    ; synced = carrier &: (s.synced |: (take &: (shifted ==: c.sync)))
+    ; history = mux2 carrier (mux2 take shifted s.history) (zero 8)
+    ; data = mux2 pass bit s.data
+    }
+  , pass )
+;;
+
 let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
   let is m = Option.value_map mutation ~default:false ~f:(Mutation.equal m) in
   let spec = Reg_spec.create ~clock:i.clock ~clear:i.clear () in
@@ -699,12 +800,38 @@ let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
   let ext_in = (i.pins_in &: bypass) |: (sync2 &: ~:bypass) in
   (* --- Pin levels seen by both threads this cycle. --- *)
   let mode p = select i.pin_modes ((2 * p) + 1) (2 * p) in
+  (* --- The bit sampler. Two samples of its pin a cycle, half a cycle
+     apart: the older from the synchroniser (the rising edge two cycles
+     back), the newer taken at the falling edge after that one and brought
+     here through one more flip-flop. Held in its initial state while
+     disabled. --- *)
+  let smp_mid = reg spec i.smp.fall -- "smp_mid" in
+  let smp_state, smp_strobe =
+    let d = Sampler_state.map Sampler_state.port_widths ~f:wire in
+    let q =
+      Sampler_state.map2 d Sampler_state.port_names ~f:(fun d name -> reg spec d -- ("smp_" ^ name))
+    in
+    let early = mux i.smp.pin (bits_lsb sync2) in
+    let first, second = if is Sampler_samples_swapped then smp_mid, early else early, smp_mid in
+    let after_first, pass_first = sampler_sample ?mutation i.smp q first in
+    let after_second, pass_second = sampler_sample ?mutation i.smp after_first second in
+    Sampler_state.iter2 d after_second ~f:(fun d next ->
+      d <== mux2 i.smp.enable next (zero (width next)));
+    q, reg spec (i.smp.enable &: (pass_first |: pass_second)) -- "smp_strobe"
+  in
+  (* --- Pin levels seen by both threads this cycle. With the sampler on,
+     its two pins show what it has recovered. --- *)
   let lines =
     concat_lsb
       (List.init num_pins ~f:(fun p ->
          let ext = bit ext_in p in
          let out = bit pin_out p in
-         mux (mode p) [ ext; out; out &: ext; ext ]))
+         let line = mux (mode p) [ ext; out; out &: ext; ext ] in
+         let pulse_pin = if is Sampler_pulse_on_wrong_pin then (p + 1) % num_pins else (p + num_pins - 1) % num_pins in
+         mux2
+           (i.smp.enable &: (i.smp.pin ==:. p))
+           smp_state.data
+           (mux2 (i.smp.enable &: (i.smp.pin ==:. pulse_pin)) smp_strobe line)))
   in
   (* --- Each thread's registers, named t0_pc, t1_pc, ... so the
      equivalence checker can pair them up between two builds. The thread's
@@ -962,5 +1089,13 @@ let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
     ; crc_run = q.crc_run
     }
   in
-  { O.pin_out; pads_out; pads_oe; buf_ptr; buf_word; t0 = thread_out 0; t1 = thread_out 1 }
+  { O.pin_out
+  ; pads_out
+  ; pads_oe
+  ; buf_ptr
+  ; buf_word
+  ; smp = { state = smp_state; strobe = smp_strobe; mid = smp_mid }
+  ; t0 = thread_out 0
+  ; t1 = thread_out 1
+  }
 ;;

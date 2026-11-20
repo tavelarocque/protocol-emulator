@@ -62,6 +62,10 @@ it set on MISO.
 | 0x69 | BUF_PTR (global): the buffer's pointer, 0 to 1023. A write sets it; it reads back as it stands |
 | 0x6A | BUF_END (global): playing and recording stop when the pointer gets here |
 | 0x6B | BUF_DATA (global): a write stores at the pointer, a read returns the word there, and each moves the pointer on; only while BUF_CTRL is 0 |
+| 0x6C | SMP_CTRL (global): the bit sampler. Bit 0 on; [3:1] its pin (the threads then see the recovered bit on that pin and a pulse for each bit on the next); bit 4 invert; bit 5 pass bits on only after SMP_SYNC has been seen; [8:6] bit times without an edge before the carrier is lost (7: never) |
+| 0x6D | SMP_TIME (global), in samples, two to a clock cycle: [4:0] the phase from which an edge is accepted, [9:5] the phase at which a bit is taken, [14:10] the phase at which a bit time has gone by |
+| 0x6E | SMP_SYNC (global): the sync word, 8 bits, first bit lowest |
+| 0x6F | SMP_STATUS (read): bit 0 carrier, bit 1 sync word seen |
 
 Status pins: uo[1] thread 0 running, uo[2] thread 0 RX data waiting, uo[3]
 thread 0 TX FIFO full; uo[4]-uo[6] the same for thread 1.
@@ -194,7 +198,25 @@ starts the thread (SHIFT 0x14: autopull, CRC read inverted; CRC_POLY
 53 for a frame with an odd number of bytes, whose first word holds one
 byte in its top half). `EthernetTx` in `host/more_protocols.py` does all
 of it: `send(frame)`. It does not yet send the link pulses a switch looks
-for between frames, and there is no receiver.
+for between frames.
+
+10BASE-T Ethernet receive: `test/eth_rx.hex` (14 words), the pair on P2
+through a line receiver; P3 is taken too. The bit sampler recovers the
+sender's clock from samples on both clock edges and decodes the Manchester
+code, and passes nothing on until the delimiter 0xD5 has gone by (at
+40 MHz: SMP_TIME 0x2C25, SMP_SYNC 0xD5, SMP_CTRL 0x25; at 50 MHz SMP_TIME
+0x3847). The thread shifts the bits in, 16 to a word, with the CRC register
+following them, and the packet buffer records the words (SHIFT 0x28:
+autopush, CRC follows IN; CRC_POLY 0xEDB88320, CRC_INIT 0xFFFFFFFF; IN base
+2; THRESHOLD 16; TIMEOUT 8, TIMEOUT_VECTOR 7; BUF_END 1023, BUF_CTRL 2).
+After each frame come three more words: 0x10000 minus the number of bits,
+then what the CRC register ended at, low half first, which is 0xDEBB20E3
+for a frame whose check sequence is right. An odd last byte has a word to
+itself. `EthernetRx` in `host/more_protocols.py`: `listen()`, then
+`frames()`. There is one buffer, so the chip sends a frame or receives
+frames, not both at once. Each edge on the pair may be up to 6 ns from its
+place at 40 MHz and 10 ns at 50 MHz; the standard allows a sender and a
+long cable 13.5 ns, so use a short one.
 
 ## External hardware
 
@@ -203,7 +225,9 @@ shows what the firmware is doing. USB needs a USB 1.1 transceiver (VO/FSE0
 mode, such as a TUSB1106 or MAX3349E) between the protocol pins and the USB
 connector, the host's 15 kohm pull-downs on D+ and D-, and 5 V for the
 device. Ethernet needs a 10BASE-T transformer (or a jack with magnetics)
-and series resistors between P0, P1 and the pair. 1-Wire needs a pull-up on P0 (4.7 kohm to 3.3 V); I2C, SWD and the
+and series resistors between P0, P1 and the transmit pair, and for
+receive a differential line receiver or comparator with a 100 ohm
+termination between the receive pair and P2. 1-Wire needs a pull-up on P0 (4.7 kohm to 3.3 V); I2C, SWD and the
 other open-drain buses need one per line. A PS/2 device runs from 5 V: put
 a bidirectional level shifter on DATA and CLK, with pull-ups on its 5 V
 side. CAN needs a 3.3 V transceiver (an SN65HVD230, for one) and a

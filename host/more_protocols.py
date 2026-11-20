@@ -393,6 +393,7 @@ CRC_POLY = 0x61  # low half; the high half follows. Thread 1's are + pe.BANK
 CRC_INIT = 0x63
 BUF_CTRL, BUF_PTR, BUF_END, BUF_DATA = 0x68, 0x69, 0x6A, 0x6B
 BUF_WORDS = 1024
+SMP_CTRL, SMP_TIME, SMP_SYNC, SMP_STATUS = 0x6C, 0x6D, 0x6E, 0x6F
 
 
 def set_crc(chip, poly, init, thread=0):
@@ -482,3 +483,83 @@ class EthernetTx:
 
     def sent(self):
         return self.chip.status()["pc"] == self.PARK
+
+
+def set_sampler(chip, pin, blank, sample, wrap, sync=None, misses=0, invert=False):
+    """The bit sampler: clock recovery on [pin]. The threads then see the
+    recovered bit on that pin and a one-cycle pulse for each bit on the
+    next. [blank], [sample] and [wrap] count samples, two to a clock cycle:
+    an edge is accepted once [blank] samples have passed since the last
+    one, the bit is the level [sample] samples after it, and [wrap] samples
+    with no edge are a bit time gone by, which is the end after [misses]
+    of them in a row (7: never). With [sync], bits are passed on only once
+    those 8 bits, first bit lowest, have gone by."""
+    chip.write(SMP_CTRL, 0)
+    chip.write(SMP_TIME, blank | (sample << 5) | (wrap << 10))
+    chip.write(SMP_SYNC, sync or 0)
+    chip.write(SMP_CTRL, 1 | (pin << 1) | (int(invert) << 4) | (int(sync is not None) << 5)
+               | (misses << 6))
+
+
+class EthernetRx:
+    """10BASE-T Ethernet receive (eth_rx.hex): the pair, through a
+    transformer and a line receiver, on pin 2. Pin 3 is taken too. The
+    chip's clock is 40 MHz, or 50 MHz for more margin. The chip recovers
+    the sender's clock, decodes the Manchester code, finds the start of
+    the frame, runs the CRC-32 and records the frame; the host reads it
+    back when it likes."""
+
+    EOF = 7  # eth_rx_eof: where the program goes when a frame's bits stop
+    WAITING = 3  # where it waits for a frame's first bit
+    RESIDUE = 0xDEBB20E3  # what the CRC register holds after a good frame
+
+    def __init__(self, chip, image, clock_hz=40_000_000):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        set_crc(chip, 0xEDB88320, 0xFFFFFFFF)
+        self.buffer = Buffer(chip)
+        if clock_hz == 50_000_000:
+            set_sampler(chip, pin=2, blank=7, sample=2, wrap=14, sync=0xD5)
+        else:
+            set_sampler(chip, pin=2, blank=5, sample=1, wrap=11, sync=0xD5)
+
+    def listen(self):
+        """Start recording frames from the start of the buffer. It holds one
+        frame of the largest size, or several small ones."""
+        self.chip.stop()
+        self.chip.configure(start=0, in_base=2, threshold=16, timeout_vector=self.EOF,
+                            timeout=8, auto=AUTOPUSH | CRC_IN)
+        self.buffer.record(BUF_WORDS - 1)
+        self.chip.run()
+
+    def waiting(self):
+        """True between frames: nothing is half received."""
+        return self.chip.status()["pc"] == self.WAITING
+
+    def frames(self):
+        """Stop listening and return what was recorded, oldest first: for
+        each frame its bytes, frame check sequence included, and whether
+        the CRC was right. Call it while [waiting]."""
+        count = self.buffer.position()
+        self.chip.stop()
+        words = self.buffer.read(count)
+        found = []
+        # Each frame ends with three words: 0x10000 minus its number of bits,
+        # then the CRC register's two halves. From the last frame back.
+        while len(words) >= 3:
+            bits = (0x10000 - words[-3]) & 0xFFFF
+            size = bits // 8
+            used = (size + 1) // 2
+            if bits % 8 or used > len(words) - 3:
+                break
+            data = words[len(words) - 3 - used:len(words) - 3]
+            frame = bytearray()
+            for w in data:
+                frame.append(w & 0xFF)
+                frame.append(w >> 8)
+            ok = (words[-2] | (words[-1] << 16)) == self.RESIDUE
+            found.append((bytes(frame[:size]), ok))
+            words = words[:len(words) - 3 - used]
+        found.reverse()
+        return found

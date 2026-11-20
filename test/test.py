@@ -3241,3 +3241,94 @@ async def test_ethernet(dut):
         want = frame + bytes(max(0, 60 - len(frame)))
         assert got == want, f"{len(frame)} bytes sent, {len(got)} received"
         levels.clear()
+
+
+def ethernet_line(frame, start_ps, bit_ps=100_000, jitter_ps=0, rng=None, bad_fcs=False):
+    """The times, in ps, at which a 10BASE-T pair changes level for one
+    frame, starting low, written from IEEE 802.3's description of the wire:
+    the preamble and delimiter, the frame, its frame check sequence from
+    zlib's CRC-32, each bit a Manchester cell (a 1 is low then high), then
+    the pair held high for three bit times. [bit_ps] is the sender's bit
+    time, which is not the chip's, and every change is moved by up to
+    [jitter_ps] either way."""
+    fcs = zlib.crc32(frame) ^ (0x80 if bad_fcs else 0)
+    sent = bytes([0x55] * 7 + [0xD5]) + frame + fcs.to_bytes(4, "little")
+    halves = []
+    for byte in sent:
+        for k in range(8):
+            bit = (byte >> k) & 1
+            halves += [1 - bit, bit]
+    halves += [1] * 6 + [0]
+    times, level = [], 0
+    for k, v in enumerate(halves):
+        if v != level:
+            level = v
+            j = rng.randint(-jitter_ps, jitter_ps) if jitter_ps else 0
+            times.append(start_ps + k * bit_ps // 2 + j)
+    return times
+
+
+@cocotb.test(timeout_time=80, timeout_unit="ms")
+async def test_ethernet_receive(dut):
+    """10BASE-T Ethernet receive at a 40 MHz clock. The pair is driven on
+    pin 2 at times that have nothing to do with the chip's clock, from a
+    sender whose own clock is 100 ppm off and whose edges are each up to
+    5 ns early or late. The chip recovers the clock with samples on both
+    clock edges, decodes the Manchester code, finds the start of each
+    frame, runs the CRC-32 and records the frames. Four of them, 9.6 us
+    apart: an ARP request, an odd length, the largest size, and one whose
+    frame check sequence is wrong, which must be told apart."""
+    await reset(dut, period_ps=25_000)
+    chip = pe.Chip(sim_port(dut))
+    arp = bytes.fromhex(
+        "ffffffffffff" "02004e455431" "0806"
+        "0001" "0800" "06" "04" "0001"
+        "02004e455431" "c0a80102" "000000000000" "c0a80101") + bytes(18)
+    rng = random.Random(8024)
+    frames = [arp, arp + b"\x5a", bytes(rng.randrange(256) for _ in range(1514)), arp[::-1]]
+
+    eth = None
+
+    @bridge
+    def listen():
+        nonlocal eth
+        eth = more.EthernetRx(chip, firmware("eth_rx"))
+        eth.listen()
+
+    @bridge
+    def waiting():
+        return eth.waiting()
+
+    @bridge
+    def read_back():
+        return eth.frames()
+
+    await listen()
+    now = get_sim_time("ps")
+    start = now + 20_000 + 7_301  # not on a clock edge
+    times = []
+    for n, frame in enumerate(frames):
+        bit_ps = 100_010 if n % 2 == 0 else 99_990  # 100 ppm slow, then fast
+        line = ethernet_line(frame, start, bit_ps=bit_ps, jitter_ps=5_000, rng=rng,
+                             bad_fcs=(n == 3))
+        times += line
+        start = line[-1] + 9_600_000
+
+    async def pair():
+        level = 0
+        for t in times:
+            await Timer(t - get_sim_time("ps"), unit="ps")
+            level ^= 1
+            dut.uio_in.value = (int(dut.uio_in.value) & ~4) | (level << 2)
+
+    await cocotb.start_soon(pair())
+    await ClockCycles(dut.clk, 40)
+    assert await waiting(), "the thread is not waiting for another frame"
+    got = await read_back()
+    want = [(f + zlib.crc32(f).to_bytes(4, "little"), True) for f in frames[:3]]
+    bad = frames[3] + (zlib.crc32(frames[3]) ^ 0x80).to_bytes(4, "little")
+    want.append((bad, False))
+    assert len(got) == len(want), f"{len(got)} frames read back, {len(want)} sent"
+    for n, (g, w) in enumerate(zip(got, want)):
+        assert g[1] == w[1], f"frame {n}: CRC {'good' if g[1] else 'bad'}, should be the other"
+        assert g[0] == w[0], f"frame {n}: {len(w[0])} bytes sent, {len(g[0])} read back, or they differ"

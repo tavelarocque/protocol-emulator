@@ -41,10 +41,24 @@ type thread_state =
   }
 [@@deriving sexp_of, equal]
 
+type sampler_state =
+  { mid : bool
+  ; last : bool
+  ; phase : int
+  ; missed : int
+  ; carrier : bool
+  ; synced : bool
+  ; history : int
+  ; data : bool
+  ; strobe : bool
+  }
+[@@deriving sexp_of, equal]
+
 type state =
   { pin_out : int
   ; buf_ptr : int
   ; buf_read : int option (* the word the host read from the buffer this cycle *)
+  ; smp : sampler_state
   ; t0 : thread_state
   ; t1 : thread_state
   }
@@ -64,6 +78,13 @@ module Scenario = struct
 
   type pins =
     | Random_pins
+    | Random_runs
+      (* each pin holds its level for a while: at each half cycle it changes
+         with probability 1 in 5, so the bit sampler sees edges a few
+         samples apart instead of at nearly every sample *)
+    | Wave of (int * int) array
+      (* cycle by cycle, the pins at the falling edge and at the rising edge
+         that ends the cycle; all low once it runs out *)
     | Constant of int
     | Square of
         { period : int
@@ -110,11 +131,41 @@ module Scenario = struct
          address, word). Random trials add their own. *)
     ; rates : (int * int) list (* per thread: host push %, host pop % *)
     ; buffer : buffer
+    ; sampler : Isa.Sampler_config.t (* at the start *)
+    ; sampler_random : bool (* the host rewrites the sampler's registers as the trial runs *)
     ; pins : pins
     ; cycles : int
     }
   [@@deriving sexp_of]
 end
+
+(* A sampler configuration. The timing numbers are mostly small, so that in
+   a few hundred cycles of random pins edges are accepted and ignored, bit
+   times go by, the carrier comes and goes, and bits are taken; the sync
+   word is mostly one that random bits soon make. *)
+let random_sampler rs : Isa.Sampler_config.t =
+  let rand n = Random.State.int rs n in
+  let small () = if rand 8 = 0 then rand 32 else rand 10 in
+  { enable = rand 8 > 0
+  ; pin = rand 8
+  ; invert = rand 2 = 0
+  ; sync_enable = rand 2 = 0
+  ; misses =
+      (match rand 4 with
+       | 0 -> 0
+       | 1 -> 7
+       | _ -> rand 8)
+  ; blank = small ()
+  ; sample = small ()
+  ; wrap = small ()
+  ; sync =
+      (match rand 4 with
+       | 0 -> 0x00
+       | 1 -> 0xFF
+       | 2 -> rand 4 lsl 6
+       | _ -> rand 256)
+  }
+;;
 
 let random_config rs =
   let rand n = Random.State.int rs n in
@@ -226,6 +277,11 @@ let random_scenario ~seed ~cycles =
     ; random = true
     }
   in
+  (* The bit sampler: off in half the trials, on from the start in the
+     rest, and rewritten by the host now and then in all of them. Half the
+     trials hold each pin's level for a few samples at a time. *)
+  let sampler = if rand 2 = 0 then Isa.Sampler_config.off else random_sampler rs in
+  let pins = if rand 2 = 0 then Scenario.Random_pins else Random_runs in
   ( { Scenario.name = sprintf "random #%d" (seed + 1)
     ; words
     ; configs
@@ -237,7 +293,9 @@ let random_scenario ~seed ~cycles =
     ; writes = []
     ; rates
     ; buffer
-    ; pins = Random_pins
+    ; sampler
+    ; sampler_random = true
+    ; pins
     ; cycles
     }
   , rs )
@@ -333,7 +391,20 @@ let basic_bins (model : Isa.t) ~words ~chain ~inputs =
        else classify model ~thread:n ~word ~inputs);
     let mask, executing = pin_writes th (Isa.Instruction.decode word) in
     if executing && th.config.sideset_count > 0 then add "(side-set driving pins)";
-    if mask <> 0 then incr drivers
+    if mask <> 0 then incr drivers;
+    (* A thread looking at what the bit sampler shows: a WAIT on either of
+       its two pins, or an IN from pins whose first pin is its data pin. *)
+    let smp = model.sampler in
+    if executing && smp.config.enable
+    then (
+      let data_pin = smp.config.pin in
+      let pulse_pin = (data_pin + 1) % Isa.num_pins in
+      match (Isa.Instruction.decode word).op with
+      | Wait { pin; _ } when pin = pulse_pin ->
+        add (if smp.strobe then "(sampler: a WAIT sees its pulse)" else "(sampler: a WAIT sees no pulse)")
+      | Wait { pin; _ } when pin = data_pin -> add "(sampler: a WAIT looks at its bit)"
+      | In { src = Pins; _ } when th.config.in_base = data_pin -> add "(sampler: an IN takes its bit)"
+      | _ -> ())
   done;
   let t0 = Isa.thread model 0
   and t1 = Isa.thread model 1 in
@@ -534,17 +605,50 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
   let buf_mode = ref b.mode
   and buf_thread = ref b.thread
   and buf_end = ref ((b.first + b.length) % Isa.buffer_size) in
+  (* The sampler's registers are levels the host holds too. *)
+  let sampler = ref s.sampler in
+  let runs = ref 0 in
   let rec loop cycle =
     if cycle >= s.cycles
     then None
     else (
-      let pins =
+      (* The pins at the falling edge in the middle of this cycle and at the
+         rising edge that ends it. *)
+      let pins_mid, pins =
         match s.pins with
-        | Random_pins -> rand 256
-        | Constant v -> v
-        | Square { period; mask } -> if cycle / period % 2 = 0 then mask else 0
+        | Random_pins ->
+          let mid = rand 256 in
+          mid, rand 256
+        | Random_runs ->
+          let half () =
+            for p = 0 to Isa.num_pins - 1 do
+              if rand 5 = 0 then runs := !runs lxor (1 lsl p)
+            done;
+            !runs
+          in
+          let mid = half () in
+          mid, half ()
+        | Wave w -> if cycle < Array.length w then w.(cycle) else 0, 0
+        | Constant v -> v, v
+        | Square { period; mask } ->
+          let v = if cycle / period % 2 = 0 then mask else 0 in
+          v, v
       in
       set i.pins_in pins;
+      if s.sampler_random && rand 60 = 0 then sampler := random_sampler rs;
+      (let c = !sampler in
+       Isa.set_sampler model c;
+       set i.smp.enable (Bool.to_int c.enable);
+       set i.smp.pin c.pin;
+       set i.smp.invert (Bool.to_int c.invert);
+       set i.smp.sync_enable (Bool.to_int c.sync_enable);
+       set i.smp.misses c.misses;
+       set i.smp.blank c.blank;
+       set i.smp.sample c.sample;
+       set i.smp.wrap c.wrap;
+       set i.smp.sync c.sync;
+       (* The top level's falling-edge flip-flop: the sampler's own pin. *)
+       set i.smp.fall ((pins_mid lsr c.pin) land 1));
       let pcs_before = List.init Rtl.num_threads ~f:(fun n -> (Isa.thread model n).pc) in
       (* What the host does to the packet buffer this cycle, if anything. It
          never reads in the cycle after a write: the host port takes dozens
@@ -553,6 +657,11 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
       let buffer_action : Scenario.buffer_action option =
         match List.Assoc.find b.script cycle ~equal:Int.equal with
         | Some a -> Some a
+        | None when b.random && model.buffer_wrote && rand 3 = 0 ->
+          (* Straight after a write, often set it playing: the cycle in
+             which nothing may be played yet. Left to chance this came up
+             once or twice in 400 trials. *)
+          Some (Mode (Play, rand Rtl.num_threads))
         | None when b.random && rand 25 = 0 ->
           (match rand 6 with
            | 0 ->
@@ -652,8 +761,13 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
                 (if e
                  then "(program write to a running thread: ignored)"
                  else "(program write to a stopped thread)"))));
+      let events_before = Hashtbl.copy model.sampler.events in
       Cyclesim.cycle sim;
-      Isa.step model ~inputs:pins;
+      Isa.step model ~inputs_mid:pins_mid ~inputs:pins;
+      Option.iter coverage ~f:(fun c ->
+        Hashtbl.iteri model.sampler.events ~f:(fun ~key ~data ->
+          let before = Option.value (Hashtbl.find events_before key) ~default:0 in
+          if data > before then Hashtbl.incr c.basic ~by:(data - before) (sprintf "(sampler: %s)" key)));
       Option.iter write ~f:(fun (mask, addr, w) ->
         for n = 0 to Rtl.num_threads - 1 do
           if mask land (1 lsl n) <> 0
@@ -734,10 +848,37 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
         ; popped = fst (List.nth_exn popped n)
         }
       in
+      let rtl_smp =
+        let q = o.smp.state in
+        { mid = get o.smp.mid = 1
+        ; last = get q.last = 1
+        ; phase = get q.phase
+        ; missed = get q.missed
+        ; carrier = get q.carrier = 1
+        ; synced = get q.synced = 1
+        ; history = get q.history
+        ; data = get q.data = 1
+        ; strobe = get o.smp.strobe = 1
+        }
+      in
+      let model_smp =
+        let q = model.sampler in
+        { mid = q.mid
+        ; last = q.last
+        ; phase = q.phase
+        ; missed = q.missed
+        ; carrier = q.carrier
+        ; synced = q.synced
+        ; history = q.history
+        ; data = q.data
+        ; strobe = q.strobe
+        }
+      in
       let rtl =
         { pin_out = get o.pin_out
         ; buf_ptr = get o.buf_ptr
         ; buf_read = rtl_read
+        ; smp = rtl_smp
         ; t0 = rtl_thread 0
         ; t1 = rtl_thread 1
         }
@@ -746,6 +887,7 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
         { pin_out = Isa.pin_out model
         ; buf_ptr = Isa.buffer_ptr model
         ; buf_read = model_read
+        ; smp = model_smp
         ; t0 = model_thread 0
         ; t1 = model_thread 1
         }

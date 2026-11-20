@@ -66,6 +66,60 @@ end
 (* [planted_chain_bug] plants a bug in this spec, not in the RTL: the CHAIN
    mover ignores a full destination FIFO. The proof must then fail, which
    shows it really compares the RTL with this file's composition logic. *)
+(* The bit sampler given one sample of its pin, from the model's rules, in
+   the order the model states them:
+
+   - an edge is a sample that differs from the one before; it is accepted if
+     the phase is not below [blank], and the phase then starts again;
+   - otherwise, if the phase is not below [wrap], a bit time has gone by.
+     With the carrier there and a miss still allowed ([misses] 7 allows any
+     number) the phase starts again and the miss is counted; if not, the
+     carrier is lost;
+   - otherwise the phase moves on by one;
+   - with no carrier there is no sync and no history;
+   - a sample that leaves the phase at [sample], with the carrier there, is
+     a bit: it enters the history, the history may now be the sync word,
+     and the bit is passed on if the sync word had been seen before it, or
+     is not asked for. *)
+let sampler_sample (c : _ P.Sampler_in.t) (s : _ P.Sampler_state.t) level =
+  let changed = level <>: s.last in
+  let accepted = changed &: ~:(s.phase <: c.blank) in
+  let bit_time_gone = ~:accepted &: ~:(s.phase <: c.wrap) in
+  let counted = c.misses <>:. 7 in
+  let allowed = ~:counted |: (s.missed <: c.misses) in
+  let carried = bit_time_gone &: s.carrier &: allowed in
+  let lost = bit_time_gone &: ~:carried in
+  let moves_on = ~:accepted &: ~:bit_time_gone in
+  let phase =
+    priority_select_with_default
+      [ { valid = accepted |: carried; value = zero 5 }
+      ; { valid = moves_on; value = s.phase +:. 1 }
+      ]
+      ~default:s.phase
+  in
+  let missed =
+    priority_select_with_default
+      [ { valid = accepted; value = zero 3 }
+      ; { valid = carried &: counted; value = s.missed +:. 1 }
+      ]
+      ~default:s.missed
+  in
+  let carrier = accepted |: (s.carrier &: ~:lost) in
+  let is_bit = carrier &: (phase ==: c.sample) in
+  let value = mux2 c.invert ~:level level in
+  let history = mux2 is_bit (concat_lsb [ select s.history 7 1; value ]) s.history in
+  let passed = is_bit &: mux2 c.sync_enable s.synced vdd in
+  ( { P.Sampler_state.last = level
+    ; phase
+    ; missed
+    ; carrier
+    ; synced = mux2 carrier (s.synced |: (is_bit &: (history ==: c.sync))) gnd
+    ; history = mux2 carrier history (zero 8)
+    ; data = mux2 passed value s.data
+    }
+  , passed )
+;;
+
 let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
   let spec = Reg_spec.create ~clock:i.clock ~clear:i.clear () in
   let high = Reg_spec.override spec ~clear_to:(ones P.num_pins) in
@@ -116,6 +170,35 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
          let ext = bit external_ p
          and out = bit pin_out p in
          mux2 (push_pull p) out (mux2 (open_drain p) (out &: ext) ext)))
+  in
+  (* The bit sampler. "The sampler's two samples of this cycle, half a cycle
+     apart: the pin at the rising edge two cycles back, from the
+     synchroniser, and at the falling edge after it." A disabled sampler is
+     held at its initial state, which is all zeros; the flip-flop that
+     brings in the falling-edge sample follows it always. *)
+  let smp_mid = reg spec i.smp.fall -- "smp_mid" in
+  let smp, smp_strobe =
+    let next = P.Sampler_state.map P.Sampler_state.port_widths ~f:wire in
+    let now =
+      P.Sampler_state.map2 next P.Sampler_state.port_names ~f:(fun d name ->
+        reg spec d -- ("smp_" ^ name))
+    in
+    let on = i.smp.enable in
+    let early = bit (log_shift srl sync2 i.smp.pin) 0 in
+    let between, first_passed = sampler_sample i.smp now early in
+    let after, second_passed = sampler_sample i.smp between smp_mid in
+    P.Sampler_state.iter2 next after ~f:(fun d v -> d <== (v &: repeat on (width v)));
+    now, reg spec (on &: (first_passed |: second_passed)) -- "smp_strobe"
+  in
+  (* "With the bit sampler enabled, two pins show the threads what it has
+     recovered instead of their own levels": the bit on its pin, the pulse on
+     the pin after it, counting round from 7 to 0. *)
+  let lines =
+    let shows_bit = binary_to_onehot i.smp.pin &: repeat i.smp.enable P.num_pins in
+    let shows_pulse = rotl shows_bit 1 in
+    (shows_bit &: repeat smp.data P.num_pins)
+    |: (shows_pulse &: repeat smp_strobe P.num_pins)
+    |: (lines &: ~:(shows_bit |: shows_pulse))
   in
   (* Thread state, one register per field, except the pin register, which
      is shared. *)
@@ -356,6 +439,7 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
   ; pads_oe
   ; buf_ptr
   ; buf_word
+  ; smp = { state = smp; strobe = smp_strobe; mid = smp_mid }
   ; t0 = out t0 ~div:div0 ~tx:tx0 ~rx:rx0
   ; t1 = out t1 ~div:div1 ~tx:tx1 ~rx:rx1
   }

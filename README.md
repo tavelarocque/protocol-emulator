@@ -10,13 +10,15 @@ fabrication rather than in fixed logic. Written in Hardcaml, designed for
 tapeout through [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L
 (8x4 tiles).
 
-> **This branch is v2.1, in progress.** It adds three things to v2.0
+> **This branch is v2.2, in progress.** v2.1 added three things to v2.0
 > (branch `v2`): a packet buffer in a third SRAM, automatic refill of the
-> shift registers, and a CRC register. With them the chip sends 10 Mbit
-> Ethernet frames from firmware ([`docs/isa.md`](docs/isa.md), revision
-> history). The model, the RTL, the proofs and the tests are updated and
-> pass. The text and numbers below still describe v2.0 until the v2.1
-> layout is characterised. `main` holds v1.4.
+> shift registers, and a CRC register, and with them the chip sends 10 Mbit
+> Ethernet frames from firmware. v2.2 adds a bit sampler, clock recovery in
+> hardware, and with it the chip receives them
+> ([`docs/isa.md`](docs/isa.md), revision history). The model, the RTL,
+> the proofs and the tests are updated and pass. The text and numbers
+> below still describe v2.0 until the new layout is characterised. `main`
+> holds v1.4.
 
 **In ten minutes:** [`docs/submission.md`](docs/submission.md) is the
 one-page summary for judges. This page is the map.

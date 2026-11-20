@@ -37,6 +37,7 @@ let make
   ?(writes = [])
   ?(rates = [ 0, 0; 0, 0 ])
   ?(buffer = Scenario.no_buffer)
+  ?(sampler = Isa.Sampler_config.off)
   ?(pins = Scenario.Random_pins)
   ?(cycles = 400)
   ~name
@@ -64,6 +65,8 @@ let make
       ; writes
       ; rates
       ; buffer
+      ; sampler
+      ; sampler_random = false
       ; pins
       ; cycles
       }
@@ -536,6 +539,59 @@ lp:     nop
     ]
 ;;
 
+(* The bit sampler in front of the Ethernet receive program: a short
+   Manchester transmission on pin 2, eight samples to the bit, starting on a
+   falling clock edge so that edges fall on either sample of a cycle. It is
+   a preamble byte, the delimiter 0xD5 and three bytes of data. One edge
+   between two bits shows a sample late, at the fifth sample after the
+   middle edge, which is the last place it is still ignored. Then the line
+   stays high and the carrier is lost.
+
+   The recovered bits reach thread 0 as a level on pin 2 and a pulse on pin
+   3; it shifts them in and the buffer records the words. Thread 1 watches
+   the same pulse, so a pulse on the wrong pin is seen at once. *)
+let sampler_receives =
+  let pin = Pe_model.Firmware.eth_rx_data_pin in
+  let bits_of byte = List.init 8 ~f:(fun k -> (byte lsr k) land 1) in
+  let bits = List.concat_map [ 0x55; 0xD5; 0xA7; 0x00; 0xFF ] ~f:bits_of in
+  let samples =
+    (* a 1 is low then high, a 0 high then low; four samples to the half *)
+    List.concat_map bits ~f:(fun b -> List.init 4 ~f:(fun _ -> b = 0) @ List.init 4 ~f:(fun _ -> b = 1))
+    @ List.init 24 ~f:(fun _ -> true)
+    |> Array.of_list
+  in
+  (* The delimiter ends 1, 1: the line falls where the second begins. That
+     is sample 8 * 15; it now shows at the next one. *)
+  samples.(8 * 15) <- samples.((8 * 15) - 1);
+  let quiet = List.init 21 ~f:(fun _ -> false) in
+  let levels = Array.of_list (quiet @ Array.to_list samples @ quiet) in
+  let at k = if k < Array.length levels && levels.(k) then 1 lsl pin else 0 in
+  let wave = Array.init ((Array.length levels + 1) / 2) ~f:(fun c -> at (2 * c), at ((2 * c) + 1)) in
+  make
+    ~name:"sampler: a Manchester line recovered, taken by a thread and recorded"
+    ~target:
+      [ "Sampler_samples_swapped"
+      ; "Sampler_blank_one_short"
+      ; "Sampler_passes_before_sync"
+      ; "Sampler_keeps_carrier"
+      ; "Sampler_pulse_on_wrong_pin"
+      ]
+    ~modes:all_input
+    ~sampler:Pe_model.Firmware.eth_rx_sampler
+    ~buffer:{ Scenario.no_buffer with mode = Record; thread = 0; first = 0; length = 64 }
+    ~pins:(Wave wave)
+    ~cycles:(Array.length wave + 60)
+    [ Pe_model.Firmware.eth_rx_origin, Pe_model.Firmware.eth_rx, Pe_model.Firmware.eth_rx_config
+    ; ( 20
+      , {|
+lp:     wait 1 pin 3
+        in pins, 1
+        jmp lp
+|}
+      , { cfg with in_base = pin; threshold = 16; autopush = true } )
+    ]
+;;
+
 let all =
   [ pin_fight
   ; chain_backpressure
@@ -554,6 +610,7 @@ let all =
   ; buffer_plays
   ; buffer_records
   ; buffer_write_then_play
+  ; sampler_receives
   ]
 ;;
 

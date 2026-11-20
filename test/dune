@@ -248,3 +248,11 @@
   (with-stdout-to
    eth_tx.hex
    (run %{dep:../bin/firmware_hex.exe} eth_tx))))
+
+(rule
+ (targets eth_rx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   eth_rx.hex
+   (run %{dep:../bin/firmware_hex.exe} eth_rx))))

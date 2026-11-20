@@ -350,6 +350,11 @@ let%expect_test "every planted RTL bug is refuted with a counterexample" =
     Play_past_end                SAT: counterexample found
     Record_keeps_host_pop        SAT: counterexample found
     Play_after_write             SAT: counterexample found
+    Sampler_samples_swapped      SAT: counterexample found
+    Sampler_blank_one_short      SAT: counterexample found
+    Sampler_passes_before_sync   SAT: counterexample found
+    Sampler_keeps_carrier        SAT: counterexample found
+    Sampler_pulse_on_wrong_pin   SAT: counterexample found
     |}]
 ;;
 
@@ -382,5 +387,10 @@ let%expect_test "every planted RTL bug is refuted by the whole-core spec" =
     Play_past_end                SAT: counterexample found
     Record_keeps_host_pop        SAT: counterexample found
     Play_after_write             SAT: counterexample found
+    Sampler_samples_swapped      SAT: counterexample found
+    Sampler_blank_one_short      SAT: counterexample found
+    Sampler_passes_before_sync   SAT: counterexample found
+    Sampler_keeps_carrier        SAT: counterexample found
+    Sampler_pulse_on_wrong_pin   SAT: counterexample found
     |}]
 ;;

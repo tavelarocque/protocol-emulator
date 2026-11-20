@@ -34,6 +34,19 @@ class _Recorder:
     def write(self, addr, value):
         self.log.append(("write", addr, value))
 
+    def write_many(self, writes):
+        self.log.append(("write_many", list(writes)))
+
+    def read(self, addr):
+        # What the test put in [reads] for this address, in order; then 0.
+        queue = getattr(self, "reads", {}).get(addr)
+        value = queue.pop(0) if queue else 0
+        self.log.append(("read", addr, value))
+        return value
+
+    def status(self):
+        return {"pc": getattr(self, "pc", 0)}
+
     def push(self, value):
         self.log.append(("push", value))
 
@@ -143,3 +156,41 @@ _show("pwm", _chip)
 _chip = _Recorder(line=0b01101110)
 print("nes", NesPad(_chip, _image, clock_hz=12_000_000).read())
 _show("nes", _chip)
+
+_chip = _Recorder()
+_b = Buffer(_chip)
+_b.load([1, 2, 3], at=1020)
+_b.play(3, thread=1, at=1020)
+_b.record(10)
+_chip.reads = {BUF_PTR: [7], BUF_DATA: [0x1111, 0x2222]}
+print("buffer", _b.position(), _b.read(2, at=5))
+_show("buffer", _chip)
+
+_chip = _Recorder()
+_e = EthernetTx(_chip, _image)
+_e.send(bytes(range(60)))
+_e.send(bytes(range(7)))  # padded to 60
+_e.send(bytes(range(61)))  # an odd length
+_chip.pc = EthernetTx.PARK
+print("ethernet tx sent", _e.sent())
+_show("ethernet tx", _chip)
+
+_chip = _Recorder()
+set_sampler(_chip, pin=4, blank=0, sample=9, wrap=19, sync=0x7E, misses=7, invert=True)
+set_sampler(_chip, pin=7, blank=3, sample=1, wrap=6)
+_show("sampler", _chip)
+
+_chip = _Recorder()
+_e = EthernetRx(_chip, _image)
+EthernetRx(_chip, _image, clock_hz=50_000_000)
+_e.listen()
+_chip.pc = EthernetRx.WAITING
+print("ethernet rx waiting", _e.waiting())
+# Two frames as the program leaves them: five bytes with a good CRC, then
+# two bytes with a wrong one. Then a recording cut short.
+_chip.reads = {BUF_PTR: [10], BUF_DATA: [0x0201, 0x0403, 0x0005, 0xFFD8, 0x20E3, 0xDEBB,
+                                         0xBBAA, 0xFFF0, 0x1234, 0x5678]}
+print("ethernet rx", _e.frames())
+_chip.reads = {BUF_PTR: [4], BUF_DATA: [0x0201, 0xFFD8, 0x20E3, 0xDEBB]}
+print("ethernet rx", _e.frames())
+_show("ethernet rx", _chip)

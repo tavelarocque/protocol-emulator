@@ -430,6 +430,166 @@ module Buffer_mode = struct
   [@@deriving sexp_of, compare, equal, enumerate]
 end
 
+(* The bit sampler: clock recovery for one input pin, in hardware, for line
+   codes too fast for a thread to follow edge by edge. It looks at its pin
+   twice per clock cycle, on both clock edges, so its three timing numbers
+   count half cycles.
+
+   It keeps a phase: the number of samples since the last edge it accepted.
+   An edge is accepted, and the phase starts again from 0, if the phase had
+   reached [blank]; edges before that are ignored. The sample taken at phase
+   [sample] is a recovered bit. If the phase gets to [wrap] with no edge, a
+   bit time has gone by without one: up to [misses] times in a row the phase
+   starts again from 0 anyway and the bits keep coming at the pace of the
+   last edge, and after that the carrier is lost and nothing more is
+   recovered until the next edge. (With [misses] 7 it is never lost.)
+
+   Manchester code has an edge in the middle of every bit and sometimes one
+   between bits. With [blank] at three quarters of a bit the sampler locks
+   to the middle edges and ignores the others, the level after each middle
+   edge is the bit, and one bit time without an edge is the end of the
+   frame: [misses] 0. NRZ code has edges only between bits, and not always:
+   [blank] 0, [sample] half a bit, [wrap] one sample short of a bit, and as
+   many [misses] as the code allows equal bits in a row.
+
+   While the carrier is there the recovered bits shift through an 8-bit
+   register, first bit ending up lowest. With [sync_enable], bits are passed
+   on only after that register has held [sync]: for Ethernet 0xD5, the last
+   byte before the frame. Each bit passed on shows on two pins as the
+   threads see them, whatever those pins' modes: the bit itself on [pin],
+   held until the next one, and a pulse one cycle long on the pin after it. *)
+module Sampler_config = struct
+  type t =
+    { enable : bool
+    ; pin : int (* 0..7: the input; the threads see the bit here and the pulse on the next pin *)
+    ; invert : bool (* the recovered bit is the opposite of the sampled level *)
+    ; sync_enable : bool
+    ; misses : int (* 0..7 *)
+    ; blank : int (* 0..31, in samples: half cycles *)
+    ; sample : int (* 0..31 *)
+    ; wrap : int (* 0..31 *)
+    ; sync : int (* 8 bits, first bit lowest *)
+    }
+  [@@deriving sexp_of]
+
+  let off =
+    { enable = false
+    ; pin = 0
+    ; invert = false
+    ; sync_enable = false
+    ; misses = 0
+    ; blank = 0
+    ; sample = 0
+    ; wrap = 0
+    ; sync = 0
+    }
+  ;;
+end
+
+module Sampler = struct
+  type t =
+    { mutable config : Sampler_config.t
+    ; mutable mid : bool
+      (* the pin as it was at the falling clock edge in the middle of the
+         last cycle; see [step] *)
+    ; mutable last : bool (* the previous sample *)
+    ; mutable phase : int
+    ; mutable missed : int (* bit times in a row without an edge *)
+    ; mutable carrier : bool
+    ; mutable synced : bool (* the sync word has been seen since the carrier came *)
+    ; mutable history : int (* the last 8 recovered bits *)
+    ; mutable data : bool (* what the threads see on [pin] *)
+    ; mutable strobe : bool (* and on the pin after it *)
+    ; events : (string, int) Hashtbl.t
+      (* how often each thing below has happened: not state, only a record
+         for the tests that measure what they exercised *)
+    }
+
+  let create () =
+    { config = Sampler_config.off
+    ; mid = false
+    ; last = false
+    ; phase = 0
+    ; missed = 0
+    ; carrier = false
+    ; synced = false
+    ; history = 0
+    ; data = false
+    ; strobe = false
+    ; events = Hashtbl.create (module String)
+    }
+  ;;
+
+  (* What a disabled sampler is held at. [mid] is not part of it: that
+     flip-flop follows the pin always. *)
+  let reset t =
+    t.last <- false;
+    t.phase <- 0;
+    t.missed <- 0;
+    t.carrier <- false;
+    t.synced <- false;
+    t.history <- 0;
+    t.data <- false;
+    t.strobe <- false
+  ;;
+
+  (* One sample. Returns whether it passed a bit on. *)
+  let sample t level =
+    let c = t.config in
+    let note what = Hashtbl.incr t.events what in
+    let edge = Bool.( <> ) level t.last in
+    t.last <- level;
+    if edge && t.phase >= c.blank
+    then (
+      note (if t.carrier then "edge accepted" else "edge accepted: carrier found");
+      t.phase <- 0;
+      t.missed <- 0;
+      t.carrier <- true)
+    else (
+      if edge then note "edge ignored";
+      if t.phase >= c.wrap
+      then
+        if t.carrier && (c.misses = 7 || t.missed < c.misses)
+        then (
+          note "bit time without an edge: carried on";
+          t.phase <- 0;
+          if c.misses <> 7 then t.missed <- t.missed + 1)
+        else (
+          if t.carrier then note "bit time without an edge: carrier lost";
+          t.carrier <- false)
+      else t.phase <- t.phase + 1);
+    if not t.carrier
+    then (
+      t.synced <- false;
+      t.history <- 0;
+      false)
+    else if t.phase = c.sample
+    then (
+      let bit = Bool.( <> ) level c.invert in
+      let pass = t.synced || not c.sync_enable in
+      t.history <- (Bool.to_int bit lsl 7) lor (t.history lsr 1);
+      if t.history = c.sync && not t.synced
+      then (
+        note "sync word seen";
+        t.synced <- true);
+      note (if pass then "bit passed on" else "bit held back before the sync word");
+      if pass then t.data <- bit;
+      pass)
+    else false
+  ;;
+
+  (* One clock cycle: the two samples in the order they were taken. *)
+  let cycle t ~early ~late =
+    if not t.config.enable
+    then reset t
+    else (
+      let a = sample t early in
+      let b = sample t late in
+      if a && b then Hashtbl.incr t.events "both samples of a cycle are bits";
+      t.strobe <- a || b)
+  ;;
+end
+
 type t =
   { programs : Instruction.t array array
     (* one memory per thread: thread n executes [programs.(n)] *)
@@ -450,6 +610,7 @@ type t =
     (* the buffer was written in the last cycle: like the program memories
        it answers a cycle after it is asked, and in a cycle with a write it
        is not asked, so nothing is played in the cycle after one *)
+  ; sampler : Sampler.t
   ; mutable pin_out : int
   ; mutable cycle : int
   }
@@ -486,6 +647,7 @@ let create_separate ~programs ~pin_modes ~threads =
   ; buffer_ptr = 0
   ; buffer_end = 0
   ; buffer_wrote = false
+  ; sampler = Sampler.create ()
   ; pin_out = mask num_pins (* all high: idle for UART, released for open-drain *)
   ; cycle = 0
   }
@@ -780,9 +942,25 @@ let seen_inputs t ~inputs =
   ((inputs land t.sync_bypass) lor (t.sync2 land lnot t.sync_bypass)) land mask num_pins
 ;;
 
-let seen_lines t ~inputs = lines t ~inputs:(seen_inputs t ~inputs)
+(* With the bit sampler enabled, two pins show the threads what it has
+   recovered instead of their own levels. *)
+let seen_lines t ~inputs =
+  let lines = lines t ~inputs:(seen_inputs t ~inputs) in
+  let s = t.sampler in
+  if not s.config.enable
+  then lines
+  else (
+    let put lines pin level = lines land lnot (1 lsl pin) lor (Bool.to_int level lsl pin) in
+    let pin = s.config.pin in
+    put (put lines pin s.data) ((pin + 1) % num_pins) s.strobe)
+;;
 
-let step t ~inputs =
+(* [inputs] is the level on each pin at the rising clock edge that ends
+   this cycle. [inputs_mid] is the level at the falling edge in the middle of
+   it, which only the bit sampler looks at; left out, it is taken to be the
+   same, as for an input that changes just after a rising edge. *)
+let step ?inputs_mid t ~inputs =
+  let inputs_mid = Option.value inputs_mid ~default:inputs in
   let lines_now = seen_lines t ~inputs in
   let pin_out = ref t.pin_out in
   let move =
@@ -823,6 +1001,13 @@ let step t ~inputs =
     t.buffer_ptr <- (t.buffer_ptr + 1) % buffer_size;
     t.buffer_wrote <- true);
   t.pin_out <- !pin_out;
+  (* The sampler's two samples of this cycle, half a cycle apart: the pin at
+     the rising edge two cycles back, from the synchroniser, and at the
+     falling edge after it. *)
+  (let s = t.sampler in
+   let at v = (v lsr s.config.pin) land 1 = 1 in
+   Sampler.cycle s ~early:(at t.sync2) ~late:s.mid;
+   s.mid <- at inputs_mid);
   t.sync2 <- t.sync1;
   t.sync1 <- inputs land mask num_pins;
   t.cycle <- t.cycle + 1
@@ -888,6 +1073,20 @@ let read_buffer t =
 ;;
 
 let set_chain t b = t.chain <- b
+
+(* The host writes the bit sampler's registers. Like the other host actions
+   this is called after the [step] of the cycle it happens in. *)
+let set_sampler t (c : Sampler_config.t) =
+  t.sampler.config
+  <- { c with
+       pin = c.pin land mask 3
+     ; misses = c.misses land mask 3
+     ; blank = c.blank land mask 5
+     ; sample = c.sample land mask 5
+     ; wrap = c.wrap land mask 5
+     ; sync = c.sync land mask 8
+     }
+;;
 
 (* The host writes one word of a thread's program memory. Like the other
    host actions it is called after the [step] of the cycle it happens in.

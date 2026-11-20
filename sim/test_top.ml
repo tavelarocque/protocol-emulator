@@ -182,7 +182,15 @@ let%test_unit "configuration registers read back what was written" =
       ]
   in
   let registers =
-    Top.Addr.[ ctrl, 0x7; pin_modes, 0xFFFF; sync_bypass, 0xFF; load, 0x3F ]
+    Top.Addr.
+      [ ctrl, 0x7
+      ; pin_modes, 0xFFFF
+      ; sync_bypass, 0xFF
+      ; load, 0x3F
+      ; smp_ctrl, 0x1FF
+      ; smp_time, 0x7FFF
+      ; smp_sync, 0xFF
+      ]
     @ per_thread
     @ List.map per_thread ~f:(fun (a, m) -> Top.Addr.for_thread 1 a, m)
   in
@@ -199,6 +207,46 @@ let%test_unit "configuration registers read back what was written" =
 ;;
 
 (* --- Firmware loaded over SPI ------------------------------------------- *)
+
+let%test_unit "Ethernet receive through the host port: a frame on pin 2, read back from the buffer" =
+  (* Everything a driver does, over SPI: the program, the thread's
+     configuration, the sampler's three registers, the buffer set recording.
+     Then a frame on the pin, two clocks to the half bit, and the buffer read
+     back. (This simulator moves every flip-flop on the rising edge, the
+     falling-edge one too, so the sampler here sees each clock's level
+     twice. The chip-level test in test/test.py has real half cycles.) *)
+  let h = create ~half:4 () in
+  load_image h (Firmware.eth_rx_image ());
+  configure h ~thread:0 Firmware.eth_rx_config;
+  let c = Firmware.eth_rx_sampler in
+  write h Top.Addr.smp_time (c.blank lor (c.sample lsl 5) lor (c.wrap lsl 10));
+  write h Top.Addr.smp_sync c.sync;
+  write h Top.Addr.smp_ctrl (1 lor (c.pin lsl 1) lor (Bool.to_int c.sync_enable lsl 5) lor (c.misses lsl 6));
+  write h Top.Addr.buf_ptr 0;
+  write h Top.Addr.buf_end (Isa.buffer_size - 1);
+  write h Top.Addr.buf_ctrl 2;
+  write h Top.Addr.ctrl 1;
+  [%test_result: int] (read h Top.Addr.smp_status) ~expect:0 ~message:"no carrier yet";
+  let frame = Test_ethernet.random_frame (Random.State.make [| 802; 3; 12 |]) 61 in
+  let line =
+    Test_ethernet_rx.transmission frame |> List.concat_map ~f:(fun v -> [ v; v ]) |> Queue.of_list
+  in
+  let clocks = Queue.length line in
+  h.on_cycle
+  <- (fun () ->
+       let level = Option.value (Queue.dequeue line) ~default:false in
+       (i h).uio_in := Bits.of_int ~width:8 (if level then 1 lsl c.pin else 0));
+  wait h (clocks / 2);
+  [%test_result: int] (read h Top.Addr.smp_status) ~expect:3 ~message:"carrier and sync, mid-frame";
+  wait h (clocks / 2);
+  [%test_result: int] (read h Top.Addr.smp_status) ~expect:0 ~message:"carrier gone after the frame";
+  let recorded = read h Top.Addr.buf_ptr in
+  write h Top.Addr.ctrl 0;
+  write h Top.Addr.buf_ctrl 0;
+  write h Top.Addr.buf_ptr 0;
+  let words = Array.init recorded ~f:(fun _ -> read h Top.Addr.buf_data) |> Array.to_list in
+  Test_ethernet_rx.expect_frame frame (Firmware.eth_rx_frame words)
+;;
 
 let%test_unit "echo firmware: words round-trip through SPI, both FIFOs and the core" =
   Quickcheck.test

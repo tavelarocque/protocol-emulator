@@ -166,6 +166,76 @@ SRAM: it answers a cycle after it is asked, and in a cycle in which it is
 written it is not asked, so nothing is played in the cycle after a write.
 Reset does not clear it.
 
+### The bit sampler
+
+One block of hardware in front of the threads, for line codes too fast for
+a thread to follow edge by edge. Recovering a sender's clock means timing
+its edges, and a thread that needs a few instructions per edge cannot do
+that for a bit that lasts four clocks. The sampler does that one job, and
+hands the threads bits; everything after that is still firmware.
+
+It listens to one pin and looks at it twice per clock cycle, on the rising
+edge and on the falling edge, so at 40 MHz it has a sample every 12.5 ns.
+(The falling-edge sample is the only flip-flop in the chip clocked on that
+edge. It passes through a second, rising-edge flip-flop before any logic
+uses it, as every input does.) Its three timing numbers count samples.
+
+The sampler keeps a phase: the number of samples since the last edge it
+accepted. Each sample:
+
+- If the level changed and the phase has reached `blank`, the edge is
+  accepted and the phase starts again from 0. An edge before that is
+  ignored.
+- Otherwise, if the phase has reached `wrap`, a bit time has gone by with
+  no edge. Up to `misses` times in a row the phase starts again from 0
+  anyway, so the bits keep coming at the pace of the last edge; after that
+  the carrier is lost, and nothing more is recovered until the next edge.
+  With `misses` at 7 the carrier is never lost.
+- Otherwise the phase moves on by one.
+
+A sample that leaves the phase at `sample`, with the carrier there, is a
+recovered bit (its opposite, with `invert`).
+
+That is enough for the two common families of code. Manchester code has an
+edge in the middle of every bit and sometimes one between bits: with
+`blank` at about three quarters of a bit the sampler locks to the middle
+edges and ignores the others, the level just after a middle edge is the
+bit, and one bit time without an edge is the end of the transmission
+(`misses` 0). NRZ code has edges only between bits and not between equal
+ones: `blank` 0 so that every edge restarts the phase, `sample` half a bit,
+`wrap` one sample short of a bit, and as many `misses` as the code allows
+equal bits in a row.
+
+While the carrier is there, the recovered bits shift through an 8-bit
+history, first bit lowest. With the sync word on, bits are passed on to the
+threads only after the history has held that word: for Ethernet 0xD5, the
+last byte before a frame. So link pulses, noise, and a transmission joined
+half way through reach no thread.
+
+A bit that is passed on shows on two pins as the threads see them, whatever
+those pins' modes and whatever is on them outside: the bit on the sampler's
+own pin, held until the next one, and a pulse one cycle long on the pin
+after it (pin 0 after pin 7). A thread takes the bits with instructions it
+already has: `wait 1 pin` on the pulse, `in pins, 1` for the bit, and
+`wait ... timeout` on the pulse to find the end. Two edges are never
+accepted less than `blank` + 1 samples apart, so with `blank` 5 the pulses
+are at least three cycles apart and a three-instruction loop always keeps
+up.
+
+How much jitter it stands is set by the sample spacing and nothing else.
+Each edge resets the phase, so what matters is the distance between two
+neighbouring edges. With the settings for 10 Mbit Manchester at 40 MHz
+(`blank` 5, `sample` 1, `wrap` 11), the edge between two bits may show one
+sample late and still be ignored, and a middle edge may show two samples
+early and still be accepted: 12.5 ns one way and 25 ns the other. At
+50 MHz (`blank` 7, `sample` 2, `wrap` 14) it is 20 ns both ways. IEEE 802.3
+asks a 10BASE-T receiver to accept edges up to 13.5 ns from where they
+belong, which is 27 ns between neighbours; this sampler does not meet that,
+and no setting of it can, because a 12.5 ns or 10 ns sample is too coarse.
+It receives from a sender with clean edges over a short cable.
+`sim/test_ethernet_rx.ml` measures it: at 40 MHz every frame arrives with
+each edge up to 6 ns off, at 50 MHz up to 10 ns.
+
 ### Chaining threads
 
 With the host's CHAIN bit set, thread 0's RX FIFO feeds thread 1's TX FIFO:
@@ -344,6 +414,8 @@ the host:
 - pushes to each thread's TX FIFO and pops from its RX FIFO
 - fills the packet buffer and reads it back, a word at a time at its
   pointer, and sets it playing into a thread or recording from one
+- sets the bit sampler's pin, timing and sync word, and reads whether it
+  has a carrier
 - reads status (FIFO levels, PCs)
 
 The register map is in `docs/info.md` and `hw/top.ml`.
@@ -441,6 +513,18 @@ rates.
     gives USB's and CAN's CRCs.
   The CRC register takes one bit an instruction. Sixteen, with a free
   polynomial, was more than the equivalence proof could finish.
+
+- **v2.2.** The bit sampler: clock recovery in hardware, for 10 Mbit
+  Ethernet receive. Off unless the host turns it on, and no instruction
+  changed: what it recovers appears on two pins. It came from working out
+  what a thread can do in the 4 clocks a bit lasts at 40 MHz. A thread can
+  take a bit that is handed to it, with one IN, and still count it and run
+  the CRC. It cannot find the bit: that needs the time of each edge to a
+  fraction of a bit, and 4 samples a bit leave no margin at all at some
+  alignments of the two clocks. So the sampler looks on both clock edges,
+  8 samples a bit, and does only the timing. Its numbers are registers, in
+  samples, so the same block recovers other Manchester and NRZ codes up to
+  a quarter of the clock rate.
 
 ## Open questions for review
 

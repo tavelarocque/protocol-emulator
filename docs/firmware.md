@@ -37,6 +37,7 @@ fits in one page.
 | PWM, and RC servo pulses | 8 | high time and period each exact to the tick; the two counts live in the two shift registers, which leaves X free to count |
 | NES gamepad | 7 | read as the console reads it: latch, then eight clocks, a button read as each clock falls |
 | 10BASE-T Ethernet transmitter | 66 | a whole frame at 10 Mbit/s with a 40 MHz clock, 4 clocks a bit: preamble, start-of-frame delimiter, the frame played from the packet buffer, its CRC-32 from the CRC register, the idle signal. Frames up to the full 1514 bytes. The first program longer than a page |
+| 10BASE-T Ethernet receiver | 14 | frames at 10 Mbit/s with a 40 or 50 MHz clock. The bit sampler recovers the sender's clock and decodes the Manchester code; the program takes each bit with one IN, counts it, lets the CRC register follow it, and at the end of the frame pushes the count and the CRC for the host to check. The packet buffer records the frame. Frames up to the full 1518 bytes with the check sequence |
 
 Everything from the I2C target down to CAN was written after the hardware
 was frozen at v1.4, as firmware alone.
@@ -54,8 +55,17 @@ needed and nothing about Ethernet: automatic refill of the OSR, the packet
 buffer and a CRC register with the polynomial the host's to set
 ([`isa.md`](isa.md), revision history). On the reference model its frames
 are taken by a receiver written from IEEE 802.3, and at chip level by one
-whose CRC-32 is Python's `zlib`. Transmit only: no link pulses yet, and no
-receiver.
+whose CRC-32 is Python's `zlib`. No link pulses yet.
+
+The receiver is the first engine on v2.2, which added the bit sampler: the
+one thing a thread could not do at 4 clocks a bit was find the bit, so
+hardware does that and only that. The program is 14 instructions and has
+nothing about Manchester code in it. On the reference model it takes
+frames from a sender written from IEEE 802.3 whose clock is not the chip's
+and whose edges are jittered, and thread 1 receives what thread 0 sends;
+at chip level the sender is in the test bench, 100 ppm off and with 5 ns
+of jitter on every edge, and its CRC-32 is `zlib`'s. The chip has one
+packet buffer, so it sends a frame or receives frames, not both at once.
 
 **Protocols that need no engine of their own.** Some protocols are an
 existing engine at particular settings plus framing on the host, and are

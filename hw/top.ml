@@ -52,6 +52,18 @@
      0x6B       BUF_DATA (global): a write stores at the pointer and a read
                 returns the word there, and each moves the pointer on.
                 Only while BUF_CTRL leaves the buffer to the host
+     0x6C       SMP_CTRL (global): the bit sampler. Bit 0 = on; [3:1] =
+                its pin (the threads then see the recovered bit there and
+                a pulse for each bit on the next pin); bit 4 = invert;
+                bit 5 = pass bits on only once SMP_SYNC has been seen;
+                [8:6] = bit times without an edge before the carrier is
+                lost (7: never)
+     0x6D       SMP_TIME (global), in samples, two to a clock cycle:
+                [4:0] = the phase from which an edge is accepted,
+                [9:5] = the phase at which a bit is taken,
+                [14:10] = the phase at which a bit time has gone by
+     0x6E       SMP_SYNC (global): the sync word, 8 bits, first bit lowest
+     0x6F       SMP_STATUS (read): bit 0 = carrier, bit 1 = sync word seen
      bank + 0x1 START address [7:0]
      bank + 0x2 OUT config: base [2:0], count [7:4]
      bank + 0x3 SET config: base [2:0], count [7:4]
@@ -112,6 +124,10 @@ module Addr = struct
   let buf_ptr = 0x69
   let buf_end = 0x6A
   let buf_data = 0x6B
+  let smp_ctrl = 0x6C
+  let smp_time = 0x6D
+  let smp_sync = 0x6E
+  let smp_status = 0x6F
 
   (* Thread 0's per-thread registers; [for_thread n] moves one into thread
      n's bank. *)
@@ -194,6 +210,22 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
   let load = config ~init:0x30 "cfg_load" 6 in
   let buf_ctrl = config "cfg_buf_ctrl" 3 in
   let buf_end = config "cfg_buf_end" Pe_core.buffer_bits in
+  let smp_ctrl = config "cfg_smp_ctrl" 9 in
+  let smp_time = config "cfg_smp_time" 15 in
+  let smp_sync = config "cfg_smp_sync" 8 in
+  (* --- The one flip-flop on the falling clock edge: the bit sampler's pin,
+     half a cycle after the synchroniser's first stage took it and half a
+     cycle before it does again. The core takes it from here on a rising
+     edge, so it has half a cycle to settle. --- *)
+  let smp_pin = select smp_ctrl.value 3 1 in
+  let smp_fall =
+    reg
+      (Reg_spec.override
+         (Reg_spec.create ~clock:i.clock ~clear:i.clear ())
+         ~clock_edge:Edge.Falling)
+      (mux smp_pin (bits_lsb i.uio_in))
+    -- "smp_fall"
+  in
   (* One bank of per-thread registers. Returns its writes as (address,
      register, write rule), its RX pop strobe, and the thread's core inputs. *)
   let bank n =
@@ -292,6 +324,18 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
       ; buf_write = write_to Addr.buf_data
       ; buf_data = data_now
       ; buf_read
+      ; smp =
+          { enable = bit smp_ctrl.value 0
+          ; pin = smp_pin
+          ; invert = bit smp_ctrl.value 4
+          ; sync_enable = bit smp_ctrl.value 5
+          ; misses = select smp_ctrl.value 8 6
+          ; blank = select smp_time.value 4 0
+          ; sample = select smp_time.value 9 5
+          ; wrap = select smp_time.value 14 10
+          ; sync = smp_sync.value
+          ; fall = smp_fall
+          }
       ; t0 = bank_in 0
       ; t1 = bank_in 1
       }
@@ -309,6 +353,10 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
   table.(Addr.buf_ptr) <- uresize core.buf_ptr 16;
   table.(Addr.buf_end) <- uresize buf_end.value 16;
   table.(Addr.buf_data) <- core.buf_word;
+  table.(Addr.smp_ctrl) <- uresize smp_ctrl.value 16;
+  table.(Addr.smp_time) <- uresize smp_time.value 16;
+  table.(Addr.smp_sync) <- uresize smp_sync.value 16;
+  table.(Addr.smp_status) <- uresize (core.smp.state.synced @: core.smp.state.carrier) 16;
   List.iteri banks ~f:(fun n (writes, _, _) ->
     let a = Addr.for_thread n in
     let t = Pe_core.O.thread core n in
@@ -349,6 +397,9 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
      ; when_
          (write_to Addr.buf_end)
          [ buf_end <-- select data_now (Pe_core.buffer_bits - 1) 0 ]
+     ; when_ (write_to Addr.smp_ctrl) [ smp_ctrl <-- select data_now 8 0 ]
+     ; when_ (write_to Addr.smp_time) [ smp_time <-- select data_now 14 0 ]
+     ; when_ (write_to Addr.smp_sync) [ smp_sync <-- select data_now 7 0 ]
      ]
      @ List.concat_map banks ~f:(fun (writes, _, _) ->
        List.map writes ~f:(fun (_, _, w) -> w)));

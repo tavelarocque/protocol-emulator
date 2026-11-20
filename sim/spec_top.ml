@@ -117,7 +117,25 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
      RX FIFO, 0 leave it to the host; bit 2 = which thread". BUF_END:
      "playing and recording stop when the pointer gets here". *)
   and buf_ctrl = config ~name:"cfg_buf_ctrl" ~width:3 0x68
-  and buf_end = config ~name:"cfg_buf_end" ~width:P.buffer_bits 0x6A in
+  and buf_end = config ~name:"cfg_buf_end" ~width:P.buffer_bits 0x6A
+  (* The bit sampler. SMP_CTRL: "bit 0 = on; [3:1] = its pin; bit 4 =
+     invert; bit 5 = pass bits on only once SMP_SYNC has been seen; [8:6] =
+     bit times without an edge before the carrier is lost". SMP_TIME:
+     "[4:0] = the phase from which an edge is accepted, [9:5] = the phase at
+     which a bit is taken, [14:10] = the phase at which a bit time has gone
+     by". *)
+  and smp_ctrl = config ~name:"cfg_smp_ctrl" ~width:9 0x6C
+  and smp_time = config ~name:"cfg_smp_time" ~width:15 0x6D
+  and smp_sync = config ~name:"cfg_smp_sync" ~width:8 0x6E in
+  (* The sampler's pin as the falling clock edge finds it: the one register
+     here that does not change on rising edges. *)
+  let smp_fall =
+    let pin = select smp_ctrl 3 1 in
+    reg
+      (Reg_spec.override spec ~clock_edge:Falling)
+      (List.init 8 ~f:(fun p -> bit i.uio_in p &: (pin ==:. p)) |> List.reduce_exn ~f:( |: ))
+    -- "smp_fall"
+  in
   let banks =
     List.init 2 ~f:(fun n ->
       List.map bank_registers ~f:(fun (offset, name, width, init) ->
@@ -191,6 +209,18 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
       ; buf_write = written 0x6B
       ; buf_data = data
       ; buf_read = reading &: (read_address ==:. 0x6B)
+      ; smp =
+          { enable = bit smp_ctrl 0
+          ; pin = select smp_ctrl 3 1
+          ; invert = bit smp_ctrl 4
+          ; sync_enable = bit smp_ctrl 5
+          ; misses = select smp_ctrl 8 6
+          ; blank = select smp_time 4 0
+          ; sample = select smp_time 9 5
+          ; wrap = select smp_time 14 10
+          ; sync = smp_sync
+          ; fall = smp_fall
+          }
       ; t0 = thread_in 0
       ; t1 = thread_in 1
       }
@@ -212,6 +242,11 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
     ; 0x69, core.buf_ptr
     ; 0x6A, buf_end
     ; 0x6B, core.buf_word
+    ; 0x6C, smp_ctrl
+    ; 0x6D, smp_time
+    ; 0x6E, smp_sync
+    ; (* SMP_STATUS: "bit 0 = carrier, bit 1 = sync word seen" *)
+      0x6F, concat_lsb [ core.smp.state.carrier; core.smp.state.synced ]
     ]
     @ List.concat_mapi banks ~f:(fun n regs ->
       let t = P.O.thread core n in
