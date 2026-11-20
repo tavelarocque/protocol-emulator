@@ -16,8 +16,9 @@ BOOTROM_SHA256 = 99f8a1f813ce3aa9415884de3fb6c5b962d3c6fa0394b05413ad3c7b3c39ec6
 all: cosim.node $(BUILD)/$(FIRMWARE) $(BUILD)/bootrom.mjs node_modules
 
 DEVICES = ../spiflash.v ../jtag_tap.v ../swd_dp.v
-# IHP's behavioural model of the SRAM macro that holds each program memory.
-SRAM = ../sram_model/RM_IHPSG13_1P_256x16_c2_bm_bist.v ../sram_model/RM_IHPSG13_1P_core_behavioral_bm_bist.v
+# IHP's behavioural models of the SRAM macros: a program memory per thread and the packet buffer.
+SRAM = ../sram_model/RM_IHPSG13_1P_256x16_c2_bm_bist.v ../sram_model/RM_IHPSG13_1P_1024x16_c2_bm_bist.v \
+       ../sram_model/RM_IHPSG13_1P_core_behavioral_bm_bist.v
 
 $(BUILD)/Vboard__ALL.a: board.v $(DEVICES) $(SRAM) ../../src/project.v ../../src/protocol_emulator.v
 	verilator --cc --no-timing -O3 --Mdir $(BUILD) -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \
