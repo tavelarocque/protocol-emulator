@@ -36,6 +36,7 @@ fits in one page.
 | NEC infrared receiver | 33 | on an IR receiver module's output; reads each bit once, 1.3 units after its burst; tolerates a remote 20% fast or slow, ignores repeat codes, and never lets a frame cut short put the host's pairs of words out of step |
 | PWM, and RC servo pulses | 8 | high time and period each exact to the tick; the two counts live in the two shift registers, which leaves X free to count |
 | NES gamepad | 7 | read as the console reads it: latch, then eight clocks, a button read as each clock falls |
+| 10BASE-T Ethernet transmitter | 66 | a whole frame at 10 Mbit/s with a 40 MHz clock, 4 clocks a bit: preamble, start-of-frame delimiter, the frame played from the packet buffer, its CRC-32 from the CRC register, the idle signal. Frames up to the full 1514 bytes. The first program longer than a page |
 
 Everything from the I2C target down to CAN was written after the hardware
 was frozen at v1.4, as firmware alone.
@@ -47,6 +48,14 @@ receivers by sources written from the protocol's rules, with remotes off
 speed, frames cut short and, for NEC, repeat codes. MDIO also reads from a PHY
 model written from the standard, one that takes the full 300 ns it is
 allowed to answer.
+
+The Ethernet transmitter is the first engine on v2.1, which added what it
+needed and nothing about Ethernet: automatic refill of the OSR, the packet
+buffer and a CRC register with the polynomial the host's to set
+([`isa.md`](isa.md), revision history). On the reference model its frames
+are taken by a receiver written from IEEE 802.3, and at chip level by one
+whose CRC-32 is Python's `zlib`. Transmit only: no link pulses yet, and no
+receiver.
 
 **Protocols that need no engine of their own.** Some protocols are an
 existing engine at particular settings plus framing on the host, and are

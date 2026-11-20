@@ -46,7 +46,11 @@ let bank_registers =
   ; 0xB, "timeout", 16, 0
   ; 0xC, "sideset", 6, 0
   ; 0xD, "clkdiv", 16, 0
-  ; 0xF, "shift", 2, 0
+  ; 0xF, "shift", 6, 0
+  ; 0x21, "crc_poly_lo", 16, 0
+  ; 0x22, "crc_poly_hi", 16, 0
+  ; 0x23, "crc_init_lo", 16, 0
+  ; 0x24, "crc_init_hi", 16, 0
   ]
 ;;
 
@@ -108,7 +112,12 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
   and sync_bypass = config ~name:"cfg_sync_bypass" ~width:8 0x4E
   (* LOAD: "[1:0] = the page program writes go to; bit 4 = write thread
      0's memory, bit 5 = thread 1's. Resets to 0x30: page 0 of both." *)
-  and load = config ~init:0x30 ~name:"cfg_load" ~width:6 0x50 in
+  and load = config ~init:0x30 ~name:"cfg_load" ~width:6 0x50
+  (* BUF_CTRL: "[1:0] = 1 play into a thread's TX FIFO, 2 record from its
+     RX FIFO, 0 leave it to the host; bit 2 = which thread". BUF_END:
+     "playing and recording stop when the pointer gets here". *)
+  and buf_ctrl = config ~name:"cfg_buf_ctrl" ~width:3 0x68
+  and buf_end = config ~name:"cfg_buf_end" ~width:P.buffer_bits 0x6A in
   let banks =
     List.init 2 ~f:(fun n ->
       List.map bank_registers ~f:(fun (offset, name, width, init) ->
@@ -147,6 +156,12 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
     ; clkdiv = f "clkdiv"
     ; out_msb_first = bit (f "shift") 0
     ; in_msb_first = bit (f "shift") 1
+    ; autopull = bit (f "shift") 2
+    ; autopush = bit (f "shift") 3
+    ; crc_invert = bit (f "shift") 4
+    ; crc_in = bit (f "shift") 5
+    ; crc_poly = concat_msb [ f "crc_poly_hi"; f "crc_poly_lo" ]
+    ; crc_init = concat_msb [ f "crc_init_hi"; f "crc_init_lo" ]
     ; tx_push = written (bank_base n + tx_offset)
     ; tx_data = data
     ; rx_pop = List.nth_exn pops n
@@ -165,6 +180,17 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
       ; pins_in = i.uio_in
       ; sync_bypass
       ; chain = bit ctrl 2
+      ; buf_mode = select buf_ctrl 1 0
+      ; buf_thread = bit buf_ctrl 2
+      ; buf_end
+      ; (* BUF_PTR: "a write sets it". BUF_DATA: "a write stores at the
+           pointer and a read returns the word there, and each moves the
+           pointer on". *)
+        buf_set_ptr = written 0x69
+      ; buf_ptr_in = select data (P.buffer_bits - 1) 0
+      ; buf_write = written 0x6B
+      ; buf_data = data
+      ; buf_read = reading &: (read_address ==:. 0x6B)
       ; t0 = thread_in 0
       ; t1 = thread_in 1
       }
@@ -178,7 +204,15 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
      was written; RX pops (0 if empty); STATUS packs pc [15:8], enable [7],
      RX level [6:4], TX level [2:0]. Everything else reads 0. *)
   let readable =
-    [ 0x40, ctrl; 0x47, pin_modes; 0x4E, sync_bypass; 0x50, load ]
+    [ 0x40, ctrl
+    ; 0x47, pin_modes
+    ; 0x4E, sync_bypass
+    ; 0x50, load
+    ; 0x68, buf_ctrl
+    ; 0x69, core.buf_ptr
+    ; 0x6A, buf_end
+    ; 0x6B, core.buf_word
+    ]
     @ List.concat_mapi banks ~f:(fun n regs ->
       let t = P.O.thread core n in
       let base = bank_base n in

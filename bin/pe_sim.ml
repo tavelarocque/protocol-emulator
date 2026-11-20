@@ -49,11 +49,18 @@ let config_of_string s =
          | "clkdiv" -> { c with clkdiv = n }
          | "out_msb_first" -> { c with out_msb_first = n <> 0 }
          | "in_msb_first" -> { c with in_msb_first = n <> 0 }
+         | "autopull" -> { c with autopull = n <> 0 }
+         | "autopush" -> { c with autopush = n <> 0 }
+         | "crc_poly" -> { c with crc_poly = n }
+         | "crc_init" -> { c with crc_init = n }
+         | "crc_invert" -> { c with crc_invert = n <> 0 }
+         | "crc_in" -> { c with crc_in = n <> 0 }
          | k ->
            failwithf
              "-config: unknown key %s (keys: start, out_base, out_count, set_base, \
               set_count, in_base, threshold, timeout_vector, timeout, sideset_base, \
-              sideset_count, clkdiv, out_msb_first, in_msb_first)"
+              sideset_count, clkdiv, out_msb_first, in_msb_first, autopull, autopush, \
+              crc_poly, crc_init, crc_invert, crc_in)"
              k
              ()))
 ;;
@@ -93,7 +100,7 @@ let run_cmd =
          ~doc:
            "k=v,... thread config: start out_base out_count set_base set_count in_base \
             threshold timeout_vector timeout sideset_base sideset_count clkdiv \
-            out_msb_first in_msb_first"
+            out_msb_first in_msb_first autopull autopush crc_poly crc_init crc_invert crc_in"
      and modes = flag "-mode" (listed string) ~doc:"P=pp|od|in pin mode (default in)"
      and tx = flag "-tx" (optional string) ~doc:"FILE TX words, one per line"
      and cycles = flag "-cycles" (optional_with_default 100_000 int) ~doc:"N cycles to run"

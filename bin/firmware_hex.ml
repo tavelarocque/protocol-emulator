@@ -3,7 +3,7 @@
 
    Usage: firmware_hex.exe NAME, where NAME is one of Firmware.all, or
    two_protocols, bridge, uart_duplex, usb_host, ps2 or can for the two-thread
-   images. *)
+   images, or eth_tx, which is placed at its own origin. *)
 
 open! Core
 module Isa = Pe_model.Isa
@@ -18,6 +18,7 @@ let () =
     | "usb_host" -> Pe_model.Firmware.Usb_host.image
     | "ps2" -> Pe_model.Firmware.Ps2.image
     | "can" -> Pe_model.Firmware.Can.image
+    | "eth_tx" -> Pe_model.Firmware.eth_tx_image ()
     | name ->
       Pe_model.Asm.assemble
         (List.Assoc.find_exn Pe_model.Firmware.all name ~equal:String.equal)

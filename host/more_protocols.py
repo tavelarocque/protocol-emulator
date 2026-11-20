@@ -384,3 +384,101 @@ class NecRx:
         if (address ^ (address >> 8)) & 0xFF == 0xFF:
             address &= 0xFF
         return address, command & 0xFF
+
+
+# --- v2.1: the packet buffer, the CRC register, Ethernet -----------------------
+
+AUTOPULL, AUTOPUSH, CRC_INVERT, CRC_IN = 1, 2, 4, 8  # for configure(auto=...)
+CRC_POLY = 0x61  # low half; the high half follows. Thread 1's are + pe.BANK
+CRC_INIT = 0x63
+BUF_CTRL, BUF_PTR, BUF_END, BUF_DATA = 0x68, 0x69, 0x6A, 0x6B
+BUF_WORDS = 1024
+
+
+def set_crc(chip, poly, init, thread=0):
+    """The thread's CRC register: its polynomial, low power first, and
+    what it starts from. Both are 32 bits."""
+    bank = pe.BANK * thread
+    chip.write(CRC_POLY + bank, poly & 0xFFFF)
+    chip.write(CRC_POLY + 1 + bank, poly >> 16)
+    chip.write(CRC_INIT + bank, init & 0xFFFF)
+    chip.write(CRC_INIT + 1 + bank, init >> 16)
+
+
+class Buffer:
+    """The packet buffer: 1024 words that stand in for the host at one end
+    of one thread's FIFOs."""
+
+    def __init__(self, chip):
+        self.chip = chip
+
+    def load(self, words, at=0):
+        """Store [words] from [at] on. The buffer stops playing or
+        recording first."""
+        self.chip.write(BUF_CTRL, 0)
+        self.chip.write(BUF_PTR, at)
+        self.chip.write_many([(BUF_DATA, w) for w in words])
+
+    def play(self, count, thread=0, at=0):
+        """Play [count] words from [at] into the thread's TX FIFO."""
+        self._go(1, count, thread, at)
+
+    def record(self, count, thread=0, at=0):
+        """Record up to [count] words from the thread's RX FIFO, from [at]."""
+        self._go(2, count, thread, at)
+
+    def _go(self, mode, count, thread, at):
+        self.chip.write(BUF_CTRL, 0)
+        self.chip.write(BUF_PTR, at)
+        self.chip.write(BUF_END, (at + count) % BUF_WORDS)
+        self.chip.write(BUF_CTRL, mode | (thread << 2))
+
+    def position(self):
+        """Where the pointer is: how far a play or a recording has got."""
+        return self.chip.read(BUF_PTR)
+
+    def read(self, count, at=0):
+        """Take [count] words back from [at]."""
+        self.chip.write(BUF_CTRL, 0)
+        self.chip.write(BUF_PTR, at)
+        return [self.chip.read(BUF_DATA) for _ in range(count)]
+
+
+class EthernetTx:
+    """10BASE-T Ethernet transmit (eth_tx.hex): TD+ on pin 0 and TD- on pin
+    1, to a transformer through series resistors. The chip's clock must be
+    40 MHz. The chip makes the preamble, the Manchester code, the CRC-32
+    and the idle signal; the host supplies the frame."""
+
+    START = 51  # eth_tx_origin; an odd number of bytes starts two words on
+    PARK = 113  # where the program waits once a frame is out
+
+    def __init__(self, chip, image):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        set_crc(chip, 0xEDB88320, 0xFFFFFFFF)
+        self.buffer = Buffer(chip)
+        # Pins reset high. Both high is no voltage across the pair, which is
+        # idle, so they can drive from now on; the program idles both low.
+        chip.set_pin_modes({0: pe.PUSH_PULL, 1: pe.PUSH_PULL})
+
+    def send(self, frame):
+        """Send one frame: destination address to the end of the data, no
+        frame check sequence. Shorter than 60 bytes, it is padded with
+        zeros. Returns at once; [sent] says when it is on the wire."""
+        frame = bytes(frame)
+        frame += bytes(max(0, 60 - len(frame)))
+        odd = len(frame) & 1
+        if odd:
+            frame = b"\x00" + frame  # the first word holds one byte, in its top half
+        words = [frame[k] | (frame[k + 1] << 8) for k in range(0, len(frame), 2)]
+        self.chip.stop()
+        self.chip.configure(start=self.START + 2 * odd, threshold=16, sideset_base=0,
+                            sideset_count=2, auto=AUTOPULL | CRC_INVERT)
+        self.buffer.load(words)
+        self.buffer.play(len(words))
+        self.chip.run()
+
+    def sent(self):
+        return self.chip.status()["pc"] == self.PARK

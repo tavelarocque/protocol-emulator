@@ -29,7 +29,8 @@ which START sets and `set page, n` changes; START and TIMEOUT_VECTOR are
 full 8-bit addresses.
 
 Thread 0's registers are at 0x41-0x4F; thread 1 has an identical bank at
-0x51-0x5F. CTRL, PIN_MODES, SYNC_BYPASS and LOAD are global. Every protocol
+0x51-0x5F. CTRL, PIN_MODES, SYNC_BYPASS, LOAD and the packet buffer's four registers
+are global. Every protocol
 pin's input passes through a two-flip-flop synchroniser (two cycles of
 delay) unless its SYNC_BYPASS bit is set; the side-set SPI controller needs
 it set on MISO.
@@ -52,9 +53,15 @@ it set on MISO.
 | 0x4C | SIDESET: base pin [2:0], count [5:4] |
 | 0x4D | CLKDIV: the thread runs one cycle in every CLKDIV (0, 1: every cycle) |
 | 0x4E | SYNC_BYPASS (global): 1 bit per pin; set to read that pin without the 2-cycle input synchroniser |
-| 0x4F | SHIFT: bit 0 OUT most significant bit first, bit 1 IN most significant bit first |
+| 0x4F | SHIFT: bit 0 OUT most significant bit first, bit 1 IN most significant bit first; bit 2 autopull, bit 3 autopush; bit 4 the CRC register reads inverted, bit 5 it follows IN's bits, not OUT's |
 | 0x50 | LOAD (global): page that program writes go to [1:0]; bit 4 write thread 0's memory, bit 5 thread 1's. Resets to 0x30 |
 | 0x51-0x5F | thread 1: same layout as 0x41-0x4F (0x57 and 0x5E unused) |
+| 0x61, 0x62 | CRC_POLY, low and high half: the CRC register's polynomial, low power first (thread 1: 0x71, 0x72) |
+| 0x63, 0x64 | CRC_INIT, low and high half: what the CRC register starts from (thread 1: 0x73, 0x74) |
+| 0x68 | BUF_CTRL (global): the packet buffer. Bits [1:0] = 1 play into a thread's TX FIFO, 2 record from its RX FIFO, 0 leave it to the host; bit 2 which thread |
+| 0x69 | BUF_PTR (global): the buffer's pointer, 0 to 1023. A write sets it; it reads back as it stands |
+| 0x6A | BUF_END (global): playing and recording stop when the pointer gets here |
+| 0x6B | BUF_DATA (global): a write stores at the pointer, a read returns the word there, and each moves the pointer on; only while BUF_CTRL is 0 |
 
 Status pins: uo[1] thread 0 running, uo[2] thread 0 RX data waiting, uo[3]
 thread 0 TX FIFO full; uo[4]-uo[6] the same for thread 1.
@@ -177,13 +184,26 @@ port from one of the microcontroller's PIO state machines so it does
 is derived from. Bit-banged from MicroPython, each register access takes
 milliseconds (`test/board_emu`).
 
+10BASE-T Ethernet transmit: `test/eth_tx.hex` (66 words, loaded with its
+first at 51), TD+ on P0 and TD- on P1, push-pull. The core clock must be
+40 MHz, 4 clocks a bit. The chip makes the preamble, the Manchester code,
+the CRC-32 frame check sequence and the idle signal; the host stores the
+frame in the packet buffer, sets the buffer playing into thread 0 and
+starts the thread (SHIFT 0x14: autopull, CRC read inverted; CRC_POLY
+0xEDB88320, CRC_INIT 0xFFFFFFFF; SIDESET 0x20; THRESHOLD 16; START 51, or
+53 for a frame with an odd number of bytes, whose first word holds one
+byte in its top half). `EthernetTx` in `host/more_protocols.py` does all
+of it: `send(frame)`. It does not yet send the link pulses a switch looks
+for between frames, and there is no receiver.
+
 ## External hardware
 
 None required. A logic analyser or USB-serial adapter on the protocol pins
 shows what the firmware is doing. USB needs a USB 1.1 transceiver (VO/FSE0
 mode, such as a TUSB1106 or MAX3349E) between the protocol pins and the USB
 connector, the host's 15 kohm pull-downs on D+ and D-, and 5 V for the
-device. 1-Wire needs a pull-up on P0 (4.7 kohm to 3.3 V); I2C, SWD and the
+device. Ethernet needs a 10BASE-T transformer (or a jack with magnetics)
+and series resistors between P0, P1 and the pair. 1-Wire needs a pull-up on P0 (4.7 kohm to 3.3 V); I2C, SWD and the
 other open-drain buses need one per line. A PS/2 device runs from 5 V: put
 a bidirectional level shifter on DATA and CLK, with pull-ups on its 5 V
 side. CAN needs a 3.3 V transceiver (an SN65HVD230, for one) and a

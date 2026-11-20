@@ -71,6 +71,12 @@ let random_sample rs word =
     ; clkdiv = r 4
     ; out_msb_first = r 2 = 0
     ; in_msb_first = r 2 = 0
+    ; autopull = r 2 = 0
+    ; autopush = r 2 = 0
+    ; crc_poly = (r 65536 lsl 16) lor r 65536
+    ; crc_init = (r 65536 lsl 16) lor r 65536
+    ; crc_invert = r 2 = 0
+    ; crc_in = r 2 = 0
     }
   in
   let state =
@@ -85,6 +91,8 @@ let random_sample rs word =
     ; delay_left = (if r 5 = 0 then r 16 else 0)
     ; waiting = r 2
     ; wait_count = (if r 2 = 0 then r 4 else r 65536)
+    ; crc = (r 65536 lsl 16) lor r 65536
+    ; crc_run = r 4 > 0 |> Bool.to_int
     ; pin_out = r 256
     }
   in
@@ -133,6 +141,8 @@ let run_model s =
   th.delay_left <- s.state.delay_left;
   th.waiting <- s.state.waiting = 1;
   th.wait_count <- s.state.wait_count;
+  th.crc <- s.state.crc;
+  th.crc_run <- s.state.crc_run = 1;
   (* A thread is between ticks while its divider counter is non-zero. *)
   th.div_count <- (if s.tick then 0 else 1);
   m.pin_out <- s.state.pin_out;
@@ -153,6 +163,8 @@ let run_model s =
       ; delay_left = th.delay_left
       ; waiting = Bool.to_int th.waiting
       ; wait_count = th.wait_count
+      ; crc = th.crc
+      ; crc_run = Bool.to_int th.crc_run
       ; pin_out = Isa.pin_out m
       }
   ; pull = Queue.length th.tx_fifo < tx_before
@@ -190,6 +202,12 @@ let run_spec s =
       ; sideset_count = b 2 c.sideset_count
       ; out_msb_first = Bits.of_bool c.out_msb_first
       ; in_msb_first = Bits.of_bool c.in_msb_first
+      ; autopull = Bits.of_bool c.autopull
+      ; autopush = Bits.of_bool c.autopush
+      ; crc_poly = b 32 c.crc_poly
+      ; crc_init = b 32 c.crc_init
+      ; crc_invert = Bits.of_bool c.crc_invert
+      ; crc_in = Bits.of_bool c.crc_in
       }
   in
   { next = P.Thread_state.map out.next ~f:Bits.to_int
@@ -221,8 +239,8 @@ let%test_unit "spec equals the reference model on all 65,536 instruction words" 
 
 (* --- 2. The proof ---------------------------------------------------------- *)
 
-let rtl ?mutation () = Core_circuit.create_exn ~name:"core" (P.create ?mutation)
-let spec () = Core_circuit.create_exn ~name:"core" (P.create ~datapath:Spec_signal.step)
+let rtl ?mutation () = Core_circuit.create_exn ~name:"core" (P.create ~memory:Proof ?mutation)
+let spec () = Core_circuit.create_exn ~name:"core" (P.create ~memory:Proof ~datapath:Spec_signal.step)
 
 let prove a b =
   let open Hardcaml_verify in
@@ -266,7 +284,7 @@ let%expect_test "a bug planted in the spec core breaks the whole-core proof" =
 
 module Top_circuit = Circuit.With_interface (Pe_hw.Top.I) (Pe_hw.Top.O)
 
-let top ?mutation () = Top_circuit.create_exn ~name:"chip" (Pe_hw.Top.create ?mutation)
+let top ?mutation () = Top_circuit.create_exn ~name:"chip" (Pe_hw.Top.create ~memory:Proof ?mutation)
 
 let spec_top ?plant () =
   Top_circuit.create_exn ~name:"chip" (Spec_top.create ?plant)
@@ -324,6 +342,14 @@ let%expect_test "every planted RTL bug is refuted with a counterexample" =
     Jump_ignores_page            SAT: counterexample found
     Write_lands_while_running    SAT: counterexample found
     No_hold_after_write          SAT: counterexample found
+    Autopull_ignores_empty       SAT: counterexample found
+    Autopush_ignores_full        SAT: counterexample found
+    Crc_ignores_direction        SAT: counterexample found
+    Crc_read_keeps_running       SAT: counterexample found
+    Play_ignores_full            SAT: counterexample found
+    Play_past_end                SAT: counterexample found
+    Record_keeps_host_pop        SAT: counterexample found
+    Play_after_write             SAT: counterexample found
     |}]
 ;;
 
@@ -348,5 +374,13 @@ let%expect_test "every planted RTL bug is refuted by the whole-core spec" =
     Jump_ignores_page            SAT: counterexample found
     Write_lands_while_running    SAT: counterexample found
     No_hold_after_write          SAT: counterexample found
+    Autopull_ignores_empty       SAT: counterexample found
+    Autopush_ignores_full        SAT: counterexample found
+    Crc_ignores_direction        SAT: counterexample found
+    Crc_read_keeps_running       SAT: counterexample found
+    Play_ignores_full            SAT: counterexample found
+    Play_past_end                SAT: counterexample found
+    Record_keeps_host_pop        SAT: counterexample found
+    Play_after_write             SAT: counterexample found
     |}]
 ;;

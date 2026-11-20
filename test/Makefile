@@ -8,9 +8,9 @@ TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
 PROJECT_SOURCES = project.v protocol_emulator.v sram_bb.v
 
-# Behavioural model of the IHP SRAM macro (RTL and gate level simulation).
+# Behavioural models of the IHP SRAM macros (RTL and gate level simulation).
 # SIM also skips the macro's blackbox declaration in src/sram_bb.v.
-SRAM_MODEL = $(PWD)/sram_model/RM_IHPSG13_1P_256x16_c2_bm_bist.v $(PWD)/sram_model/RM_IHPSG13_1P_core_behavioral_bm_bist.v
+SRAM_MODEL = $(PWD)/sram_model/RM_IHPSG13_1P_256x16_c2_bm_bist.v $(PWD)/sram_model/RM_IHPSG13_1P_1024x16_c2_bm_bist.v $(PWD)/sram_model/RM_IHPSG13_1P_core_behavioral_bm_bist.v
 VERILOG_SOURCES += $(SRAM_MODEL)
 COMPILE_ARGS += -DFUNCTIONAL -DSIM
 

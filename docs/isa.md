@@ -106,6 +106,9 @@ output, read back on a push-pull or open-drain pin, is never delayed.
 | `sideset_base`, `sideset_count` | first side-set pin, and how many of the delay field's top bits (0 to 3) are side-set values |
 | `clkdiv` | the thread runs one cycle in every `clkdiv` (0 and 1: every cycle). Between those ticks it does nothing at all, so delays and wait timeouts count in ticks |
 | `out_msb_first`, `in_msb_first` | shift direction (SHIFT register). OUT: take bits from the top of the OSR and shift it left. IN: shift the ISR left, new bits entering at the bottom. Off by default, which is least significant bit first |
+| `autopull`, `autopush` | the OSR refills and the ISR empties by themselves (see `out` and `in`). Off by default |
+| `crc_poly`, `crc_init` | the CRC register's polynomial, written low power first, and the value it starts from; 32 bits each |
+| `crc_invert`, `crc_in` | the CRC register reads inverted; it follows the bits IN shifts, not OUT's |
 
 Pin ranges wrap modulo 8.
 
@@ -126,6 +129,42 @@ On every clock cycle:
 A thread with `clkdiv` above 1 takes step 2 only on its ticks, one cycle in
 every `clkdiv`; on other cycles it holds its whole state. Its first tick is
 the first cycle it is enabled.
+
+### The CRC register
+
+Each thread has a 32-bit CRC register. It takes one bit from every OUT the
+thread executes (or every IN, with `crc_in`): the first bit that
+instruction shifted. Protocols with a CRC shift one bit at a time, so that
+is every bit. If the bit differs from the register's bit 0, the register
+shifts right and the polynomial is added; otherwise it only shifts.
+
+With the polynomial written low power first, that one rule is the CRC of
+Ethernet (0xEDB88320, from all ones, sent inverted), USB (0xA001 for its
+CRC-16) and CAN (its 15-bit polynomial reversed, from zero, with the bytes
+shifted most significant bit first). A CRC narrower than 32 bits uses the
+register's low bits. The register starts from `crc_init` whenever the
+thread is disabled. `mov` reads it and restarts it (see `mov`).
+
+### The packet buffer
+
+A memory of 1024 words of 16 bits that can stand in for the host at one end
+of one thread's FIFOs. The host fills it or reads it back while it is off.
+Set to play, it is the source of one thread's TX FIFO: in any cycle that
+starts with the pointer short of the end and that FIFO not full, one word
+moves from the buffer into the FIFO and the pointer moves on. Set to
+record, it is the sink of one thread's RX FIFO in the same way. The thread
+cannot tell: it pulls and pushes as it always did, with a host that never
+falls behind. That is what a protocol faster than the host port needs, and
+10 Mbit Ethernet takes 625,000 words a second where the port can carry
+260,000.
+
+While the buffer plays into a FIFO the host cannot push to it, and while it
+records from one the host cannot pop it. An end the chain owns (thread 1's
+TX FIFO, thread 0's RX FIFO) is not the buffer's: it does nothing there.
+The pointer wraps from 1023 to 0. Like the program memories the buffer is
+SRAM: it answers a cycle after it is asked, and in a cycle in which it is
+written it is not asked, so nothing is played in the cycle after a write.
+Reset does not clear it.
 
 ### Chaining threads
 
@@ -246,6 +285,10 @@ A loop `l: jmp x-- l` entered with X = n takes exactly n + 1 cycles.
 Bits arrive least significant bit first by default; with `in_msb_first`
 the ISR shifts left instead and new bits enter at the bottom.
 
+With `autopush`, an `in` that brings the ISR's count to the threshold
+pushes it in the same cycle, as `push` would, and clears it. If the RX FIFO
+is full, that `in` stalls instead, with nothing shifted.
+
 **`out dst, count`** shifts `count` bits out of the OSR, least significant
 bit first by default; with `out_msb_first` it takes them from the top and
 shifts the OSR left. `dst` is one of:
@@ -253,6 +296,12 @@ shifts the OSR left. `dst` is one of:
 - `pins`: written from `out_base` up
 - `x` or `y`
 - `null`: discarded
+
+With `autopull`, an `out` that empties the OSR refills it from the TX FIFO
+in the same cycle, if the FIFO has a word, so a program can shift bits
+without a gap and never execute a `pull`. An `out` that finds the OSR empty
+spends that tick fetching a word instead (or waiting for one), and runs on
+the next.
 
 **`push`** sends the bits shifted in since the last push to the RX FIFO,
 right-justified, then clears the ISR. It stalls while the RX FIFO is full.
@@ -262,8 +311,12 @@ the TX FIFO is empty.
 
 **`mov dst, src`** copies a 16-bit value.
 
-- Locations: `x`, `y`, `pins`, `isr`, `osr`, `null`.
+- Locations: `x`, `y`, `pins`, `isr`, `osr`, `null`, `crc`.
 - Reading `pins` gives all 8 pin levels.
+- Reading `crc` gives the CRC register's low 16 bits (inverted, with
+  `crc_invert`). The register then holds its high 16 bits in its low half,
+  so a second read gives those, and it stops following the data. Writing
+  `crc`, from any source, starts it again from `crc_init`.
 - Writing `pins` writes `out_count` pins from `out_base`.
 - Writing `isr` or `osr` resets that register's shift count.
 
@@ -289,6 +342,8 @@ the host:
 - enables threads through one CTRL register, so a single write can start or
   stop both in the same cycle
 - pushes to each thread's TX FIFO and pops from its RX FIFO
+- fills the packet buffer and reads it back, a word at a time at its
+  pointer, and sets it playing into a thread or recording from one
 - reads status (FIFO levels, PCs)
 
 The register map is in `docs/info.md` and `hw/top.ml`.
@@ -373,12 +428,24 @@ rates.
     memory.
   Every v1.4 program encodes and runs identically.
 
+- **v2.1.** Three additions, each off unless the host turns it on, so
+  every earlier program runs as before. They came from writing 10 Mbit
+  Ethernet, which is 4 clocks a bit at 40 MHz:
+  - Autopull and autopush. There is no clock in which to fetch a word, so
+    the OSR has to refill itself.
+  - The packet buffer. No host port can supply 625,000 words a second, so
+    a third SRAM plays a frame into the FIFO, or records one from it.
+  - A CRC register per thread, with the polynomial the host's to set, and
+    `mov` to read it (location 6, until now reserved and a NOP). A CRC-32
+    cannot be computed by firmware in 4 clocks a bit. The same register
+    gives USB's and CAN's CRCs.
+  The CRC register takes one bit an instruction. Sixteen, with a free
+  polynomial, was more than the equivalence proof could finish.
+
 ## Open questions for review
 
 - **Fractional divider.** PIO's divider has 8 fractional bits; this one is
   an integer. UART baud rates that do not divide the clock still need the
   X/Y loop for fine timing.
-- **Autopush / autopull.** PIO has them. They save one instruction per word
-  but complicate timing. Left out of v0.
 - **IRQ / thread sync.** Not in v0. Full-duplex UART does not need it; SPI
   with separate RX and TX threads might.

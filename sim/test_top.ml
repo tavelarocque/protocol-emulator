@@ -101,7 +101,19 @@ let configure h ~thread (c : Isa.Thread_config.t) =
   w Top.Addr.timeout c.timeout;
   w Top.Addr.sideset (c.sideset_base lor (c.sideset_count lsl 4));
   w Top.Addr.clkdiv c.clkdiv;
-  w Top.Addr.shift (Bool.to_int c.out_msb_first lor (Bool.to_int c.in_msb_first lsl 1))
+  let b v n = Bool.to_int v lsl n in
+  w
+    Top.Addr.shift
+    (b c.out_msb_first 0
+     lor b c.in_msb_first 1
+     lor b c.autopull 2
+     lor b c.autopush 3
+     lor b c.crc_invert 4
+     lor b c.crc_in 5);
+  w Top.Addr.crc_poly_lo (c.crc_poly land 0xFFFF);
+  w Top.Addr.crc_poly_hi (c.crc_poly lsr 16);
+  w Top.Addr.crc_init_lo (c.crc_init land 0xFFFF);
+  w Top.Addr.crc_init_hi (c.crc_init lsr 16)
 ;;
 
 let push ?(thread = 0) h v =
@@ -162,7 +174,11 @@ let%test_unit "configuration registers read back what was written" =
       ; timeout, 0xFFFF
       ; sideset, 0x3F
       ; clkdiv, 0xFFFF
-      ; shift, 0x3
+      ; shift, 0x3F
+      ; crc_poly_lo, 0xFFFF
+      ; crc_poly_hi, 0xFFFF
+      ; crc_init_lo, 0xFFFF
+      ; crc_init_hi, 0xFFFF
       ]
   in
   let registers =

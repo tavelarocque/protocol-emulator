@@ -240,3 +240,11 @@
   (with-stdout-to
    nes_pad.hex
    (run %{dep:../bin/firmware_hex.exe} nes_pad))))
+
+(rule
+ (targets eth_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   eth_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} eth_tx))))

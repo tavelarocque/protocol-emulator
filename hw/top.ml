@@ -42,6 +42,16 @@
                 bit 4 = write thread 0's memory, bit 5 = thread 1's.
                 Resets to 0x30: page 0 of both. A write to the memory of an
                 enabled thread is ignored.
+     0x68       BUF_CTRL (global): the packet buffer. [1:0] = 1 play into a
+                thread's TX FIFO, 2 record from its RX FIFO, 0 leave it to
+                the host; bit 2 = which thread
+     0x69       BUF_PTR (global): the buffer's pointer, 0 to 1023. A write
+                sets it; it reads back as it stands
+     0x6A       BUF_END (global): playing and recording stop when the
+                pointer gets here
+     0x6B       BUF_DATA (global): a write stores at the pointer and a read
+                returns the word there, and each moves the pointer on.
+                Only while BUF_CTRL leaves the buffer to the host
      bank + 0x1 START address [7:0]
      bank + 0x2 OUT config: base [2:0], count [7:4]
      bank + 0x3 SET config: base [2:0], count [7:4]
@@ -57,7 +67,12 @@
      bank + 0xD CLKDIV [15:0]: the thread runs one cycle in every CLKDIV
                 (0 and 1: every cycle)
      bank + 0xF SHIFT: bit 0 = OUT most significant bit first, bit 1 = IN
-                most significant bit first (both 0: LSB first, as before)
+                most significant bit first (both 0: LSB first, as before);
+                bit 2 = autopull, bit 3 = autopush; bit 4 = the CRC register
+                reads inverted, bit 5 = it follows IN's bits, not OUT's
+     bank + 0x21, 0x22  CRC_POLY, low and high half: the CRC register's
+                polynomial, low power first
+     bank + 0x23, 0x24  CRC_INIT, low and high half: what it starts from
    Configuration registers read back what was written; unmapped addresses
    read 0. Pin conflicts: if both threads write a pin in the same cycle,
    thread 1 wins. *)
@@ -93,6 +108,10 @@ module Addr = struct
   let pin_modes = 0x47
   let sync_bypass = 0x4E
   let load = 0x50
+  let buf_ctrl = 0x68
+  let buf_ptr = 0x69
+  let buf_end = 0x6A
+  let buf_data = 0x6B
 
   (* Thread 0's per-thread registers; [for_thread n] moves one into thread
      n's bank. *)
@@ -109,9 +128,13 @@ module Addr = struct
   let sideset = 0x4C
   let clkdiv = 0x4D
   let shift = 0x4F
+  let crc_poly_lo = 0x61
+  let crc_poly_hi = 0x62
+  let crc_init_lo = 0x63
+  let crc_init_hi = 0x64
   let bank_size = 0x10
   let for_thread n a = a + (bank_size * n)
-  let last = for_thread 1 shift
+  let last = for_thread 1 crc_init_hi
 end
 
 let bit s i = select s i i
@@ -169,6 +192,8 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
   let pin_modes = config "cfg_pin_modes" 16 in
   let sync_bypass = config "cfg_sync_bypass" 8 in
   let load = config ~init:0x30 "cfg_load" 6 in
+  let buf_ctrl = config "cfg_buf_ctrl" 3 in
+  let buf_end = config "cfg_buf_end" Pe_core.buffer_bits in
   (* One bank of per-thread registers. Returns its writes as (address,
      register, write rule), its RX pop strobe, and the thread's core inputs. *)
   let bank n =
@@ -183,7 +208,11 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
     let timeout = config "timeout" 16 in
     let sideset = config "sideset" 6 in
     let clkdiv = config "clkdiv" 16 in
-    let shift = config "shift" 2 in
+    let shift = config "shift" 6 in
+    let crc_poly_lo = config "crc_poly_lo" 16 in
+    let crc_poly_hi = config "crc_poly_hi" 16 in
+    let crc_init_lo = config "crc_init_lo" 16 in
+    let crc_init_hi = config "crc_init_hi" 16 in
     let writes =
       List.map
         [ Addr.start, start
@@ -196,6 +225,10 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
         ; Addr.sideset, sideset
         ; Addr.clkdiv, clkdiv
         ; Addr.shift, shift
+        ; Addr.crc_poly_lo, crc_poly_lo
+        ; Addr.crc_poly_hi, crc_poly_hi
+        ; Addr.crc_init_lo, crc_init_lo
+        ; Addr.crc_init_hi, crc_init_hi
         ]
         ~f:(fun (offset, (r : Variable.t)) ->
           let addr = a offset in
@@ -218,6 +251,12 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
       ; clkdiv = clkdiv.value
       ; out_msb_first = bit shift.value 0
       ; in_msb_first = bit shift.value 1
+      ; autopull = bit shift.value 2
+      ; autopush = bit shift.value 3
+      ; crc_invert = bit shift.value 4
+      ; crc_in = bit shift.value 5
+      ; crc_poly = crc_poly_hi.value @: crc_poly_lo.value
+      ; crc_init = crc_init_hi.value @: crc_init_lo.value
       ; tx_push = write_to (a Addr.tx_fifo)
       ; tx_data = data_now
       ; rx_pop
@@ -230,6 +269,7 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
     let _, _, core_in = List.nth_exn banks n in
     core_in
   in
+  let buf_read = wire 1 in
   let core =
     Pe_core.create
       ?memory
@@ -244,6 +284,14 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
       ; pins_in = i.uio_in
       ; sync_bypass = sync_bypass.value
       ; chain = bit ctrl.value 2
+      ; buf_mode = select buf_ctrl.value 1 0
+      ; buf_thread = bit buf_ctrl.value 2
+      ; buf_end = buf_end.value
+      ; buf_set_ptr = write_to Addr.buf_ptr
+      ; buf_ptr_in = select data_now (Pe_core.buffer_bits - 1) 0
+      ; buf_write = write_to Addr.buf_data
+      ; buf_data = data_now
+      ; buf_read
       ; t0 = bank_in 0
       ; t1 = bank_in 1
       }
@@ -257,6 +305,10 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
   table.(Addr.pin_modes) <- pin_modes.value;
   table.(Addr.sync_bypass) <- uresize sync_bypass.value 16;
   table.(Addr.load) <- uresize load.value 16;
+  table.(Addr.buf_ctrl) <- uresize buf_ctrl.value 16;
+  table.(Addr.buf_ptr) <- uresize core.buf_ptr 16;
+  table.(Addr.buf_end) <- uresize buf_end.value 16;
+  table.(Addr.buf_data) <- core.buf_word;
   List.iteri banks ~f:(fun n (writes, _, _) ->
     let a = Addr.for_thread n in
     let t = Pe_core.O.thread core n in
@@ -266,6 +318,7 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
     <- concat_msb [ t.pc; bit ctrl.value n; t.rx_level; gnd; t.tx_level ]);
   (* The last entry is zero, and mux repeats it for higher addresses. *)
   let read_value = mux read_addr (Array.to_list table) in
+  buf_read <== (cmd_done &: ~:(bit cmd_now 7) &: (read_addr ==:. Addr.buf_data));
   List.iteri banks ~f:(fun n (_, rx_pop, _) ->
     rx_pop
     <== (cmd_done
@@ -292,6 +345,10 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
      ; when_ (write_to Addr.pin_modes) [ pin_modes <-- data_now ]
      ; when_ (write_to Addr.sync_bypass) [ sync_bypass <-- select data_now 7 0 ]
      ; when_ (write_to Addr.load) [ load <-- select data_now 5 0 ]
+     ; when_ (write_to Addr.buf_ctrl) [ buf_ctrl <-- select data_now 2 0 ]
+     ; when_
+         (write_to Addr.buf_end)
+         [ buf_end <-- select data_now (Pe_core.buffer_bits - 1) 0 ]
      ]
      @ List.concat_map banks ~f:(fun (writes, _, _) ->
        List.map writes ~f:(fun (_, _, w) -> w)));

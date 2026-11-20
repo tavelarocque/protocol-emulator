@@ -87,6 +87,7 @@ let parse_mov_loc ~line = function
   | "isr" -> Isr
   | "osr" -> Osr
   | "null" -> Null
+  | "crc" -> Crc
   | s -> error ~line (sprintf "bad MOV operand %S" s)
 ;;
 

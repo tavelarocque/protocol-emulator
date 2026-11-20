@@ -27,6 +27,12 @@ let page_size = 64
 let page_bits = pc_bits - Int.ceil_log2 page_size
 let num_pins = 8
 let num_threads = 2
+let crc_bits = 32
+
+(* The packet buffer: [buffer_size] words that play into one thread's TX
+   FIFO or record from its RX FIFO. *)
+let buffer_size = 1024
+let buffer_bits = Int.ceil_log2 buffer_size
 
 (* Per-thread inputs: configuration, enable, and the host side of the
    thread's FIFOs. *)
@@ -47,6 +53,12 @@ module Thread_in = struct
     ; clkdiv : 'a [@bits 16] (* one tick every [clkdiv] cycles; 0 and 1: every cycle *)
     ; out_msb_first : 'a (* OUT takes bits from the top of the OSR *)
     ; in_msb_first : 'a (* IN shifts the ISR left *)
+    ; autopull : 'a (* an OUT that empties the OSR refills it from the TX FIFO *)
+    ; autopush : 'a (* an IN that fills the ISR pushes it *)
+    ; crc_poly : 'a [@bits crc_bits] (* low power first: the register shifts right *)
+    ; crc_init : 'a [@bits crc_bits]
+    ; crc_invert : 'a (* [mov ..., crc] reads the register inverted *)
+    ; crc_in : 'a (* the register follows IN's bits, not OUT's *)
     ; tx_push : 'a
     ; tx_data : 'a [@bits 16]
     ; rx_pop : 'a
@@ -73,6 +85,8 @@ module Thread_out = struct
     ; waiting : 'a
     ; wait_count : 'a [@bits 16]
     ; div_count : 'a [@bits 16]
+    ; crc : 'a [@bits crc_bits]
+    ; crc_run : 'a
     }
   [@@deriving hardcaml]
 end
@@ -91,6 +105,18 @@ module I = struct
     ; pins_in : 'a [@bits 8] (* straight from the pads, asynchronous *)
     ; sync_bypass : 'a [@bits 8] (* pins read without the 2-flop synchroniser *)
     ; chain : 'a (* thread 0's RX FIFO feeds thread 1's TX FIFO *)
+    ; buf_mode : 'a [@bits 2]
+      (* the packet buffer: 1 plays into [buf_thread]'s TX FIFO, 2 records
+         from its RX FIFO, 0 and 3 leave it to the host *)
+    ; buf_thread : 'a
+    ; buf_end : 'a [@bits buffer_bits] (* playing and recording stop here *)
+    ; buf_set_ptr : 'a (* the host sets the pointer to [buf_ptr_in] *)
+    ; buf_ptr_in : 'a [@bits buffer_bits]
+    ; buf_write : 'a
+      (* the host stores [buf_data] at the pointer, which moves on. Only
+         while the buffer is left to the host, like [buf_read]. *)
+    ; buf_data : 'a [@bits 16]
+    ; buf_read : 'a (* the host has taken the word at the pointer, which moves on *)
     ; t0 : 'a Thread_in.t [@rtlprefix "t0_"]
     ; t1 : 'a Thread_in.t [@rtlprefix "t1_"]
     }
@@ -104,6 +130,8 @@ module O = struct
     { pin_out : 'a [@bits 8] (* the output register *)
     ; pads_out : 'a [@bits 8] (* to the bidirectional pads *)
     ; pads_oe : 'a [@bits 8]
+    ; buf_ptr : 'a [@bits buffer_bits]
+    ; buf_word : 'a [@bits 16] (* the word at the pointer *)
     ; t0 : 'a Thread_out.t [@rtlprefix "t0_"]
     ; t1 : 'a Thread_out.t [@rtlprefix "t1_"]
     }
@@ -139,6 +167,14 @@ module Mutation = struct
     | No_hold_after_write
       (* a thread enabled in the cycle after a write to its memory runs at
          once, on whatever the memory last read *)
+    | Autopull_ignores_empty (* autopull loads the OSR from an empty TX FIFO *)
+    | Autopush_ignores_full (* an autopushing IN goes ahead with the RX FIFO full *)
+    | Crc_ignores_direction (* the CRC takes its bits LSB first whatever the shift direction *)
+    | Crc_read_keeps_running (* reading the CRC register does not stop it *)
+    | Play_ignores_full (* the buffer plays a word into a full TX FIFO, losing it *)
+    | Play_past_end (* the buffer plays on when the pointer has reached the end *)
+    | Record_keeps_host_pop (* the host can still pop the FIFO the buffer records from *)
+    | Play_after_write (* a word is played in the cycle after a write, before the memory has read it *)
   [@@deriving sexp_of, enumerate, equal]
 end
 
@@ -205,6 +241,8 @@ module Thread_state = struct
     ; delay_left : 'a [@bits 4]
     ; waiting : 'a
     ; wait_count : 'a [@bits 16]
+    ; crc : 'a [@bits crc_bits]
+    ; crc_run : 'a (* the CRC register is following the data *)
     ; pin_out : 'a [@bits 8]
     }
   [@@deriving hardcaml]
@@ -232,6 +270,12 @@ module Step_in = struct
     ; sideset_count : 'a [@bits 2]
     ; out_msb_first : 'a
     ; in_msb_first : 'a
+    ; autopull : 'a
+    ; autopush : 'a
+    ; crc_poly : 'a [@bits crc_bits]
+    ; crc_init : 'a [@bits crc_bits]
+    ; crc_invert : 'a
+    ; crc_in : 'a
     }
   [@@deriving hardcaml]
 end
@@ -267,6 +311,8 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
   let delay_left = w s.delay_left in
   let waiting = w s.waiting in
   let wait_count = w s.wait_count in
+  let crc = w s.crc in
+  let crc_run = w s.crc_run in
   let pin_out = w s.pin_out in
   let instr = i.instr in
   (* --- Decode. --- *)
@@ -312,17 +358,28 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
   in
   (* PUSH / PULL *)
   let is_pull = bit instr 8 in
-  (* MOV: source/destination 6 and 7 are reserved, making the whole
-     instruction a NOP. *)
+  (* MOV: source/destination 7 is reserved, making the whole instruction
+     a NOP. 6 is the CRC register. *)
   let mov_dst = select instr 8 6 in
   let mov_src = select instr 5 3 in
-  let mov_valid = (mov_dst <:. 6) &: (mov_src <:. 6) in
+  let mov_valid = (mov_dst <:. 7) &: (mov_src <:. 7) in
   let set_dst = select instr 8 7 in
+  (* Autopull: an OUT that finds the OSR empty spends this tick fetching.
+     Autopush: an IN that would fill the ISR waits while the RX FIFO is
+     full. *)
+  let tx_has = if is Autopull_ignores_empty then vdd else ~:(i.tx_empty) in
+  let out_fetches = is_op 3 &: i.autopull &: (s.osr_count >=: i.threshold) in
+  let in_fills =
+    is_op 2 &: i.autopush &: (uresize s.isr_count 6 +: uresize count 6 >=: uresize i.threshold 6)
+  in
+  let in_waits = if is Autopush_ignores_full then gnd else in_fills &: i.rx_full in
   (* --- Control: stall, or move to the next/target instruction. --- *)
   let stall =
     (is_op 1 &: ~:wait_ok &: ~:wait_expired)
     |: (is_op 4 &: is_pull &: i.tx_empty)
     |: (is_op 4 &: ~:is_pull &: i.rx_full)
+    |: out_fetches
+    |: in_waits
   in
   let goto_ = (is_op 0 &: cond_true) |: (is_op 1 &: ~:wait_ok &: wait_expired) in
   let jump_page =
@@ -331,18 +388,6 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
   let target = mux2 (is_op 0) (jump_page @: select instr 5 0) i.timeout_vector in
   let next_pc = mux2 goto_ target (s.pc +:. 1) in
   let advance = executing &: ~:stall in
-  let pull = executing &: is_op 4 &: is_pull &: ~:(i.tx_empty) in
-  let push = executing &: is_op 4 &: ~:is_pull &: ~:(i.rx_full) in
-  let push_value =
-    let lsb_first = shift_right ~hi:(zero 16) s.isr ~by:(of_int ~width:5 16 -: s.isr_count) in
-    (* MSB first: the bits shifted in sit at the bottom of the ISR. *)
-    let msb_first = s.isr &: ~:(uresize (log_shift sll (ones 32) s.isr_count) 16) in
-    if is Push_not_right_justified
-    then s.isr
-    else if is Push_ignores_in_direction
-    then lsb_first
-    else mux2 i.in_msb_first msb_first lsb_first
-  in
   (* --- Datapath values. --- *)
   let in_value =
     mux
@@ -350,6 +395,33 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
       [ read_pins ~lines:i.lines ~base:i.in_base ~count; s.x; s.y; zero 16 ]
   in
   let out_mask = ~:(uresize (log_shift sll (ones 32) count) 16) in
+  (* The ISR and the OSR's count as an IN or an OUT leaves them. *)
+  let isr_in =
+    mux2
+      i.in_msb_first
+      (shift_left s.isr ~by:count |: (in_value &: out_mask))
+      (shift_right ~hi:in_value s.isr ~by:count)
+  in
+  let isr_count_in = saturating_add s.isr_count count in
+  let osr_count_out = saturating_add s.osr_count count in
+  (* What a push sends: the bits shifted in, right-justified. *)
+  let justified isr isr_count =
+    let lsb_first = shift_right ~hi:(zero 16) isr ~by:(of_int ~width:5 16 -: isr_count) in
+    (* MSB first: the bits shifted in sit at the bottom of the ISR. *)
+    let msb_first = isr &: ~:(uresize (log_shift sll (ones 32) isr_count) 16) in
+    if is Push_not_right_justified
+    then isr
+    else if is Push_ignores_in_direction
+    then lsb_first
+    else mux2 i.in_msb_first msb_first lsb_first
+  in
+  let autopush = advance &: in_fills in
+  (* An OUT that empties the OSR takes the next word in the same tick. *)
+  let refill = advance &: is_op 3 &: i.autopull &: (osr_count_out >=: i.threshold) &: tx_has in
+  let fetch = executing &: out_fetches &: tx_has in
+  let pull = (executing &: is_op 4 &: is_pull &: ~:(i.tx_empty)) |: refill |: fetch in
+  let push = (executing &: is_op 4 &: ~:is_pull &: ~:(i.rx_full)) |: autopush in
+  let push_value = mux2 (is_op 2) (justified isr_in isr_count_in) (justified s.isr s.isr_count) in
   (* LSB first: the low [count] bits. MSB first: the top [count] bits,
      brought down to the bottom. *)
   let out_data =
@@ -358,9 +430,21 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
       (shift_right ~hi:(zero 16) s.osr ~by:(of_int ~width:5 16 -: count))
       (s.osr &: out_mask)
   in
+  let crc_read = select (s.crc ^: repeat i.crc_invert crc_bits) 15 0 in
   let mov_value =
-    mux mov_src [ s.x; s.y; uresize i.lines 16; s.isr; s.osr; zero 16 ]
+    mux mov_src [ s.x; s.y; uresize i.lines 16; s.isr; s.osr; zero 16; crc_read ]
   in
+  (* The CRC register after it has taken this instruction's first bit:
+     the lowest of the bits shifted, or the highest when shifting MSB
+     first. *)
+  let crc_taken =
+    let data = mux2 i.crc_in (in_value &: out_mask) out_data in
+    let msb_first = mux2 i.crc_in i.in_msb_first i.out_msb_first in
+    let msb_first = if is Crc_ignores_direction then gnd else msb_first in
+    let first = mux2 msb_first (mux (select (count -:. 1) 3 0) (bits_lsb data)) (bit data 0) in
+    srl s.crc 1 ^: (i.crc_poly &: repeat (bit s.crc 0 ^: first) crc_bits)
+  in
+  let crc_takes = advance &: s.crc_run &: mux2 i.crc_in (is_op 2) (is_op 3) in
   let set_value = uresize (select instr 4 0) 16 in
   let set_count = if is Set_pins_count_off_by_one then i.set_count +:. 1 else i.set_count in
   (* What the instruction itself writes to the pins this cycle (if it
@@ -394,6 +478,8 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
         ; delay_left <--. 0
         ; waiting <--. 0
         ; wait_count <--. 0
+        ; crc <-- i.crc_init
+        ; crc_run <--. 1
         ]
       @@ elif
            ~:(i.tick)
@@ -414,6 +500,8 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
                    ~base:i.sideset_base
                    ~count:i.sideset_count
                    ~value:(uresize side_bits 8)
+           ; when_ fetch [ osr <-- i.tx_head; osr_count <--. 0 ]
+           ; when_ crc_takes [ crc <-- crc_taken ]
            ; when_
                advance
                [ pc <-- next_pc
@@ -428,12 +516,9 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
                        ; when_ (cond ==:. 4) [ y <-- s.y -:. 1 ]
                        ] )
                    ; ( of_int ~width:3 2
-                     , [ isr
-                         <-- mux2
-                               i.in_msb_first
-                               (shift_left s.isr ~by:count |: (in_value &: out_mask))
-                               (shift_right ~hi:in_value s.isr ~by:count)
-                       ; isr_count <-- saturating_add s.isr_count count
+                     , [ isr <-- isr_in
+                       ; isr_count <-- isr_count_in
+                       ; when_ in_fills [ isr <--. 0; isr_count <--. 0 ]
                        ] )
                    ; ( of_int ~width:3 3
                      , [ osr
@@ -441,7 +526,8 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
                                i.out_msb_first
                                (shift_left s.osr ~by:count)
                                (shift_right ~hi:(zero 16) s.osr ~by:count)
-                       ; osr_count <-- saturating_add s.osr_count count
+                       ; osr_count <-- osr_count_out
+                       ; when_ refill [ osr <-- i.tx_head; osr_count <--. 0 ]
                        ; switch
                            (select instr 8 7)
                            [ of_int ~width:2 1, [ x <-- out_data ]
@@ -464,6 +550,15 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
                                ; of_int ~width:3 3, [ isr <-- mov_value; isr_count <--. 0 ]
                                ; of_int ~width:3 4, [ osr <-- mov_value; osr_count <--. 0 ]
                                ]
+                           ; (* Reading the CRC register leaves its high half in
+                                its low half and stops it; writing it starts it
+                                again, and comes second. *)
+                             when_
+                               (mov_src ==:. 6)
+                               [ crc <-- srl s.crc 16
+                               ; (crc_run <-- if is Crc_read_keeps_running then s.crc_run else gnd)
+                               ]
+                           ; when_ (mov_dst ==:. 6) [ crc <-- i.crc_init; crc_run <--. 1 ]
                            ]
                        ] )
                    ; ( of_int ~width:3 6
@@ -490,6 +585,8 @@ let rtl_step ?mutation (s : Signal.t Thread_state.t) (i : Signal.t Step_in.t)
       ; delay_left = delay_left.value
       ; waiting = waiting.value
       ; wait_count = wait_count.value
+      ; crc = crc.value
+      ; crc_run = crc_run.value
       ; pin_out = pin_out.value
       }
   ; pull
@@ -512,27 +609,38 @@ module Memory = struct
   type t =
     | Macro
     | Model
+    | Proof
+      (* for the equivalence proofs: the program memories as [Model], the
+         packet buffer as [Macro]. The checker pairs the buffer on the two
+         sides by its instance name, gives both the same arbitrary word
+         out of it each cycle, and requires everything driven into it to
+         be equal: sixteen thousand flip-flops and a 1024-way multiplexer
+         on each side were more than it could finish. *)
   [@@deriving sexp_of, equal]
 end
 
-let program_memory (memory : Memory.t) ~clock ~n ~we ~addr ~data =
+(* One memory of [words] words of 16 bits, either way. [prefix] names the
+   model's registers and [instance] the macro. *)
+let memory_block (memory : Memory.t) ~clock ~words ~prefix ~instance ~we ~addr ~data =
   match memory with
+  | Proof -> raise_s [%message "memory_block: the caller picks Model or Macro"]
   | Model ->
     let spec = Reg_spec.create ~clock () in
-    let words =
-      List.init program_size ~f:(fun a ->
-        reg spec ~enable:(we &: (addr ==:. a)) data -- sprintf "t%d_prog_%d" n a)
+    let cells =
+      List.init words ~f:(fun a ->
+        reg spec ~enable:(we &: (addr ==:. a)) data -- sprintf "%s_%d" prefix a)
     in
     let next = wire 16 in
-    let dout = reg spec next -- sprintf "t%d_prog_dout" n in
-    next <== mux2 we dout (mux addr words);
+    let dout = reg spec next -- sprintf "%s_dout" prefix in
+    next <== mux2 we dout (mux addr cells);
     dout
   | Macro ->
+    let bits = Int.ceil_log2 words in
     let inst =
       Instantiation.create
         ()
-        ~instance:(sprintf "sram%d" n)
-        ~name:"RM_IHPSG13_1P_256x16_c2_bm_bist"
+        ~instance
+        ~name:(sprintf "RM_IHPSG13_1P_%dx16_c2_bm_bist" words)
         ~inputs:
           [ "A_CLK", clock
           ; "A_MEN", vdd
@@ -547,13 +655,27 @@ let program_memory (memory : Memory.t) ~clock ~n ~we ~addr ~data =
           ; "A_BIST_MEN", gnd
           ; "A_BIST_WEN", gnd
           ; "A_BIST_REN", gnd
-          ; "A_BIST_ADDR", zero pc_bits
+          ; "A_BIST_ADDR", zero bits
           ; "A_BIST_DIN", zero 16
           ; "A_BIST_BM", zero 16
           ]
         ~outputs:[ "A_DOUT", 16 ]
     in
     Map.find_exn inst "A_DOUT"
+;;
+
+let program_memory (memory : Memory.t) ~clock ~n ~we ~addr ~data =
+  memory_block
+    (match memory with
+     | Proof -> Model
+     | m -> m)
+    ~clock
+    ~words:program_size
+    ~prefix:(sprintf "t%d_prog" n)
+    ~instance:(sprintf "sram%d" n)
+    ~we
+    ~addr
+    ~data
 ;;
 
 let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
@@ -654,18 +776,34 @@ let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
      loses access to those two ends. --- *)
   let move = wire 1 in
   let move_data = wire 16 in
+  (* The packet buffer's moves, assigned below: a word played into
+     [buf_thread]'s TX FIFO, or recorded from its RX FIFO. While it plays or
+     records, that end of that FIFO is not the host's. *)
+  let play = wire 1 in
+  let record = wire 1 in
+  let buf_word = wire 16 in
+  let buffers n mode = (i.buf_mode ==:. mode) &: (i.buf_thread ==:. n) in
   let fifos =
     List.map threads ~f:(fun (n, _) ->
       let ti = I.thread i n in
       let pull = wire 1 in
       let push = wire 1 in
       let push_value = wire 16 in
+      let played = play &: (i.buf_thread ==:. n) in
+      let recorded = record &: (i.buf_thread ==:. n) in
+      let tx_push = ti.tx_push &: ~:(buffers n 1) in
+      let rx_pop =
+        if is Record_keeps_host_pop then ti.rx_pop else ti.rx_pop &: ~:(buffers n 2)
+      in
+      let from_host = mux2 played buf_word ti.tx_data in
       let host_push, host_data =
         if n = 1
-        then move |: (ti.tx_push &: ~:(i.chain)), mux2 move move_data ti.tx_data
-        else ti.tx_push, ti.tx_data
+        then move |: played |: (tx_push &: ~:(i.chain)), mux2 move move_data from_host
+        else played |: tx_push, from_host
       in
-      let host_pop = if n = 0 then move |: (ti.rx_pop &: ~:(i.chain)) else ti.rx_pop in
+      let host_pop =
+        (if n = 0 then move |: (rx_pop &: ~:(i.chain)) else rx_pop) |: recorded
+      in
       let tx =
         Tiny_fifo.create
           ~name:(sprintf "t%d_tx" n)
@@ -689,6 +827,53 @@ let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
    let room = if is Chain_ignores_full then vdd else ~:(tx1.full) in
    move <== (i.chain &: ~:(rx0.empty) &: room);
    move_data <== rx0.head);
+  (* --- The packet buffer. One word a cycle moves between it and the
+     FIFO it stands at, judged at the start of the cycle like the chain; an
+     end the chain owns is not the buffer's. Like a program memory it
+     answers a cycle after it is asked, so it is asked for the word the
+     pointer will be at next cycle, and in a cycle with a write it is not
+     asked at all: nothing is played in the cycle after one. --- *)
+  let buf_ptr =
+    let _, _, _, (tx0 : Tiny_fifo.t), (rx0 : Tiny_fifo.t) = List.nth_exn fifos 0 in
+    let _, _, _, (tx1 : Tiny_fifo.t), (rx1 : Tiny_fifo.t) = List.nth_exn fifos 1 in
+    let ptr_next = wire buffer_bits in
+    let ptr = reg spec ptr_next -- "buf_ptr" in
+    let we = wire 1 in
+    let wrote = reg spec we -- "buf_wrote" in
+    let left_to_host = (i.buf_mode ==:. 0) |: (i.buf_mode ==:. 3) in
+    let more = if is Play_past_end then vdd else ptr <>: i.buf_end in
+    (* The planted bug keeps the register in the circuit, so that the
+       equivalence checker can still pair it with the spec's. *)
+    let settled = if is Play_after_write then ~:wrote |: wrote else ~:wrote in
+    let room = if is Play_ignores_full then vdd else ~:(mux2 i.buf_thread tx1.full tx0.full) in
+    play <== ((i.buf_mode ==:. 1) &: more &: settled &: ~:(i.chain &: i.buf_thread) &: room);
+    record
+    <== ((i.buf_mode ==:. 2)
+         &: (ptr <>: i.buf_end)
+         &: ~:(i.chain &: ~:(i.buf_thread))
+         &: ~:(mux2 i.buf_thread rx1.empty rx0.empty));
+    let host_write = i.buf_write &: left_to_host in
+    let host_read = i.buf_read &: left_to_host in
+    we <== (record |: host_write);
+    ptr_next
+    <== mux2
+          i.buf_set_ptr
+          i.buf_ptr_in
+          (mux2 (play |: record |: host_write |: host_read) (ptr +:. 1) ptr);
+    buf_word
+    <== memory_block
+          (match memory with
+           | Proof -> Macro
+           | m -> m)
+          ~clock:i.clock
+          ~words:buffer_size
+          ~prefix:"buf"
+          ~instance:"sram_buf"
+          ~we
+          ~addr:(mux2 we ptr ptr_next)
+          ~data:(mux2 record (mux2 i.buf_thread rx1.head rx0.head) i.buf_data);
+    ptr
+  in
   (* --- Step the threads in priority order, threading the pin value
      through: the later thread's writes land on top. --- *)
   let order = if is Pin_priority_inverted then [ 1; 0 ] else [ 0; 1 ] in
@@ -730,6 +915,12 @@ let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
           ; sideset_count = ti.sideset_count
           ; out_msb_first = ti.out_msb_first
           ; in_msb_first = ti.in_msb_first
+          ; autopull = ti.autopull
+          ; autopush = ti.autopush
+          ; crc_poly = ti.crc_poly
+          ; crc_init = ti.crc_init
+          ; crc_invert = ti.crc_invert
+          ; crc_in = ti.crc_in
           }
       in
       pull <== out.pull;
@@ -767,7 +958,9 @@ let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
     ; waiting = q.waiting
     ; wait_count = q.wait_count
     ; div_count = fst (List.nth_exn dividers n)
+    ; crc = q.crc
+    ; crc_run = q.crc_run
     }
   in
-  { O.pin_out; pads_out; pads_oe; t0 = thread_out 0; t1 = thread_out 1 }
+  { O.pin_out; pads_out; pads_oe; buf_ptr; buf_word; t0 = thread_out 0; t1 = thread_out 1 }
 ;;

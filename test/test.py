@@ -9,6 +9,8 @@
 # receiver written here in Python.
 
 import os
+import random
+import zlib
 
 import cocotb
 from cocotb.clock import Clock
@@ -1041,14 +1043,31 @@ except ImportError:  # cocotb 2.0 exposes them only inside a running simulation
 
 
 def sim_port(dut):
+    # Whether the transaction under way is a write: its first bit, taken
+    # here as the host sends it.
+    state = {"bits": 0, "write": False}
+
     @resume
     async def set_pins(sck, cs_n, mosi):
+        if cs_n:
+            state["bits"] = 0
+        elif sck:
+            if state["bits"] == 0:
+                state["write"] = bool(mosi)
+            state["bits"] += 1
         drive(dut, sck, cs_n, mosi)
         await ClockCycles(dut.clk, HALF)
 
     @resume
     async def read_miso():
-        return int(dut.uo_out.value) & 1
+        miso = dut.uo_out.value[0]
+        # During a write, MISO carries whatever the address would read, and
+        # nobody uses it. For the packet buffer's data register that is a
+        # word of memory never written, which a simulator shows as unknown.
+        # A read must resolve.
+        if state["write"] and not miso.is_resolvable:
+            return 0
+        return int(miso)
 
     return pe.BitBangPort(set_pins, read_miso)
 
@@ -3137,3 +3156,88 @@ async def test_pwm(dut):
         found = texts(trace.decode("pwm"))
         assert found[:2] == ["30.000000%", "1000.0 μs"], found[:4]
         assert found[-2:] == ["7.500000%", "20.0 ms"], found[-4:]
+
+
+# --- v2.1: Ethernet ----------------------------------------------------------------
+
+def ethernet_receive(levels):
+    """One 10BASE-T frame from the pair, a sample every 25 ns, written from
+    IEEE 802.3's description of the wire and not from the firmware. Each
+    sample is (TD+, TD-): the two at the same level is idle, no voltage
+    across the pair. A bit is four samples: low then high is a 1, high then
+    low a 0. The frame
+    ends where the pair stays high, for 250 to 450 ns, and must then be
+    idle. Returns the frame without preamble, delimiter and frame check
+    sequence; the sequence is checked with zlib's CRC-32."""
+    high, low = (1, 0), (0, 1)
+    start = next(t for t, v in enumerate(levels) if v[0] != v[1])
+    bits, t = [], start
+    while True:
+        cell = levels[t:t + 4]
+        if cell == [low, low, high, high]:
+            bits.append(1)
+        elif cell == [high, high, low, low]:
+            bits.append(0)
+        else:
+            break
+        t += 4
+    held = 0
+    while levels[t + held] == high:
+        held += 1
+    idle_ns = 25 * (held + (2 if bits and bits[-1] else 0))
+    assert held > 0, f"the pair broke the code at sample {t}: {levels[t:t + 4]}"
+    assert 250 <= idle_ns <= 450, f"start of idle lasted {idle_ns} ns, after {len(bits)} bits"
+    assert all(v[0] == v[1] for v in levels[t + held:]), "the pair is not idle after the frame"
+    assert len(bits) % 8 == 0, f"{len(bits)} bits is not a whole number of bytes"
+    data = bytes(sum(b << k for k, b in enumerate(bits[n:n + 8])) for n in range(0, len(bits), 8))
+    assert data[:8] == bytes([0x55] * 7 + [0xD5]), "bad preamble or start-of-frame delimiter"
+    frame, fcs = data[8:-4], data[-4:]
+    assert len(frame) + 4 >= 64, f"a frame of {len(frame) + 4} bytes is shorter than 64"
+    assert int.from_bytes(fcs, "little") == zlib.crc32(frame), "frame check sequence is wrong"
+    return frame
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_ethernet(dut):
+    """10BASE-T Ethernet transmit at a 40 MHz clock: whole frames from the
+    packet buffer, with the preamble, the Manchester code, the CRC-32 and
+    the idle signal made on the chip. An ARP request, the same with one
+    more byte (an odd length), and a frame of the largest size."""
+    await reset(dut, period_ps=25_000)
+    chip = pe.Chip(sim_port(dut))
+    arp = bytes.fromhex(
+        "ffffffffffff" "02004e455431" "0806"  # to everyone, from a local address, ARP
+        "0001" "0800" "06" "04" "0001"        # Ethernet, IPv4, request
+        "02004e455431" "c0a80102" "000000000000" "c0a80101")
+    rng = random.Random(8023)
+    frames = [arp, arp + bytes(18) + b"\x5a", bytes(rng.randrange(256) for _ in range(1514))]
+    levels = []
+
+    async def watch():
+        while True:
+            await RisingEdge(dut.clk)
+            out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+            levels.append(((out & oe) & 1, ((out & oe) >> 1) & 1))
+
+    eth = None
+    for frame in frames:
+        @bridge
+        def send():
+            nonlocal eth
+            eth = eth or more.EthernetTx(chip, firmware("eth_tx"))
+            eth.send(frame)
+
+        @bridge
+        def sent():
+            return eth.sent()
+
+        watcher = cocotb.start_soon(watch())
+        await send()
+        # 8 bytes of preamble, the frame padded to 60, 4 of FCS; 32 clocks a byte.
+        await ClockCycles(dut.clk, 32 * (max(len(frame), 60) + 12) + 64)
+        assert await sent(), "the thread is not where a finished frame leaves it"
+        watcher.kill()
+        got = ethernet_receive(levels)
+        want = frame + bytes(max(0, 60 - len(frame)))
+        assert got == want, f"{len(frame)} bytes sent, {len(got)} received"
+        levels.clear()

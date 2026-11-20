@@ -36,6 +36,7 @@ let make
   ?(enables = Scenario.Script [])
   ?(writes = [])
   ?(rates = [ 0, 0; 0, 0 ])
+  ?(buffer = Scenario.no_buffer)
   ?(pins = Scenario.Random_pins)
   ?(cycles = 400)
   ~name
@@ -62,6 +63,7 @@ let make
       ; enables
       ; writes
       ; rates
+      ; buffer
       ; pins
       ; cycles
       }
@@ -399,6 +401,141 @@ lp:     set pins, 0
     ]
 ;;
 
+(* Thread 1 has no pull or push anywhere: autopull and autopush move the
+   words. The host is slow at both ends, so the OUT finds the TX FIFO empty
+   and the IN finds the RX FIFO full, again and again. *)
+let autos =
+  make
+    ~name:"thread 1: autopull and autopush with a slow host at both ends"
+    ~target:[ "Autopull_ignores_empty"; "Autopush_ignores_full" ]
+    ~modes:all_input
+    ~rates:[ 0, 0; 20, 20 ]
+    [ 0, {|
+lp:     nop
+        jmp lp
+|}, cfg
+    ; ( 2
+      , {|
+lp:     out x, 4
+        in x, 4
+        jmp lp
+|}
+      , { cfg with threshold = 8; autopull = true; autopush = true } )
+    ]
+;;
+
+(* Thread 1's CRC register follows OUT, MSB first and several bits at a
+   time, so the first bit shifted is not the lowest. It is read, which must
+   stop it, shifted past, and started again. *)
+let crc =
+  make
+    ~name:"thread 1: the CRC register followed, read, stopped and restarted"
+    ~target:[ "Crc_ignores_direction"; "Crc_read_keeps_running" ]
+    ~modes:all_input
+    ~rates:[ 0, 0; 40, 0 ]
+    [ 0, {|
+lp:     nop
+        jmp lp
+|}, cfg
+    ; ( 2
+      , {|
+top:    pull
+        out x, 3
+        out y, 5
+        mov x, crc
+        out y, 4
+        mov crc, null
+        out x, 2
+        jmp top
+|}
+      , { cfg with
+          threshold = 16
+        ; out_msb_first = true
+        ; crc_poly = 0xEDB88320
+        ; crc_init = 0x1234_5678
+        ; crc_invert = true
+        } )
+    ]
+;;
+
+(* The buffer plays twelve words into a thread that takes one every
+   eighteen cycles, so the FIFO is full most of the time, and the words
+   run off the end of the memory and round to its start. Then it must
+   stop. *)
+let buffer_plays =
+  make
+    ~name:"buffer: plays into a slow thread, across the end of the memory, and stops"
+    ~target:[ "Play_ignores_full"; "Play_past_end" ]
+    ~buffer:
+      { Scenario.no_buffer with
+        mode = Play
+      ; thread = 0
+      ; first = Isa.buffer_size - 4
+      ; loaded = List.init 12 ~f:(fun k -> 0x1100 + k)
+      ; length = 12
+      }
+    [ 0, {|
+lp:     pull [7]
+        mov x, osr [7]
+        jmp lp
+|}, { cfg with threshold = 16 }
+    ; 3, {|
+lp:     nop
+        jmp lp
+|}, cfg
+    ]
+;;
+
+(* Thread 1 pushes a count and the buffer records it, while the host keeps
+   trying to pop the same FIFO, which is no longer its to pop. *)
+let buffer_records =
+  make
+    ~name:"buffer: records from thread 1 while the host tries to pop it"
+    ~target:[ "Record_keeps_host_pop" ]
+    ~rates:[ 0, 0; 0, 50 ]
+    ~buffer:{ Scenario.no_buffer with mode = Record; thread = 1; first = 100; length = 20 }
+    [ 0, {|
+lp:     nop
+        jmp lp
+|}, cfg
+    ; ( 2
+      , {|
+        set x, 31
+lp:     in x, 16
+        push
+        jmp x-- lp
+end:    jmp end
+|}
+      , { cfg with threshold = 16 } )
+    ]
+;;
+
+(* The host stores a word and sets the buffer playing in the very next
+   cycle. The memory was not asked for a word in the cycle of the write, so
+   that cycle has nothing to play. *)
+let buffer_write_then_play =
+  make
+    ~name:"buffer: set playing in the cycle after a write"
+    ~target:[ "Play_after_write" ]
+    ~buffer:
+      { Scenario.no_buffer with
+        first = 10
+      ; loaded = [ 0x2201; 0x2202; 0x2203 ]
+      ; length = 8
+      ; script = [ 20, Write 0x22AA; 21, Mode (Play, 0) ]
+      }
+    [ 0, {|
+lp:     pull
+        mov x, osr
+        jmp lp
+|}, { cfg with threshold = 16 }
+    ; 3, {|
+lp:     nop
+        jmp lp
+|}, cfg
+    ]
+;;
+
 let all =
   [ pin_fight
   ; chain_backpressure
@@ -412,6 +549,11 @@ let all =
   ; msb_first
   ; pages
   ; program_writes
+  ; autos
+  ; crc
+  ; buffer_plays
+  ; buffer_records
+  ; buffer_write_then_play
   ]
 ;;
 

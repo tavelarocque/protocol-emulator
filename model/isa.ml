@@ -20,6 +20,12 @@ let num_pins = 8
 let fifo_depth = 4
 let word_bits = 16
 let word_mask = (1 lsl word_bits) - 1
+
+(* The packet buffer: one memory of [buffer_size] words that can stand in
+   for the host at one end of one thread's FIFOs; see [Buffer_mode]. *)
+let buffer_size = 1024
+let crc_bits = 32
+let crc_mask = (1 lsl crc_bits) - 1
 let mask n = (1 lsl n) - 1
 
 (* Small enums are encoded by their position in [all]. *)
@@ -114,7 +120,7 @@ module Set_dst = struct
 end
 
 module Mov_loc = struct
-  (* Encodings 6 and 7 are reserved and decode the whole instruction as NOP. *)
+  (* Encoding 7 is reserved and decodes the whole instruction as NOP. *)
   type t =
     | X
     | Y
@@ -122,6 +128,11 @@ module Mov_loc = struct
     | Isr
     | Osr
     | Null
+    | Crc
+      (* the thread's CRC register. As a source: its low 16 bits, after
+         which it holds its high 16 and stops following the data. As a
+         destination: it starts again from its initial value, whatever the
+         source. *)
   [@@deriving sexp_of, compare, equal, enumerate]
 
   let to_int = index_of ~all ~equal
@@ -134,6 +145,7 @@ module Mov_loc = struct
     | Isr -> "isr"
     | Osr -> "osr"
     | Null -> "null"
+    | Crc -> "crc"
   ;;
 end
 
@@ -290,6 +302,18 @@ module Thread_config = struct
       (* OUT takes bits from the top of the OSR and shifts it left *)
     ; in_msb_first : bool
       (* IN shifts the ISR left, new bits entering at the bottom *)
+    ; autopull : bool
+      (* an OUT that empties the OSR refills it from the TX FIFO in the same
+         cycle, and an OUT that finds it empty waits for a word *)
+    ; autopush : bool
+      (* an IN that fills the ISR pushes it in the same cycle, and waits
+         instead while the RX FIFO is full *)
+    ; crc_poly : int
+      (* the CRC register's polynomial, in the form used when the register
+         shifts right: bit 0 is the coefficient of the highest power *)
+    ; crc_init : int (* what the register starts from, 32 bits *)
+    ; crc_invert : bool (* [mov ..., crc] reads the register inverted *)
+    ; crc_in : bool (* the register follows the bits IN shifts in, not OUT's *)
     }
   [@@deriving sexp_of]
 
@@ -308,8 +332,16 @@ module Thread_config = struct
     ; clkdiv = 0
     ; out_msb_first = false
     ; in_msb_first = false
+    ; autopull = false
+    ; autopush = false
+    ; crc_poly = 0
+    ; crc_init = 0
+    ; crc_invert = false
+    ; crc_in = false
     }
   ;;
+
+  let crc_init t = t.crc_init land crc_mask
 end
 
 module Thread = struct
@@ -330,6 +362,8 @@ module Thread = struct
     ; mutable waiting : bool (* stalled in a [wait ... timeout] *)
     ; mutable wait_count : int (* ticks of that wait's budget left *)
     ; mutable div_count : int (* cycles until the thread's next tick *)
+    ; mutable crc : int
+    ; mutable crc_run : bool (* the CRC register is following the data *)
     ; tx_fifo : int Queue.t (* host -> thread *)
     ; rx_fifo : int Queue.t (* thread -> host *)
     ; mutable loaded : bool
@@ -353,7 +387,9 @@ module Thread = struct
     t.delay_left <- 0;
     t.waiting <- false;
     t.wait_count <- 0;
-    t.div_count <- 0
+    t.div_count <- 0;
+    t.crc <- Thread_config.crc_init t.config;
+    t.crc_run <- true
   ;;
 
   let create (config : Thread_config.t) =
@@ -370,12 +406,28 @@ module Thread = struct
     ; waiting = false
     ; wait_count = 0
     ; div_count = 0
+    ; crc = Thread_config.crc_init config
+    ; crc_run = true
     ; tx_fifo = Queue.create ()
     ; rx_fifo = Queue.create ()
     ; loaded = false
     ; enabled = true
     }
   ;;
+end
+
+(* What the packet buffer is doing. The host fills it or reads it back while
+   it is [Off]. [Play] makes it the source of one thread's TX FIFO: while
+   the pointer has not reached the end and that FIFO has room, one word a
+   cycle moves from the buffer into it. [Record] makes it the sink of one
+   thread's RX FIFO in the same way. The thread cannot tell: it pulls and
+   pushes as it always did, with a host that never falls behind. *)
+module Buffer_mode = struct
+  type t =
+    | Off
+    | Play
+    | Record
+  [@@deriving sexp_of, compare, equal, enumerate]
 end
 
 type t =
@@ -389,6 +441,15 @@ type t =
   ; mutable sync2 : int
   ; mutable chain : bool
     (* thread 0's RX FIFO feeds thread 1's TX FIFO, one word per cycle *)
+  ; buffer : int array
+  ; mutable buffer_mode : Buffer_mode.t
+  ; mutable buffer_thread : int (* whose FIFO the buffer plays into or records from *)
+  ; mutable buffer_ptr : int (* the next word to write, read, play or record *)
+  ; mutable buffer_end : int (* playing and recording stop when the pointer gets here *)
+  ; mutable buffer_wrote : bool
+    (* the buffer was written in the last cycle: like the program memories
+       it answers a cycle after it is asked, and in a cycle with a write it
+       is not asked, so nothing is played in the cycle after one *)
   ; mutable pin_out : int
   ; mutable cycle : int
   }
@@ -419,6 +480,12 @@ let create_separate ~programs ~pin_modes ~threads =
   ; sync1 = mask num_pins (* reset high, like the idle bus *)
   ; sync2 = mask num_pins
   ; chain = false
+  ; buffer = Array.create ~len:buffer_size 0
+  ; buffer_mode = Off
+  ; buffer_thread = 0
+  ; buffer_ptr = 0
+  ; buffer_end = 0
+  ; buffer_wrote = false
   ; pin_out = mask num_pins (* all high: idle for UART, released for open-drain *)
   ; cycle = 0
   }
@@ -488,6 +555,31 @@ let eval_cond (th : Thread.t) (cond : Cond.t) =
   | Isr_not_full -> th.isr_count < th.config.threshold
 ;;
 
+(* The CRC register takes one bit from each OUT or IN: the first bit that
+   instruction shifted. Protocols with a CRC shift a bit at a time, so that
+   is every bit. If the bit differs from the register's bit 0 the register
+   shifts right and the polynomial is added, otherwise it only shifts. With
+   the polynomial written low power first this is the CRC of USB, CAN and
+   Ethernet alike; a CRC narrower than the register uses its low bits. *)
+let crc_take (th : Thread.t) ~data ~count ~msb_first =
+  if th.crc_run
+  then (
+    let b = (data lsr if msb_first then count - 1 else 0) land 1 in
+    let feedback = (th.crc lxor b) land 1 in
+    th.crc <- (th.crc lsr 1) lxor if feedback = 1 then th.config.crc_poly land crc_mask else 0)
+;;
+
+(* What a push sends: the bits shifted in since the last one,
+   right-justified. For LSB first they sit at the top of the ISR, for MSB
+   first at the bottom. *)
+let pushed_word (th : Thread.t) =
+  if th.isr_count = 0
+  then 0
+  else if th.config.in_msb_first
+  then th.isr land mask th.isr_count
+  else th.isr lsr (word_bits - th.isr_count)
+;;
+
 (* One tick of a thread: count down a delay, or execute an instruction. *)
 let tick (program : Instruction.t array) (th : Thread.t) ~lines_now ~pin_out =
   if th.delay_left > 0
@@ -522,6 +614,21 @@ let tick (program : Instruction.t array) (th : Thread.t) ~lines_now ~pin_out =
             th.waiting <- true;
             th.wait_count <- budget - 1;
             `Stall))
+      | In { count; _ }
+        when cfg.autopush
+             && th.isr_count + count >= cfg.threshold
+             && Queue.length th.rx_fifo >= fifo_depth ->
+        (* Autopush with nowhere to push: the IN waits, nothing shifted. *)
+        `Stall
+      | Out _ when cfg.autopull && th.osr_count >= cfg.threshold ->
+        (* Autopull on an empty OSR: this tick fetches a word if there is
+           one, and the OUT itself runs on the next. *)
+        (match Queue.dequeue th.tx_fifo with
+         | None -> ()
+         | Some v ->
+           th.osr <- v land word_mask;
+           th.osr_count <- 0);
+        `Stall
       | In { src; count } ->
         let v =
           match src with
@@ -531,6 +638,7 @@ let tick (program : Instruction.t array) (th : Thread.t) ~lines_now ~pin_out =
           | Zeros -> 0
         in
         let data = v land mask count in
+        if cfg.crc_in then crc_take th ~data ~count ~msb_first:cfg.in_msb_first;
         (* LSB first: new bits enter at the top and the ISR shifts right,
            so the first bit in ends up least significant once pushed. MSB
            first: they enter at the bottom and it shifts left, so the first
@@ -541,6 +649,11 @@ let tick (program : Instruction.t array) (th : Thread.t) ~lines_now ~pin_out =
             else (th.isr lsr count) lor (data lsl (word_bits - count)))
            land word_mask;
         th.isr_count <- min word_bits (th.isr_count + count);
+        if cfg.autopush && th.isr_count >= cfg.threshold
+        then (
+          Queue.enqueue th.rx_fifo (pushed_word th);
+          th.isr <- 0;
+          th.isr_count <- 0);
         `Next
       | Out { dst; count } ->
         let data, rest =
@@ -550,6 +663,12 @@ let tick (program : Instruction.t array) (th : Thread.t) ~lines_now ~pin_out =
         in
         th.osr <- rest;
         th.osr_count <- min word_bits (th.osr_count + count);
+        if not cfg.crc_in then crc_take th ~data ~count ~msb_first:cfg.out_msb_first;
+        if cfg.autopull && th.osr_count >= cfg.threshold
+        then
+          Option.iter (Queue.dequeue th.tx_fifo) ~f:(fun v ->
+            th.osr <- v land word_mask;
+            th.osr_count <- 0);
         (match dst with
          | Pins -> pin_out := write_pins !pin_out ~base:cfg.out_base ~count data
          | X -> th.x <- data
@@ -567,17 +686,7 @@ let tick (program : Instruction.t array) (th : Thread.t) ~lines_now ~pin_out =
         if Queue.length th.rx_fifo >= fifo_depth
         then `Stall
         else (
-          (* The bits shifted in since the last push, right-justified: for
-             LSB first they sit at the top of the ISR, for MSB first at the
-             bottom. *)
-          let v =
-            if th.isr_count = 0
-            then 0
-            else if cfg.in_msb_first
-            then th.isr land mask th.isr_count
-            else th.isr lsr (word_bits - th.isr_count)
-          in
-          Queue.enqueue th.rx_fifo v;
+          Queue.enqueue th.rx_fifo (pushed_word th);
           th.isr <- 0;
           th.isr_count <- 0;
           `Next)
@@ -590,6 +699,11 @@ let tick (program : Instruction.t array) (th : Thread.t) ~lines_now ~pin_out =
           | Isr -> th.isr
           | Osr -> th.osr
           | Null -> 0
+          | Crc ->
+            let v = (th.crc lxor if cfg.crc_invert then crc_mask else 0) land word_mask in
+            th.crc <- th.crc lsr word_bits;
+            th.crc_run <- false;
+            v
         in
         (match dst with
          | X -> th.x <- v
@@ -601,7 +715,10 @@ let tick (program : Instruction.t array) (th : Thread.t) ~lines_now ~pin_out =
          | Osr ->
            th.osr <- v;
            th.osr_count <- 0
-         | Null -> ());
+         | Null -> ()
+         | Crc ->
+           th.crc <- Thread_config.crc_init cfg;
+           th.crc_run <- true);
         `Next
       | Set { dst; value } ->
         (match dst with
@@ -674,8 +791,37 @@ let step t ~inputs =
     && (not (Queue.is_empty t.threads.(0).rx_fifo))
     && Queue.length t.threads.(1).tx_fifo < fifo_depth
   in
+  (* The buffer's move is judged at the start of the cycle too. An end the
+     chain owns is not the buffer's. *)
+  let buffered = t.buffer_thread < Array.length t.threads && t.buffer_ptr <> t.buffer_end in
+  let chained end_ = t.chain && Array.length t.threads = 2 && t.buffer_thread = end_ in
+  let play =
+    Buffer_mode.equal t.buffer_mode Play
+    && buffered
+    && (not t.buffer_wrote)
+    && (not (chained 1))
+    && Queue.length t.threads.(t.buffer_thread).tx_fifo < fifo_depth
+  in
+  let record =
+    Buffer_mode.equal t.buffer_mode Record
+    && buffered
+    && (not (chained 0))
+    && not (Queue.is_empty t.threads.(t.buffer_thread).rx_fifo)
+  in
+  t.buffer_wrote <- false;
   Array.iteri t.threads ~f:(fun n th -> exec t.programs.(n) th ~lines_now ~pin_out);
   if move then Queue.enqueue t.threads.(1).tx_fifo (Queue.dequeue_exn t.threads.(0).rx_fifo);
+  if play
+  then (
+    Queue.enqueue t.threads.(t.buffer_thread).tx_fifo t.buffer.(t.buffer_ptr);
+    t.buffer_ptr <- (t.buffer_ptr + 1) % buffer_size);
+  if record
+  then (
+    (* The word at the head as the cycle started: a push this cycle went
+       in behind it. *)
+    t.buffer.(t.buffer_ptr) <- Queue.dequeue_exn t.threads.(t.buffer_thread).rx_fifo;
+    t.buffer_ptr <- (t.buffer_ptr + 1) % buffer_size;
+    t.buffer_wrote <- true);
   t.pin_out <- !pin_out;
   t.sync2 <- t.sync1;
   t.sync1 <- inputs land mask num_pins;
@@ -691,9 +837,14 @@ let chained t ~thread ~end_ =
   t.chain && Array.length t.threads = 2 && thread = (match end_ with `Tx -> 1 | `Rx -> 0)
 ;;
 
+let buffered t ~thread ~end_ =
+  thread = t.buffer_thread
+  && Buffer_mode.equal t.buffer_mode (match end_ with `Tx -> Play | `Rx -> Record)
+;;
+
 let push_tx t ~thread v =
   let q = t.threads.(thread).tx_fifo in
-  if Queue.length q >= fifo_depth || chained t ~thread ~end_:`Tx
+  if Queue.length q >= fifo_depth || chained t ~thread ~end_:`Tx || buffered t ~thread ~end_:`Tx
   then false
   else (
     Queue.enqueue q (v land word_mask);
@@ -701,7 +852,39 @@ let push_tx t ~thread v =
 ;;
 
 let pop_rx t ~thread =
-  if chained t ~thread ~end_:`Rx then None else Queue.dequeue t.threads.(thread).rx_fifo
+  if chained t ~thread ~end_:`Rx || buffered t ~thread ~end_:`Rx
+  then None
+  else Queue.dequeue t.threads.(thread).rx_fifo
+;;
+
+(* The host's side of the packet buffer. Like the other host actions these
+   are called after the [step] of the cycle they happen in. Data moves only
+   while the buffer is [Off]: a write stores at the pointer and a read
+   returns the word there, and each moves the pointer on. *)
+let set_buffer t ~mode ~thread =
+  t.buffer_mode <- mode;
+  t.buffer_thread <- thread
+;;
+
+let set_buffer_ptr t v = t.buffer_ptr <- v % buffer_size
+let set_buffer_end t v = t.buffer_end <- v % buffer_size
+let buffer_ptr t = t.buffer_ptr
+
+let write_buffer t v =
+  if Buffer_mode.equal t.buffer_mode Off
+  then (
+    t.buffer.(t.buffer_ptr) <- v land word_mask;
+    t.buffer_ptr <- (t.buffer_ptr + 1) % buffer_size;
+    t.buffer_wrote <- true)
+;;
+
+let read_buffer t =
+  if Buffer_mode.equal t.buffer_mode Off
+  then (
+    let v = t.buffer.(t.buffer_ptr) in
+    t.buffer_ptr <- (t.buffer_ptr + 1) % buffer_size;
+    Some v)
+  else None
 ;;
 
 let set_chain t b = t.chain <- b

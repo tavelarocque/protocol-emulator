@@ -33,6 +33,8 @@ type thread_state =
   ; waiting : bool
   ; wait_count : int
   ; div_count : int
+  ; crc : int
+  ; crc_run : bool
   ; tx_level : int
   ; rx_level : int
   ; popped : int option
@@ -41,6 +43,8 @@ type thread_state =
 
 type state =
   { pin_out : int
+  ; buf_ptr : int
+  ; buf_read : int option (* the word the host read from the buffer this cycle *)
   ; t0 : thread_state
   ; t1 : thread_state
   }
@@ -67,6 +71,31 @@ module Scenario = struct
         } (* [mask] for [period] cycles, then 0 for [period] *)
   [@@deriving sexp_of]
 
+  (* What the host does to the packet buffer in one cycle: at most one of
+     these. *)
+  type buffer_action =
+    | Mode of Isa.Buffer_mode.t * int (* and which thread *)
+    | Ptr of int
+    | End of int
+    | Write of int
+    | Read
+  [@@deriving sexp_of]
+
+  type buffer =
+    { mode : Isa.Buffer_mode.t
+    ; thread : int
+    ; first : int (* the pointer at the start *)
+    ; loaded : int list (* words the host stored from [first] on beforehand *)
+    ; length : int (* the end is [first + length] *)
+    ; script : (int * buffer_action) list (* (cycle, action) *)
+    ; random : bool (* the host also acts at random, as a trial runs *)
+    }
+  [@@deriving sexp_of]
+
+  let no_buffer =
+    { mode = Off; thread = 0; first = 0; loaded = []; length = 0; script = []; random = false }
+  ;;
+
   type t =
     { name : string
     ; words : int array array (* each thread's whole memory *)
@@ -80,6 +109,7 @@ module Scenario = struct
       (* scripted host writes to program memory: (cycle, mask of threads,
          address, word). Random trials add their own. *)
     ; rates : (int * int) list (* per thread: host push %, host pop % *)
+    ; buffer : buffer
     ; pins : pins
     ; cycles : int
     }
@@ -115,6 +145,12 @@ let random_config rs =
        | _ -> rand 6)
   ; out_msb_first = rand 2 = 0
   ; in_msb_first = rand 2 = 0
+  ; autopull = rand 3 = 0
+  ; autopush = rand 3 = 0
+  ; crc_poly = (rand 65536 lsl 16) lor rand 65536
+  ; crc_init = (rand 65536 lsl 16) lor rand 65536
+  ; crc_invert = rand 2 = 0
+  ; crc_in = rand 2 = 0
   }
 ;;
 
@@ -170,6 +206,26 @@ let random_scenario ~seed ~cycles =
     | 1 -> 0xFF
     | _ -> rand 256
   in
+  (* The packet buffer: left alone in half the trials, playing a few words
+     into a thread or recording from one in the rest, anywhere in the
+     memory, its end included. The host then acts on it at random. *)
+  let buffer =
+    let mode : Isa.Buffer_mode.t =
+      match rand 4 with
+      | 0 -> Play
+      | 1 -> Record
+      | _ -> Off
+    in
+    let length = rand 24 in
+    { Scenario.mode
+    ; thread = rand Rtl.num_threads
+    ; first = (if rand 4 = 0 then Isa.buffer_size - 1 - rand 8 else rand Isa.buffer_size)
+    ; loaded = List.init length ~f:(fun _ -> rand 65536)
+    ; length
+    ; script = []
+    ; random = true
+    }
+  in
   ( { Scenario.name = sprintf "random #%d" (seed + 1)
     ; words
     ; configs
@@ -180,6 +236,7 @@ let random_scenario ~seed ~cycles =
     ; enables = Random_flips
     ; writes = []
     ; rates
+    ; buffer
     ; pins = Random_pins
     ; cycles
     }
@@ -205,11 +262,24 @@ let classify (model : Isa.t) ~thread ~word ~inputs =
     else if timeout
     then "wait: stalled, spending timeout budget"
     else "wait: stalled"
+  | In { count; _ } when th.config.autopush && th.isr_count + count >= th.config.threshold ->
+    if Queue.length th.rx_fifo >= Isa.fifo_depth
+    then "in: waiting, RX full (autopush)"
+    else "in: filled the ISR and pushed it (autopush)"
+  | Out _ when th.config.autopull && th.osr_count >= th.config.threshold ->
+    if Queue.is_empty th.tx_fifo
+    then "out: waiting for a word (autopull)"
+    else "out: fetched a word (autopull)"
+  | Out { count; _ }
+    when th.config.autopull
+         && th.osr_count + count >= th.config.threshold
+         && not (Queue.is_empty th.tx_fifo) -> "out: emptied the OSR and refilled it (autopull)"
   | In { src; _ } -> "in " ^ Isa.In_src.to_string src
   | Out { dst; _ } -> "out " ^ Isa.Out_dst.to_string dst
   | Push ->
     if Queue.length th.rx_fifo >= Isa.fifo_depth then "push: stalled, RX full" else "push"
   | Pull -> if Queue.is_empty th.tx_fifo then "pull: stalled, TX empty" else "pull"
+  | Mov { dst; src = Crc } when not (Isa.Mov_loc.equal dst Crc) -> "mov from crc"
   | Mov { dst; src = _ } -> "mov to " ^ Isa.Mov_loc.to_string dst
   | Set { dst; _ } -> "set " ^ Isa.Set_dst.to_string dst
   | Nop when raw_op = 5 -> "mov (reserved -> nop)"
@@ -273,6 +343,19 @@ let basic_bins (model : Isa.t) ~words ~chain ~inputs =
   then add "(chain blocked: thread 1 TX full)";
   if !drivers = 2 then add "(both threads drive pins in one cycle)";
   if t0.enabled && t1.enabled then add "(both threads enabled)";
+  (* The packet buffer, from the rules in the model's [step]. *)
+  let th = Isa.thread model model.buffer_thread in
+  let at_end = model.buffer_ptr = model.buffer_end in
+  (match model.buffer_mode with
+   | Off -> ()
+   | Play when chain && model.buffer_thread = 1 -> add "(buffer: the chain owns that FIFO)"
+   | Record when chain && model.buffer_thread = 0 -> add "(buffer: the chain owns that FIFO)"
+   | (Play | Record) when at_end -> add "(buffer: at its end)"
+   | Play when model.buffer_wrote -> add "(buffer: no play in the cycle after a write)"
+   | Play when Queue.length th.tx_fifo >= Isa.fifo_depth -> add "(buffer: play waits, TX full)"
+   | Play -> add "(buffer played a word)"
+   | Record when Queue.is_empty th.rx_fifo -> ()
+   | Record -> add "(buffer recorded a word)");
   Queue.to_list bins
 ;;
 
@@ -391,7 +474,13 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
     set ti.sideset_count config.sideset_count;
     set ti.clkdiv config.clkdiv;
     set ti.out_msb_first (Bool.to_int config.out_msb_first);
-    set ti.in_msb_first (Bool.to_int config.in_msb_first));
+    set ti.in_msb_first (Bool.to_int config.in_msb_first);
+    set ti.autopull (Bool.to_int config.autopull);
+    set ti.autopush (Bool.to_int config.autopush);
+    set ti.crc_poly config.crc_poly;
+    set ti.crc_init config.crc_init;
+    set ti.crc_invert (Bool.to_int config.crc_invert);
+    set ti.crc_in (Bool.to_int config.crc_in));
   set i.chain (Bool.to_int s.chain);
   set i.sync_bypass s.sync_bypass;
   set
@@ -404,6 +493,22 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
       set i.prog_data w;
       Cyclesim.cycle sim));
   set i.prog_we 0;
+  (* The packet buffer as the scenario starts it: the host points it at
+     [first], stores [loaded], and points it back. *)
+  let b = s.buffer in
+  let point_at v =
+    set i.buf_set_ptr 1;
+    set i.buf_ptr_in v;
+    Cyclesim.cycle sim;
+    set i.buf_set_ptr 0
+  in
+  point_at b.first;
+  List.iter b.loaded ~f:(fun w ->
+    set i.buf_write 1;
+    set i.buf_data w;
+    Cyclesim.cycle sim);
+  set i.buf_write 0;
+  point_at b.first;
   (* One cycle with no write, so that the hold after the last one is over. *)
   Cyclesim.cycle sim;
   let model =
@@ -421,6 +526,14 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
      the RTL disagreeing about a pin on cycle 0. *)
   model.sync1 <- 0;
   model.sync2 <- 0;
+  Isa.set_buffer_ptr model b.first;
+  List.iter b.loaded ~f:(Isa.write_buffer model);
+  Isa.set_buffer_ptr model b.first;
+  model.buffer_wrote <- false;
+  (* The buffer's mode, thread and end are levels the host holds. *)
+  let buf_mode = ref b.mode
+  and buf_thread = ref b.thread
+  and buf_end = ref ((b.first + b.length) % Isa.buffer_size) in
   let rec loop cycle =
     if cycle >= s.cycles
     then None
@@ -433,6 +546,57 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
       in
       set i.pins_in pins;
       let pcs_before = List.init Rtl.num_threads ~f:(fun n -> (Isa.thread model n).pc) in
+      (* What the host does to the packet buffer this cycle, if anything. It
+         never reads in the cycle after a write: the host port takes dozens
+         of cycles for each access, and the buffer has not read the word
+         out yet. *)
+      let buffer_action : Scenario.buffer_action option =
+        match List.Assoc.find b.script cycle ~equal:Int.equal with
+        | Some a -> Some a
+        | None when b.random && rand 25 = 0 ->
+          (match rand 6 with
+           | 0 ->
+             Some
+               (Mode
+                  ( (match rand 3 with
+                     | 0 -> Off
+                     | 1 -> Play
+                     | _ -> Record)
+                  , rand Rtl.num_threads ))
+           | 1 -> Some (Ptr (rand Isa.buffer_size))
+           | 2 -> Some (End ((model.buffer_ptr + rand 16) % Isa.buffer_size))
+           | 3 | 4 -> Some (Write (rand 65536))
+           | _ -> if model.buffer_wrote then None else Some Read)
+        | None -> None
+      in
+      (match buffer_action with
+       | Some (Mode (m, t)) ->
+         buf_mode := m;
+         buf_thread := t
+       | Some (End v) -> buf_end := v
+       | _ -> ());
+      Isa.set_buffer model ~mode:!buf_mode ~thread:!buf_thread;
+      Isa.set_buffer_end model !buf_end;
+      set
+        i.buf_mode
+        (match !buf_mode with
+         | Off -> 0
+         | Play -> 1
+         | Record -> 2);
+      set i.buf_thread !buf_thread;
+      set i.buf_end !buf_end;
+      set i.buf_set_ptr 0;
+      set i.buf_write 0;
+      set i.buf_read 0;
+      (match buffer_action with
+       | Some (Ptr v) ->
+         set i.buf_set_ptr 1;
+         set i.buf_ptr_in v
+       | Some (Write v) ->
+         set i.buf_write 1;
+         set i.buf_data v
+       | Some Read -> set i.buf_read 1
+       | _ -> ());
       (* Per-thread host actions, decided from the state at the start of the
          cycle. *)
       let host =
@@ -499,15 +663,34 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
       let popped =
         List.mapi host ~f:(fun n (push, push_value, pop) ->
           (* The host's push and pop are refused at the chained ends. *)
+          let buffers (mode : Isa.Buffer_mode.t) =
+            Isa.Buffer_mode.equal !buf_mode mode && !buf_thread = n
+          in
           let push_ok = if push then Isa.push_tx model ~thread:n push_value else false in
-          if push && not push_ok then assert (s.chain && n = 1);
+          if push && not push_ok then assert ((s.chain && n = 1) || buffers Play);
           let model_popped = if pop then Isa.pop_rx model ~thread:n else None in
           let rtl_popped =
             Option.some_if
-              (pop && not (s.chain && n = 0))
+              (pop && (not (s.chain && n = 0)) && not (buffers Record))
               (get (Rtl.O.thread o_before n).rx_data)
           in
           model_popped, rtl_popped)
+      in
+      (* The host's buffer action on the model, after the step like its
+         other actions; a read is compared with the word the hardware
+         showed during the cycle. *)
+      let model_read, rtl_read =
+        match buffer_action with
+        | Some (Ptr v) ->
+          Isa.set_buffer_ptr model v;
+          None, None
+        | Some (Write v) ->
+          Isa.write_buffer model v;
+          None, None
+        | Some Read ->
+          let got = Isa.read_buffer model in
+          got, Option.map got ~f:(fun _ -> get o_before.buf_word)
+        | _ -> None, None
       in
       let rtl_thread n =
         let t = Rtl.O.thread o n in
@@ -523,6 +706,8 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
         ; waiting = get t.waiting = 1
         ; wait_count = get t.wait_count
         ; div_count = get t.div_count
+        ; crc = get t.crc
+        ; crc_run = get t.crc_run = 1
         ; tx_level = get t.tx_level
         ; rx_level = get t.rx_level
         ; popped = snd (List.nth_exn popped n)
@@ -542,14 +727,28 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
         ; waiting = th.waiting
         ; wait_count = th.wait_count
         ; div_count = th.div_count
+        ; crc = th.crc
+        ; crc_run = th.crc_run
         ; tx_level = Queue.length th.tx_fifo
         ; rx_level = Queue.length th.rx_fifo
         ; popped = fst (List.nth_exn popped n)
         }
       in
-      let rtl = { pin_out = get o.pin_out; t0 = rtl_thread 0; t1 = rtl_thread 1 } in
+      let rtl =
+        { pin_out = get o.pin_out
+        ; buf_ptr = get o.buf_ptr
+        ; buf_read = rtl_read
+        ; t0 = rtl_thread 0
+        ; t1 = rtl_thread 1
+        }
+      in
       let expected =
-        { pin_out = Isa.pin_out model; t0 = model_thread 0; t1 = model_thread 1 }
+        { pin_out = Isa.pin_out model
+        ; buf_ptr = Isa.buffer_ptr model
+        ; buf_read = model_read
+        ; t0 = model_thread 0
+        ; t1 = model_thread 1
+        }
       in
       if equal_state rtl expected
       then loop (cycle + 1)

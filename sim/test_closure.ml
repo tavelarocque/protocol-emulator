@@ -80,18 +80,26 @@ let%expect_test "the directed suite catches every planted bug" =
     if List.is_empty catchers then raise_s [%message "mutant survived" name];
     printf "%-28s caught by %d of %d\n" name (List.length catchers) (List.length Directed.all));
   [%expect {|
-    Xdec_never_decrements        caught by 1 of 12
-    Wait_timeout_ignores_budget  caught by 3 of 12
-    Delay_field_ignored          caught by 4 of 12
-    Set_pins_count_off_by_one    caught by 4 of 12
-    Push_not_right_justified     caught by 2 of 12
-    Pin_priority_inverted        caught by 1 of 12
-    Fetch_port_crossed           caught by 12 of 12
-    Chain_ignores_full           caught by 3 of 12
-    Push_ignores_in_direction    caught by 1 of 12
-    Sync_bypass_inverted         caught by 2 of 12
-    Jump_ignores_page            caught by 1 of 12
-    Write_lands_while_running    caught by 1 of 12
-    No_hold_after_write          caught by 1 of 12
+    Xdec_never_decrements        caught by 2 of 17
+    Wait_timeout_ignores_budget  caught by 3 of 17
+    Delay_field_ignored          caught by 4 of 17
+    Set_pins_count_off_by_one    caught by 4 of 17
+    Push_not_right_justified     caught by 3 of 17
+    Pin_priority_inverted        caught by 1 of 17
+    Fetch_port_crossed           caught by 17 of 17
+    Chain_ignores_full           caught by 3 of 17
+    Push_ignores_in_direction    caught by 1 of 17
+    Sync_bypass_inverted         caught by 2 of 17
+    Jump_ignores_page            caught by 1 of 17
+    Write_lands_while_running    caught by 1 of 17
+    No_hold_after_write          caught by 1 of 17
+    Autopull_ignores_empty       caught by 1 of 17
+    Autopush_ignores_full        caught by 1 of 17
+    Crc_ignores_direction        caught by 1 of 17
+    Crc_read_keeps_running       caught by 1 of 17
+    Play_ignores_full            caught by 2 of 17
+    Play_past_end                caught by 2 of 17
+    Record_keeps_host_pop        caught by 1 of 17
+    Play_after_write             caught by 1 of 17
     |}]
 ;;

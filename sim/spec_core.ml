@@ -156,25 +156,116 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
      pop thread 0's RX FIFO or push to thread 1's TX FIFO." *)
   let moves = wire 1 in
   let host_ok = ~:(i.chain) in
-  let tx0 = Fifo.create spec ~name:"t0_tx" ~push:i.t0.tx_push ~data:i.t0.tx_data ~pop:pull0 in
+  (* The packet buffer: "[Play] makes it the source of one thread's TX FIFO:
+     while the pointer has not reached the end and that FIFO has room, one
+     word a cycle moves from the buffer into it. [Record] makes it the sink
+     of one thread's RX FIFO in the same way." While it does either, the
+     host cannot use that end of that FIFO. *)
+  let plays = wire 1
+  and records = wire 1
+  and buf_word = wire 16 in
+  let playing n = (i.buf_mode ==:. 1) &: (i.buf_thread ==:. n)
+  and recording n = (i.buf_mode ==:. 2) &: (i.buf_thread ==:. n) in
+  let played n = plays &: (i.buf_thread ==:. n)
+  and recorded n = records &: (i.buf_thread ==:. n) in
+  let tx0 =
+    Fifo.create
+      spec
+      ~name:"t0_tx"
+      ~push:(played 0 |: (i.t0.tx_push &: ~:(playing 0)))
+      ~data:(mux2 (played 0) buf_word i.t0.tx_data)
+      ~pop:pull0
+  in
   let rx0 =
     Fifo.create
       spec
       ~name:"t0_rx"
       ~push:push0
       ~data:value0
-      ~pop:(moves |: (host_ok &: i.t0.rx_pop))
+      ~pop:(moves |: recorded 0 |: (host_ok &: i.t0.rx_pop &: ~:(recording 0)))
   in
   let tx1 =
     Fifo.create
       spec
       ~name:"t1_tx"
-      ~push:(moves |: (host_ok &: i.t1.tx_push))
-      ~data:(mux2 moves rx0.head i.t1.tx_data)
+      ~push:(moves |: played 1 |: (host_ok &: i.t1.tx_push &: ~:(playing 1)))
+      ~data:(mux2 moves rx0.head (mux2 (played 1) buf_word i.t1.tx_data))
       ~pop:pull1
   in
-  let rx1 = Fifo.create spec ~name:"t1_rx" ~push:push1 ~data:value1 ~pop:i.t1.rx_pop in
+  let rx1 =
+    Fifo.create
+      spec
+      ~name:"t1_rx"
+      ~push:push1
+      ~data:value1
+      ~pop:(recorded 1 |: (i.t1.rx_pop &: ~:(recording 1)))
+  in
   moves <== (i.chain &: ~:(rx0.empty) &: (if planted_chain_bug then vdd else ~:(tx1.full)));
+  (* The buffer's own state: the pointer, the memory, and whether it was
+     written in the last cycle. "An end the chain owns is not the
+     buffer's": thread 1's TX FIFO and thread 0's RX FIFO. "Nothing is
+     played in the cycle after a write." The host stores and takes words
+     only while the buffer is neither playing nor recording. *)
+  let buf_ptr =
+    let next = wire P.buffer_bits in
+    let ptr = reg spec next -- "buf_ptr" in
+    let stores = wire 1 in
+    let wrote = reg spec stores -- "buf_wrote" in
+    let of_thread a b = mux2 i.buf_thread b a in
+    let not_at_end = ptr <>: i.buf_end in
+    plays
+    <== ((i.buf_mode ==:. 1)
+         &: not_at_end
+         &: (wrote ==:. 0)
+         &: ~:(i.chain &: (i.buf_thread ==:. 1))
+         &: ~:(of_thread tx0.full tx1.full));
+    records
+    <== ((i.buf_mode ==:. 2)
+         &: not_at_end
+         &: ~:(i.chain &: (i.buf_thread ==:. 0))
+         &: ~:(of_thread rx0.empty rx1.empty));
+    let hosts = (i.buf_mode <>:. 1) &: (i.buf_mode <>:. 2) in
+    let host_stores = hosts &: i.buf_write
+    and host_takes = hosts &: i.buf_read in
+    stores <== (records |: host_stores);
+    let moves_on = plays |: records |: host_stores |: host_takes in
+    next <== mux2 i.buf_set_ptr i.buf_ptr_in (mux2 moves_on (ptr +:. 1) ptr);
+    (* The memory itself is not described here: it is named. The proof
+       gives this side and the RTL the same arbitrary word out of it in
+       every cycle and requires everything driven into it to be equal, so
+       what is specified is how it is used: it is written at the pointer
+       with the word being stored, and otherwise asked for the word the
+       pointer is about to be at, since "it answers a cycle after it is
+       asked". The rest of its pins are held as the chip holds them. *)
+    let stored = mux2 records (of_thread rx0.head rx1.head) i.buf_data in
+    let memory =
+      Instantiation.create
+        ()
+        ~instance:"sram_buf"
+        ~name:(sprintf "RM_IHPSG13_1P_%dx16_c2_bm_bist" P.buffer_size)
+        ~inputs:
+          [ "A_CLK", i.clock
+          ; "A_MEN", vdd
+          ; "A_WEN", stores
+          ; "A_REN", stores ==:. 0
+          ; "A_ADDR", mux2 stores ptr next
+          ; "A_DIN", stored
+          ; "A_DLY", vdd
+          ; "A_BM", ones 16
+          ; "A_BIST_CLK", gnd
+          ; "A_BIST_EN", gnd
+          ; "A_BIST_MEN", gnd
+          ; "A_BIST_WEN", gnd
+          ; "A_BIST_REN", gnd
+          ; "A_BIST_ADDR", zero P.buffer_bits
+          ; "A_BIST_DIN", zero 16
+          ; "A_BIST_BM", zero 16
+          ]
+        ~outputs:[ "A_DOUT", 16 ]
+    in
+    buf_word <== Map.find_exn memory "A_DOUT";
+    ptr
+  in
   (* "If two threads write the same pin in the same cycle, the
      higher-numbered thread wins": thread 1 steps from the pins thread 0
      leaves. *)
@@ -201,6 +292,12 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
       ; sideset_count = c.sideset_count
       ; out_msb_first = c.out_msb_first
       ; in_msb_first = c.in_msb_first
+      ; autopull = c.autopull
+      ; autopush = c.autopush
+      ; crc_poly = c.crc_poly
+      ; crc_init = c.crc_init
+      ; crc_invert = c.crc_invert
+      ; crc_in = c.crc_in
       }
   in
   let s0 =
@@ -250,11 +347,15 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
     ; waiting = s.waiting
     ; wait_count = s.wait_count
     ; div_count = div
+    ; crc = s.crc
+    ; crc_run = s.crc_run
     }
   in
   { P.O.pin_out
   ; pads_out
   ; pads_oe
+  ; buf_ptr
+  ; buf_word
   ; t0 = out t0 ~div:div0 ~tx:tx0 ~rx:rx0
   ; t1 = out t1 ~div:div1 ~tx:tx1 ~rx:rx1
   }

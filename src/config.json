@@ -39,7 +39,7 @@
   "//": "https://tinytapeout.com/faq/#how-can-i-map-an-additional-external-clock-to-one-of-the-gpios",
   "CLOCK_PORT": "clk",
 
-  "//": "======== SPIKE: IHP SRAM macros (RM_IHPSG13_1P_256x16_c2_bm_bist), one per thread ========",
+  "//": "======== IHP SRAM macros: a program memory per thread (RM_IHPSG13_1P_256x16_c2_bm_bist) and the packet buffer ========",
   "//": "Integration from https://github.com/TinyTapeout/ttihp-cmos5l-sram-example (Apache-2.0):",
   "//": "librelane_plugin_sram_pdn.py, odb_stripes.py, src/pdn_cfg.tcl, src/sram_bb.v, test/sram_model.",
 
@@ -49,8 +49,10 @@
     "substituting_steps": { "+OpenROAD.GeneratePDN": "Project.ExtendPowerStripes" }
   },
 
-  "//": "Both at the bottom left, flipped (FS) so their pins face up towards the logic.",
-  "//": "x = 3.36 + n x 11.24 um keeps each macro's power columns under the PDN stripes (n = 0 and 24).",
+  "//": "All three along the bottom, flipped (FS) so their pins face up towards the logic.",
+  "//": "x = 3.36 + n x 11.24 um keeps each macro's power columns under the PDN stripes (n = 0, 24 and 48).",
+  "//": "The packet buffer (RM_IHPSG13_1P_1024x16_c2_bm_bist) is the same width as the program memories",
+  "//": "(236.8 um) with the same power columns, and 336.46 um tall where they are 118.78.",
   "MACROS": {
     "RM_IHPSG13_1P_256x16_c2_bm_bist": {
       "instances": {
@@ -64,6 +66,18 @@
         "*_fast_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x16_c2_bm_bist_fast_1p32V_m55C.lib"],
         "*_slow_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x16_c2_bm_bist_slow_1p08V_125C.lib"]
       }
+    },
+    "RM_IHPSG13_1P_1024x16_c2_bm_bist": {
+      "instances": {
+        "u_protocol_emulator.sram_buf": { "location": [542.88, 3.78], "orientation": "FS" }
+      },
+      "gds": ["pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_1024x16_c2_bm_bist.gds"],
+      "lef": ["pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_1024x16_c2_bm_bist.lef"],
+      "lib": {
+        "*_typ_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x16_c2_bm_bist_typ_1p20V_25C.lib"],
+        "*_fast_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x16_c2_bm_bist_fast_1p32V_m55C.lib"],
+        "*_slow_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_1024x16_c2_bm_bist_slow_1p08V_125C.lib"]
+      }
     }
   },
 
@@ -72,7 +86,9 @@
     "u_protocol_emulator.sram0 VPWR VGND VDD! VSS!",
     "u_protocol_emulator.sram0 VPWR VGND VDDARRAY! VSS!",
     "u_protocol_emulator.sram1 VPWR VGND VDD! VSS!",
-    "u_protocol_emulator.sram1 VPWR VGND VDDARRAY! VSS!"
+    "u_protocol_emulator.sram1 VPWR VGND VDDARRAY! VSS!",
+    "u_protocol_emulator.sram_buf VPWR VGND VDD! VSS!",
+    "u_protocol_emulator.sram_buf VPWR VGND VDDARRAY! VSS!"
   ],
 
   "//": "PDN: pdngen skips the SRAMs; ExtendPowerStripes powers them.",

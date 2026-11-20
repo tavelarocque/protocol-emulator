@@ -274,9 +274,11 @@ class Chip:
     def configure(self, thread=0, start=0, out_base=0, out_count=1, set_base=0,
                   set_count=1, in_base=0, threshold=8, timeout_vector=0, timeout=0,
                   sideset_base=0, sideset_count=0, clkdiv=0, out_msb_first=False,
-                  in_msb_first=False):
+                  in_msb_first=False, auto=0):
         """Write every field of a thread's configuration. The defaults are
-        the reset values."""
+        the reset values. [auto] is the top of the SHIFT register: 1
+        autopull, 2 autopush, 4 the CRC register reads inverted, 8 it
+        follows IN's bits."""
         bank = BANK * thread
         self.write(START + bank, start)
         self.write(OUT_CFG + bank, out_base | (out_count << 4))
@@ -287,7 +289,7 @@ class Chip:
         self.write(TIMEOUT + bank, timeout)
         self.write(SIDESET + bank, sideset_base | (sideset_count << 4))
         self.write(CLKDIV + bank, clkdiv)
-        self.write(SHIFT + bank, int(out_msb_first) | (int(in_msb_first) << 1))
+        self.write(SHIFT + bank, int(out_msb_first) | (int(in_msb_first) << 1) | (auto << 2))
 
     def set_pin_modes(self, modes):
         """[modes] maps pin number to INPUT, PUSH_PULL or OPEN_DRAIN; pins not

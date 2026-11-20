@@ -62,6 +62,23 @@ module Make (C : Comb.S) = struct
     uresize (log_shift rotr lines base &: mask8 count) 16
   ;;
 
+  (* "What a push sends: the bits shifted in since the last one,
+     right-justified." *)
+  let justify ~msb_first isr isr_count =
+    mux2
+      msb_first
+      (isr &: low16 (mask32 isr_count))
+      (low16 (log_shift srl (uresize isr 32) (of_int ~width:5 16 -: isr_count)))
+  ;;
+
+  (* "The CRC register takes one bit: the first bit that instruction
+     shifted. If the bit differs from the register's bit 0 the register
+     shifts right and the polynomial is added, otherwise it only shifts." *)
+  let crc_take crc ~poly ~first =
+    let shifted = concat_msb [ gnd; select crc 31 1 ] in
+    mux2 (select crc 0 0 <>: first) (shifted ^: poly) shifted
+  ;;
+
   let step (s : C.t P.Thread_state.t) (i : C.t P.Step_in.t) : C.t P.Step_out.t =
     let ins = i.instr in
     (* Side-set splits the 4-bit delay field: with n side-set bits the
@@ -146,14 +163,40 @@ module Make (C : Comb.S) = struct
          16 is the identity) and replace the bits that wrapped round with
          the new ones. *)
       let msb_first = (log_shift rotl s.isr count &: ~:m) |: (v &: m) in
-      finish
-        ~st:
-          { s with
-            isr = mux2 i.in_msb_first msb_first lsb_first
-          ; isr_count = sat16 s.isr_count count
-          }
-        ()
+      let isr = mux2 i.in_msb_first msb_first lsb_first in
+      let isr_count = sat16 s.isr_count count in
+      let crc =
+        mux2
+          (i.crc_in &: s.crc_run)
+          (crc_take
+             s.crc
+             ~poly:i.crc_poly
+             ~first:
+               (* MSB first, the first bit in is the highest of the [count]
+                  taken: bring it down to bit 0. *)
+               (mux2
+                  i.in_msb_first
+                  (select (log_shift srl (v &: m) (count -:. 1)) 0 0)
+                  (select v 0 0)))
+          s.crc
+      in
+      (* "Autopush: an IN that fills the ISR pushes it in the same cycle, and
+         waits instead while the RX FIFO is full." It fills it when the bits
+         it has and the bits it takes reach the threshold. *)
+      let fills =
+        i.autopush &: (uresize s.isr_count 6 +: uresize count 6 >=: uresize i.threshold 6)
+      in
+      let word = justify ~msb_first:i.in_msb_first isr isr_count in
+      ( word
+      , pick
+          fills
+          (pick
+             i.rx_full
+             (stall ())
+             (finish ~st:{ s with isr = zero 16; isr_count = zero 5; crc } ~push:vdd ()))
+          (finish ~st:{ s with isr; isr_count; crc } ()) )
     in
+    let in_word, r_in = r_in in
     (* --- OUT --- *)
     let r_out =
       let m = low16 (mask32 count) in
@@ -173,18 +216,36 @@ module Make (C : Comb.S) = struct
         }
       in
       let dst = select ins 8 7 in
-      finish
-        ~st:
-          { st with
-            pin_out =
-              mux2
-                (dst ==:. 0)
-                (write_pins s.pin_out ~base:i.out_base ~count data)
-                s.pin_out
-          ; x = mux2 (dst ==:. 1) data s.x
-          ; y = mux2 (dst ==:. 2) data s.y
-          }
-        ()
+      let st =
+        { st with
+          pin_out =
+            mux2 (dst ==:. 0) (write_pins s.pin_out ~base:i.out_base ~count data) s.pin_out
+        ; x = mux2 (dst ==:. 1) data s.x
+        ; y = mux2 (dst ==:. 2) data s.y
+        ; crc =
+            mux2
+              (~:(i.crc_in) &: s.crc_run)
+              (crc_take
+                 s.crc
+                 ~poly:i.crc_poly
+                 ~first:
+                   (* The first bit out is the OSR's lowest, or its highest
+                      when shifting MSB first. *)
+                   (mux2 i.out_msb_first (select s.osr 15 15) (select s.osr 0 0)))
+              s.crc
+        }
+      in
+      (* "Autopull: an OUT that empties the OSR refills it from the TX FIFO
+         in the same cycle, and an OUT that finds it empty waits for a
+         word": that tick takes the word if there is one, and the OUT
+         itself runs on the next. *)
+      let word = { st with osr = i.tx_head; osr_count = zero 5 } in
+      let emptied = st.osr_count >=: i.threshold in
+      let has = ~:(i.tx_empty) in
+      pick
+        (i.autopull &: (s.osr_count >=: i.threshold))
+        (pick has { none with st = { s with osr = i.tx_head; osr_count = zero 5 }; pull = vdd } (stall ()))
+        (pick (i.autopull &: emptied &: has) (finish ~st:word ~pull:vdd ()) (finish ~st ()))
     in
     (* --- PUSH / PULL --- *)
     let r_pushpull =
@@ -198,20 +259,18 @@ module Make (C : Comb.S) = struct
         (pick
            i.rx_full
            (stall ())
-           (finish
-              ~st:{ s with isr = zero 16; isr_count = zero 5 }
-              ~push:vdd
-              ~push_value:
-                (low16
-                   (log_shift srl (uresize s.isr 32) (of_int ~width:5 16 -: s.isr_count)))
-              ()))
+           (finish ~st:{ s with isr = zero 16; isr_count = zero 5 } ~push:vdd ()))
     in
     (* --- MOV --- *)
     let r_mov =
       let dst = select ins 8 6
       and src = select ins 5 3 in
-      let v = mux src [ s.x; s.y; uresize i.lines 16; s.isr; s.osr; zero 16 ] in
-      let valid = (dst <:. 6) &: (src <:. 6) in
+      (* "As a source: its low 16 bits, after which it holds its high 16
+         and stops following the data. As a destination: it starts again
+         from its initial value, whatever the source." *)
+      let crc_low = low16 (mux2 i.crc_invert ~:(s.crc) s.crc) in
+      let v = mux src [ s.x; s.y; uresize i.lines 16; s.isr; s.osr; zero 16; crc_low ] in
+      let valid = (dst <>:. 7) &: (src <>:. 7) in
       let st =
         { s with
           x = mux2 (dst ==:. 0) v s.x
@@ -225,6 +284,12 @@ module Make (C : Comb.S) = struct
         ; isr_count = mux2 (dst ==:. 3) (zero 5) s.isr_count
         ; osr = mux2 (dst ==:. 4) v s.osr
         ; osr_count = mux2 (dst ==:. 4) (zero 5) s.osr_count
+        ; crc =
+            mux2
+              (dst ==:. 6)
+              i.crc_init
+              (mux2 (src ==:. 6) (uresize (select s.crc 31 16) 32) s.crc)
+        ; crc_run = mux2 (dst ==:. 6) vdd (mux2 (src ==:. 6) gnd s.crc_run)
         }
       in
       finish ~st:(P.Thread_state.map2 st s ~f:(fun a b -> mux2 valid a b)) ()
@@ -286,6 +351,8 @@ module Make (C : Comb.S) = struct
           ; delay_left = zero 4
           ; waiting = gnd
           ; wait_count = zero 16
+          ; crc = i.crc_init
+          ; crc_run = vdd
           }
       }
     in
@@ -301,11 +368,12 @@ module Make (C : Comb.S) = struct
        FIFO only takes it when [push] is high. (Defining it as zero when not
        pushing gives identical behaviour, but the equivalence checker compares
        the FIFO's data input as a function, enabled or not.) *)
+    (* An IN that pushes sends the ISR as that IN leaves it. *)
     let justified_isr =
       mux2
-        i.in_msb_first
-        (s.isr &: low16 (mask32 s.isr_count))
-        (low16 (log_shift srl (uresize s.isr 32) (of_int ~width:5 16 -: s.isr_count)))
+        (select ins 15 13 ==:. 2)
+        in_word
+        (justify ~msb_first:i.in_msb_first s.isr s.isr_count)
     in
     ignore (r.push_value : C.t);
     { P.Step_out.next = r.st; pull = r.pull; push = r.push; push_value = justified_isr }

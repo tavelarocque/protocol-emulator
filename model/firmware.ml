@@ -2151,6 +2151,148 @@ let nes_pad_config =
   }
 ;;
 
+(* 10BASE-T Ethernet transmitter: a whole frame on the wire from firmware.
+   Preamble, start-of-frame delimiter, the frame Manchester coded at
+   10 Mbit/s, its CRC-32 frame check sequence, and the idle signal that ends
+   it.
+
+   The core clock must be 40 MHz: a bit is 4 clocks and each half of it 2.
+   That leaves no clock in which to fetch a word, so the thread runs with
+   autopull, and no host could supply 625,000 words a second, so the frame
+   is played from the packet buffer. The CRC register follows every bit OUT
+   shifts and the firmware sends what it holds after the data.
+
+   Pins (side-set, base P0): P0 = TD+, P1 = TD-, push-pull. Idle is both
+   low, no voltage across the pair. A 1 is TD+ low then high, a 0 high then
+   low, with TD- the opposite. On a wire they drive a 10BASE-T transformer
+   through series resistors.
+
+   Config: [eth_tx_config ~odd]. The host loads the buffer with the frame
+   from the destination address to the end of the data, padded to at least
+   60 bytes, no FCS: two bytes a word, the first in bits 7:0. A frame with
+   an odd number of bytes starts at [eth_tx_odd] instead and its first word
+   holds only its first byte, in bits 15:8. The host then sets the buffer
+   playing into this thread and enables the thread. After the frame the
+   thread parks; the host stops it before the next.
+
+   Every bit has four slots. The first fetches the bit after the one on the
+   wire into X, the second asks whether the OSR is empty, and the last two
+   branch on X into the loop for a 1 or the loop for a 0. An empty OSR in
+   the data means the buffer has played out, and the two slots load the CRC
+   register's low half instead; an empty OSR there loads its high half; an
+   empty OSR there ends the frame. A branch that must pick between two
+   places in one slot jumps one way and falls into the other, which is why
+   the loops for a 1 follow one another and use [jmp !x], and the loops for
+   a 0 do the same with [jmp x--].
+
+   It is the first program here longer than a page: the start and the
+   preamble sit at the end of page 0 and the bit loops in page 1. *)
+let eth_tx_origin = 51
+let eth_tx_odd = eth_tx_origin + 2
+
+let eth_tx =
+  {|
+        .side_set 2
+        pull            side 0      ; wait for a frame's first word
+        jmp go          side 0
+        pull            side 0      ; start here for an odd number of bytes:
+        out null, 8     side 0      ;   the first word holds one
+go:     set y, 30       side 0
+pre:    nop             side 2 [1]  ; preamble: a 1 ...
+        nop             side 1 [1]
+        nop             side 1 [1]  ; ... and a 0, 31 times
+        jmp y-- pre     side 2 [1]
+        mov crc, null   side 2      ; it ends 1, 1. The CRC starts with the frame
+        set page, 1     side 2
+        nop             side 1
+        jmp d1          side 1      ; the second 1 is the bit loop's first turn
+
+d1:     out x, 1        side 2      ; sending a 1 from the frame
+        jmp !osre d1m   side 2
+        mov osr, crc    side 1      ; the data has run out: the FCS, low half
+        jmp !x c0       side 1
+c1:     out x, 1        side 2      ; sending a 1 from the FCS's low half
+        jmp !osre c1m   side 2
+        mov osr, crc    side 1      ; its high half
+        jmp !x e0       side 1
+e1:     out x, 1        side 2      ; sending a 1 from the FCS's high half
+        jmp !osre e1m   side 2
+        jmp !x e1z      side 1      ; one bit left, in X
+        jmp last1       side 1
+
+d0:     out x, 1        side 1      ; the same three, sending a 0
+        jmp !osre d0m   side 1
+        mov osr, crc    side 2
+        jmp x-- c1      side 2
+c0:     out x, 1        side 1
+        jmp !osre c0m   side 1
+        mov osr, crc    side 2
+        jmp x-- e1      side 2
+e0:     out x, 1        side 1
+        jmp !osre e0m   side 1
+        jmp x-- e0o     side 2
+        jmp last0       side 2
+
+d1m:    jmp !x d1z      side 1      ; the second half of the bit, and on to
+        jmp d1          side 1      ;   the loop for the next
+d1z:    jmp d0          side 1
+c1m:    jmp !x c1z      side 1
+        jmp c1          side 1
+c1z:    jmp c0          side 1
+e1m:    jmp !x e1z2     side 1
+        jmp e1          side 1
+e1z2:   jmp e0          side 1
+d0m:    jmp !x d0z      side 2
+        jmp d1          side 2
+d0z:    jmp d0          side 2
+c0m:    jmp !x c0z      side 2
+        jmp c1          side 2
+c0z:    jmp c0          side 2
+e0m:    jmp !x e0z      side 2
+        jmp e1          side 2
+e0z:    jmp e0          side 2
+
+e1z:    jmp last0       side 1
+e0o:    jmp last1       side 2
+last1:  nop             side 2 [1]  ; the last bit, a 1: low, then high
+        nop             side 1 [1]
+idle:   nop             side 1 [3]  ; start of idle: TD+ high for three bit times
+        nop             side 1 [3]
+        nop             side 1 [3]
+park:   jmp park        side 0
+last0:  nop             side 1 [1]  ; the last bit, a 0: high, then low
+        nop             side 2
+        jmp idle        side 2
+|}
+;;
+
+(* CRC-32 as Ethernet sends it: the polynomial low power first, the
+   register starting as all ones and sent inverted. *)
+let eth_tx_config ~odd =
+  { Isa.Thread_config.default with
+    start = (if odd then eth_tx_odd else eth_tx_origin)
+  ; threshold = 16
+  ; sideset_base = 0
+  ; sideset_count = 2
+  ; autopull = true
+  ; crc_poly = 0xEDB88320
+  ; crc_init = 0xFFFF_FFFF
+  ; crc_invert = true
+  }
+;;
+
+let eth_tx_image () = Asm.link [ eth_tx_origin, Asm.assemble ~origin:eth_tx_origin eth_tx ]
+
+(* The buffer's words for a frame of bytes, as [eth_tx] wants them. *)
+let eth_tx_words bytes =
+  let odd = List.length bytes % 2 = 1 in
+  let bytes = if odd then 0 :: bytes else bytes in
+  List.chunks_of bytes ~length:2
+  |> List.map ~f:(function
+    | [ a; b ] -> a lor (b lsl 8)
+    | _ -> assert false)
+;;
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo
