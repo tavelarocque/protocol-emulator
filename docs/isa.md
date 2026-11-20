@@ -1,4 +1,4 @@
-# Protocol emulator ISA, v2.0
+# Protocol emulator ISA, v2.2
 
 This document describes the instruction set in prose. The normative version
 is the executable model in `model/isa.ml`: where the two disagree, the model

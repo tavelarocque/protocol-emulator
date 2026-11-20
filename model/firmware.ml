@@ -2172,8 +2172,16 @@ let nes_pad_config =
    60 bytes, no FCS: two bytes a word, the first in bits 7:0. A frame with
    an odd number of bytes starts at [eth_tx_odd] instead and its first word
    holds only its first byte, in bits 15:8. The host then sets the buffer
-   playing into this thread and enables the thread. After the frame the
-   thread parks; the host stops it before the next.
+   playing into this thread and enables the thread. The host stops the
+   thread before the next frame.
+
+   Between frames the thread sends link pulses, which is how the other end
+   of a 10BASE-T link knows anyone is there: TD+ high for 100 ns every
+   16 ms. The 16 ms is ten waits of TIMEOUT ticks each, on a pin that can
+   never be seen high because it is this thread's own TD+ driven low; each
+   one ends at the timeout vector, [eth_tx_tick], which counts it. A host
+   that wants the pulses before it has sent anything starts the thread at
+   [eth_tx_link].
 
    Every bit has four slots. The first fetches the bit after the one on the
    wire into X, the second asks whether the OSR is empty, and the last two
@@ -2259,7 +2267,11 @@ last1:  nop             side 2 [1]  ; the last bit, a 1: low, then high
 idle:   nop             side 1 [3]  ; start of idle: TD+ high for three bit times
         nop             side 1 [3]
         nop             side 1 [3]
-park:   jmp park        side 0
+link:   set y, 9        side 0      ; between frames: ten waits of TIMEOUT ticks,
+lwait:  wait 1 pin 0 timeout side 0 ;   each on TD+, which this thread holds low,
+ltick:  jmp y-- lwait   side 0      ;   and each ending here, at the timeout vector
+        nop             side 1 [3]  ; then a link pulse: TD+ high for 100 ns
+        jmp link        side 0
 last0:  nop             side 1 [1]  ; the last bit, a 0: high, then low
         nop             side 2
         jmp idle        side 2
@@ -2268,9 +2280,18 @@ last0:  nop             side 1 [1]  ; the last bit, a 0: high, then low
 
 (* CRC-32 as Ethernet sends it: the polynomial low power first, the
    register starting as all ones and sent inverted. *)
+(* [link] and [ltick] in the program above. *)
+let eth_tx_link = eth_tx_origin + 62
+let eth_tx_tick = eth_tx_link + 2
+
+(* A tenth of the time between link pulses, in clocks: 1.6 ms at 40 MHz. *)
+let eth_tx_link_ticks = 64_000
+
 let eth_tx_config ~odd =
   { Isa.Thread_config.default with
     start = (if odd then eth_tx_odd else eth_tx_origin)
+  ; timeout_vector = eth_tx_tick
+  ; timeout = eth_tx_link_ticks
   ; threshold = 16
   ; sideset_base = 0
   ; sideset_count = 2

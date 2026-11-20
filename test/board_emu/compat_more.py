@@ -168,10 +168,11 @@ _show("buffer", _chip)
 
 _chip = _Recorder()
 _e = EthernetTx(_chip, _image)
+EthernetTx(_chip, _image, link_ticks=400)
 _e.send(bytes(range(60)))
 _e.send(bytes(range(7)))  # padded to 60
 _e.send(bytes(range(61)))  # an odd length
-_chip.pc = EthernetTx.PARK
+_chip.pc = EthernetTx.LINK
 print("ethernet tx sent", _e.sent())
 _show("ethernet tx", _chip)
 

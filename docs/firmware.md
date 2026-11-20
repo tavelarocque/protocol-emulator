@@ -4,7 +4,10 @@ Every protocol engine, what it does and what it cost. The assembly is in
 [`examples/`](../examples), one file per engine, generated from the source
 the tests run: [`model/firmware.ml`](../model/firmware.ml). Each thread
 has 256 words of program memory, in four pages of 64; every engine here
-fits in one page.
+fits in one page except the Ethernet transmitter, which crosses into a
+second. The two Ethernet programs are placed at addresses of their own, so
+they are not in `examples/`; their source is in `model/firmware.ml` with
+the rest.
 
 ## Engines
 
@@ -36,7 +39,7 @@ fits in one page.
 | NEC infrared receiver | 33 | on an IR receiver module's output; reads each bit once, 1.3 units after its burst; tolerates a remote 20% fast or slow, ignores repeat codes, and never lets a frame cut short put the host's pairs of words out of step |
 | PWM, and RC servo pulses | 8 | high time and period each exact to the tick; the two counts live in the two shift registers, which leaves X free to count |
 | NES gamepad | 7 | read as the console reads it: latch, then eight clocks, a button read as each clock falls |
-| 10BASE-T Ethernet transmitter | 66 | a whole frame at 10 Mbit/s with a 40 MHz clock, 4 clocks a bit: preamble, start-of-frame delimiter, the frame played from the packet buffer, its CRC-32 from the CRC register, the idle signal. Frames up to the full 1514 bytes. The first program longer than a page |
+| 10BASE-T Ethernet transmitter | 70 | a whole frame at 10 Mbit/s with a 40 MHz clock, 4 clocks a bit: preamble, start-of-frame delimiter, the frame played from the packet buffer, its CRC-32 from the CRC register, the idle signal. Frames up to the full 1514 bytes. Between frames, a link pulse of 100 ns every 16 ms, timed by ten waits that run out. The first program longer than a page |
 | 10BASE-T Ethernet receiver | 14 | frames at 10 Mbit/s with a 40 or 50 MHz clock. The bit sampler recovers the sender's clock and decodes the Manchester code; the program takes each bit with one IN, counts it, lets the CRC register follow it, and at the end of the frame pushes the count and the CRC for the host to check. The packet buffer records the frame. Frames up to the full 1518 bytes with the check sequence |
 
 Everything from the I2C target down to CAN was written after the hardware
@@ -55,7 +58,12 @@ needed and nothing about Ethernet: automatic refill of the OSR, the packet
 buffer and a CRC register with the polynomial the host's to set
 ([`isa.md`](isa.md), revision history). On the reference model its frames
 are taken by a receiver written from IEEE 802.3, and at chip level by one
-whose CRC-32 is Python's `zlib`. No link pulses yet.
+whose CRC-32 is Python's `zlib`. Between frames it sends the link pulses
+that tell a switch or a network card someone is there: the 16 ms between
+them is ten waits on the thread's own TD+ pin, which it holds low, so
+each wait runs out and lands on the timeout vector that counts it. The
+chip's own receiver, listening to the same pin, takes none of them for
+data.
 
 The receiver is the first engine on v2.2, which added the bit sampler: the
 one thing a thread could not do at 4 clocks a bit was find the bit, so
@@ -83,16 +91,28 @@ decoder for the bus:
 | LM75 temperature sensor | I2C controller | sigrok's LM75 decoder reads the temperature |
 | SPI NOR flash commands | SPI controller | sigrok's flash decoder names the commands, the address and the data; picosoc's flash model answers |
 | WS2801 LED pixels | SPI controller | sigrok's decoder for SPI LED strips reads the colours |
+| nRF24L01 radio | SPI controller | sigrok's nRF24L01 decoder names each command and reads the register the device answered with |
+| CC1101 radio | SPI controller | sigrok's CC1101 decoder reads the strobes, a register write and read, and the status byte |
+| RFM12 radio | SPI controller, 16-bit commands | sigrok's RFM12 decoder reads the band and crystal load the configuration sets |
+| MRF24J40 802.15.4 radio | SPI controller | sigrok's MRF24J40 decoder reads short- and long-address register accesses |
+| ENC28J60 Ethernet controller | SPI controller | sigrok's ENC28J60 decoder reads a reset, a register write, a read and a bit set |
+| ADF435x synthesiser | SPI controller, 32-bit writes | sigrok's ADF435x decoder reads the fields of each register |
+| SD card, SPI mode | SPI controller | sigrok's SD card decoder reads CMD0 and CMD8 with their arguments and CRCs, and the card's answers |
 
 One limit these tests turned up: the I2C controller starts a transfer only
 after a STOP, so it cannot send the repeated START some devices ask for
 between setting a register pointer and reading. The devices above accept a
 STOP there; one that does not is out of reach until the firmware learns it.
 
+For the last seven rows the device is a script of the bytes the part would
+answer, not a model of the part. The drivers for them are the SPI
+controller's `transfer`; nothing is added to the host library.
+
 **The blind test.** The WS2812 driver was written by a programmer (an AI
 agent) given only [`isa.md`](isa.md) and the simulator. It passed a hidden
 test of the LEDs' data-sheet timing on its first submission, in about five
-minutes. Task, notes and the hidden test:
+minutes. Loaded on the chip with its own encoder, it is also read by
+sigrok's WS281x decoder. Task, notes and the hidden test:
 [`examples/ws2812`](../examples/ws2812).
 
 ## Two programs at once

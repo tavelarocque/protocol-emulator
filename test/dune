@@ -256,3 +256,13 @@
   (with-stdout-to
    eth_rx.hex
    (run %{dep:../bin/firmware_hex.exe} eth_rx))))
+
+; The blind-written WS2812 driver (examples/ws2812), for the chip-level
+; test that hands its pin to sigrok's decoder.
+(rule
+ (targets ws2812.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   ws2812.hex
+   (run %{dep:../bin/pe_sim.exe} asm %{dep:../examples/ws2812/ws2812.s}))))

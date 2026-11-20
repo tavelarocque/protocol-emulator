@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" width="880" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 500" width="880" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
 <defs>
 <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#57606a"/></marker>
 </defs>
@@ -14,7 +14,9 @@
 <rect x="360" y="108" width="300" height="140" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
 <rect x="360" y="282" width="300" height="140" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
 <!-- pins -->
-<rect x="716" y="108" width="148" height="314" rx="6" fill="#fbefff" stroke="#8250df"/>
+<rect x="716" y="108" width="148" height="344" rx="6" fill="#fbefff" stroke="#8250df"/>
+<!-- packet buffer -->
+<rect x="176" y="330" width="130" height="92" rx="6" fill="#fff8c5" stroke="#9a6700"/>
 <!-- fifos -->
 <rect x="376" y="196" width="118" height="38" rx="4" fill="#ffffff"/>
 <rect x="526" y="196" width="118" height="38" rx="4" fill="#ffffff"/>
@@ -29,6 +31,7 @@
 <path d="M600 76V92H684V266H600V280" marker-end="url(#a)"/>
 <path d="M660 160H714" marker-end="url(#a)" marker-start="url(#a)"/>
 <path d="M660 380H714" marker-end="url(#a)" marker-start="url(#a)"/>
+<path d="M306 376H358" marker-end="url(#a)" marker-start="url(#a)"/>
 <path d="M585 234V265H435V294" stroke="#cf222e" stroke-dasharray="5 4" marker-end="url(#a)"/>
 <path d="M864 150H876M864 185H876M864 220H876M864 255H876M864 290H876M864 325H876M864 360H876M864 395H876"/>
 </g>
@@ -48,7 +51,7 @@
 <text x="510" y="64" text-anchor="middle" font-size="12">two SRAM macros, one for each thread</text>
 <text x="376" y="130" font-weight="600">Thread 0</text>
 <text x="376" y="150" font-size="12">PC, X, Y, OSR, ISR, delay and timeout counters,</text>
-<text x="376" y="166" font-size="12">clock divider. One instruction per clock.</text>
+<text x="376" y="166" font-size="12">clock divider, CRC. One instruction per clock.</text>
 <text x="435" y="220" text-anchor="middle" font-size="12">TX FIFO, 4 deep</text>
 <text x="585" y="220" text-anchor="middle" font-size="12">RX FIFO, 4 deep</text>
 <text x="376" y="364" font-weight="600">Thread 1</text>
@@ -69,6 +72,14 @@
 <text x="790" y="346" text-anchor="middle" font-size="12">a thread reads</text>
 <text x="790" y="362" text-anchor="middle" font-size="12">the other's output</text>
 <text x="790" y="378" text-anchor="middle" font-size="12">with no delay</text>
-<text x="16" y="452" font-size="12" fill="#57606a">A protocol is a program in the memory. Nothing in the hardware is specific to any protocol.</text>
+<text x="790" y="414" text-anchor="middle" font-size="12">bit sampler:</text>
+<text x="790" y="430" text-anchor="middle" font-size="12">clock recovery</text>
+<text x="790" y="446" text-anchor="middle" font-size="12">for one pin</text>
+<text x="241" y="352" text-anchor="middle" font-weight="600">Packet buffer</text>
+<text x="241" y="372" text-anchor="middle" font-size="12">1024 words in a</text>
+<text x="241" y="388" text-anchor="middle" font-size="12">third SRAM; plays</text>
+<text x="241" y="404" text-anchor="middle" font-size="12">into a FIFO or</text>
+<text x="241" y="420" text-anchor="middle" font-size="12">records from one</text>
+<text x="16" y="484" font-size="12" fill="#57606a">A protocol is a program in the memory. Nothing in the hardware is specific to any protocol.</text>
 </g>
 </svg>

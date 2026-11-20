@@ -113,7 +113,7 @@ let receive trace ~from =
 (* The host's part, in the order a driver does it: with the thread stopped,
    fill the buffer, point it at the start, set it playing into thread 0,
    start the thread. Returns the two pins on every clock after that. *)
-let send ?(source = Firmware.eth_tx) ?(config = Firmware.eth_tx_config) bytes =
+let send ?(source = Firmware.eth_tx) ?(config = Firmware.eth_tx_config) ?(after = 200) bytes =
   let modes = Array.init Isa.num_pins ~f:(fun i -> if i < 2 then Isa.Pin_mode.Push_pull else Input) in
   let odd = List.length bytes % 2 = 1 in
   let image = Asm.link [ Firmware.eth_tx_origin, Asm.assemble ~origin:Firmware.eth_tx_origin source ] in
@@ -131,13 +131,76 @@ let send ?(source = Firmware.eth_tx) ?(config = Firmware.eth_tx_config) bytes =
   (* One clock for the thread to leave reset and drive the pair idle. *)
   Isa.step m ~inputs:0xFF;
   Isa.step m ~inputs:0xFF;
-  let clocks = (4 * 8 * (List.length bytes + 12)) + 200 in
+  let clocks = (4 * 8 * (List.length bytes + 12)) + after in
   Array.init clocks ~f:(fun _ ->
     Isa.step m ~inputs:0xFF;
     Isa.pin_out m)
 ;;
 
 let random_frame rs length = List.init length ~f:(fun _ -> Random.State.int rs 256)
+
+(* --- Link pulses ------------------------------------------------------------------ *)
+
+(* Where the pair is not idle in a trace: the clock each stretch starts at,
+   how many clocks it lasts, and the two pins through it if they never
+   change (TD+ in bit 0). *)
+let stretches trace =
+  let found = Queue.create () in
+  let start = ref None in
+  Array.iteri (Array.append trace [| 0 |]) ~f:(fun t v ->
+    let v = v land 3 in
+    match !start with
+    | None -> if v <> 0 && v <> 3 then start := Some (t, v, true)
+    | Some (t0, v0, same) ->
+      if v = 0 || v = 3
+      then (
+        Queue.enqueue found (t0, t - t0, if same then Some v0 else None);
+        start := None)
+      else if v <> v0
+      then start := Some (t0, v0, false));
+  Queue.to_list found
+;;
+
+let%test_unit "Ethernet: with nothing to send, a link pulse every 16 ms" =
+  (* IEEE 802.3 14.2.1.1: a pulse every 16 ms, give or take 8, and the
+     pulse itself TD+ above TD- for about one bit time. Here: 100 ns, four
+     clocks at 40 MHz, and 640,000 clocks apart to within a thousandth. *)
+  let modes = Array.init Isa.num_pins ~f:(fun i -> if i < 2 then Isa.Pin_mode.Push_pull else Input) in
+  let m =
+    Isa.create
+      ~program:(Firmware.eth_tx_image ())
+      ~pin_modes:modes
+      ~threads:[ { (Firmware.eth_tx_config ~odd:false) with start = Firmware.eth_tx_link } ]
+  in
+  let trace =
+    Array.init (3 * 641_000) ~f:(fun _ ->
+      Isa.step m ~inputs:0xFF;
+      Isa.pin_out m)
+  in
+  match stretches trace with
+  | [ (a, 4, Some 1); (b, 4, Some 1); (c, 4, Some 1) ] ->
+    List.iter [ a; b - a; c - b ] ~f:(fun gap ->
+      if gap < 639_500 || gap > 640_500 then raise_s [%message "link pulses not 16 ms apart" (gap : int)])
+  | other -> raise_s [%message "not three link pulses" (other : (int * int * int option) list)]
+;;
+
+let%test_unit "Ethernet: after a frame the link pulses carry on" =
+  let rs = Random.State.make [| 802; 3; 20 |] in
+  let frame = random_frame rs 60 in
+  let trace = send ~after:650_000 frame in
+  (* The receiver wants an idle line after the frame: give it the trace up
+     to well before the pulse. *)
+  (match receive (Array.sub trace ~pos:0 ~len:(Array.length trace - 649_800)) ~from:0 with
+   | Ok got -> [%test_result: int list] got ~expect:frame
+   | Error why -> raise_s [%message "frame not received" why]);
+  (* The frame is one long stretch; the one after it is a link pulse, 16 ms
+     after the frame ended. *)
+  match stretches trace with
+  | [ (start, length, None); (pulse, 4, Some 1) ] ->
+    let gap = pulse - (start + length) in
+    if gap < 639_500 || gap > 640_500 then raise_s [%message "first link pulse not 16 ms after the frame" (gap : int)]
+  | other -> raise_s [%message "not a frame and then one link pulse" (other : (int * int * int option) list)]
+;;
 
 let%test_unit "Ethernet: frames of 60 to 1514 bytes arrive whole, with a good FCS" =
   let rs = Random.State.make [| 802; 3 |] in

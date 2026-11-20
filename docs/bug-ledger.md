@@ -2,9 +2,9 @@
 
 Every real bug the verification found is in the table in
 [`design-and-verification.md`](design-and-verification.md), section 5.
-This page tells eleven of them in full, chosen because each was found by a
-different layer and would have been missed by the others. The last four
-are from v2.0. A check that has
+This page tells thirteen of them in full, chosen because each was found by a
+different layer and would have been missed by the others. Four are from
+v2.0 and the last two from the Ethernet work on v2.1 and v2.2. A check that has
 found nothing has not been shown to work; these are what the checks found.
 
 ## 1. A handshake over a thousand times too late, visible only on the emulated board
@@ -218,3 +218,53 @@ requires the two to ask the chip for exactly the same things.
 *Found by:* MicroPython on the emulated board. *Lesson:* "the same file,
 unchanged" is only a claim about the board if the file is also run where
 the board runs it.
+
+## 12. A frame with no beginning
+
+The Ethernet transmitter was written and tested on the reference model
+first. A receiver written from IEEE 802.3 decoded every frame it sent, at
+every length, and checked each Manchester cell to the clock. The RTL was
+then compared with the model, cycle by cycle, and proved against its
+specifications.
+
+The first chip-level test failed anyway: the receiver in the test bench
+did not find the frame. The first guess was the odd-length case, which was
+new and intricate, and it was wrong. Logging the thread's program counter
+showed the thread already running while the pins were still inputs. What
+the model's test did, and the driver did not, was make the two pins
+outputs before starting the thread. The driver started the thread and then set the pin modes over
+SPI, hundreds of clocks later. By then the preamble's first bits had been
+driven into pins that were still inputs, and a preamble that starts in the
+middle is not one.
+
+The driver now makes the pins outputs when it is created, both high,
+which is no voltage across the pair, and the receivers treat that as an
+idle line.
+
+*Found by:* the chip-level test running the real driver. *Lesson:* the
+model's tests proved the firmware. The order of the driver's own steps is
+part of the protocol too, and only running the driver tests it.
+
+## 13. The planted bug that luck was catching
+
+One of the bugs planted for the packet buffer plays a word in the cycle
+after the host writes one, before the memory has read it back. The rule
+for every planted RTL bug is that the 400 random programs must catch it,
+and they did.
+
+When the bit sampler was added, the random programs drew a few more
+random numbers each, and every trial after that point became a different
+trial. The build failed: this one planted bug now survived all 400. The
+earlier result showed why. It had been caught by program 140 and no
+other, and the coverage report had the case it needs, a write followed at
+once by the buffer set playing, at one or two occurrences in 120,000
+cycles. One lucky trial had been standing in for a test.
+
+The random host now sets the buffer playing straight after a write in a
+third of the cycles where it can. The eighth program catches the bug, and
+a directed scenario written for it catches it every time.
+
+*Found by:* the planted-bug suite, when an unrelated change reshuffled
+the random trials. *Lesson:* "caught by one program in 400" is a warning,
+not a pass. The suite prints which program first catches each bug, and a
+late one is worth a look before chance moves it.

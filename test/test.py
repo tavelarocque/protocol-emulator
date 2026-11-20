@@ -1427,6 +1427,7 @@ async def test_onewire_read_rom(dut):
     for k in range(3):
         await reset(dut)
         devs, tasks = await onewire_start(dut, [k])
+        wire = sigrok.Trace(dut, {"owr": lambda: str(dut.onewire.value) != "0"})
         chip = pe.Chip(sim_port(dut))
 
         @bridge
@@ -1435,6 +1436,25 @@ async def test_onewire_read_rom(dut):
             return ow.read_rom(), ow.ds18b20_temperature()
 
         rom, temp = await session()
+        wire.stop()
+        if sigrok.available() and k > 0:
+            # sigrok's 1-Wire decoders on the wire itself, device and all:
+            # the reset and presence, READ ROM and the code the device
+            # sent, then the conversion and the nine-byte scratchpad read.
+            # Not for the fastest device: it lets go of the wire 15 us into
+            # a slot, which is where sigrok samples, and sigrok reads ones.
+            # The chip samples sooner and reads it right (above).
+            stack = "onewire_link:owr=owr,onewire_network"
+            found = wire.decode(stack, "onewire_network")
+            code = "ROM: 0x%016x" % int.from_bytes(devs[k].rom, "little")
+            want = ["Reset/presence: true", "ROM command: 0x33 'Read ROM'", code, "Reset/presence: true",
+                    "ROM command: 0xcc 'Skip ROM'", "Data: 0x44", "Reset/presence: true",
+                    "ROM command: 0xcc 'Skip ROM'", "Data: 0xbe"]
+            assert texts(found)[:len(want)] == want, texts(found)
+            assert len(found) == len(want) + 9, texts(found)
+            # The wire held low while the device sends its code: not that code.
+            a, b = next((a, b) for a, b, text in found if text == code)
+            assert code not in texts(wire.forced("owr", a, b, 0).decode(stack, "onewire_network"))
         for t in tasks:
             t.cancel()
         assert rom == devs[k].rom, f"device {k}: ROM {rom.hex()}"
@@ -2215,6 +2235,8 @@ async def test_usb_get_descriptor(dut):
     await usb_start(dut)
     trace = []
     cocotb.start_soon(usb_monitor(dut, trace))
+    wires = sigrok.Trace(dut, {"dp": lambda: str(dut.usb_dp.value) == "1",
+                               "dm": lambda: str(dut.usb_dm.value) == "1"}, clock_hz=12_000_000)
     chip = pe.Chip(sim_port(dut))
 
     @bridge
@@ -2223,7 +2245,29 @@ async def test_usb_get_descriptor(dut):
         return usb.control_read(0, GET_DEVICE_DESCRIPTOR, 18)
 
     descriptor = await read()
+    wires.stop()
     assert descriptor == USB_DEVICE_DESCRIPTOR, f"descriptor {descriptor}"
+    if sigrok.available():
+        # sigrok's USB decoders, three deep, on D+ and D- as recorded: the
+        # line states, then the packets with their CRCs, then the request.
+        def show(data):
+            return "[ " + " ".join(f"{b:02X}" for b in data) + " ]"
+
+        stack = "usb_signalling:dp=dp:dm=dm:signalling=low-speed,usb_packet"
+        found = wires.decode(stack, "usb_packet")
+        read = iter(texts(found))
+        first = "DATA1 " + show(USB_DEVICE_DESCRIPTOR[:8])
+        want = ["SETUP ADDR 0 EP 0", "DATA0 " + show(GET_DEVICE_DESCRIPTOR), "ACK", "IN ADDR 0 EP 0", first,
+                "ACK", "IN ADDR 0 EP 0", "DATA0 " + show(USB_DEVICE_DESCRIPTOR[8:16]), "ACK",
+                "IN ADDR 0 EP 0", "DATA1 " + show(USB_DEVICE_DESCRIPTOR[16:]), "ACK"]
+        assert all(text in read for text in want), texts(found)
+        # The decoder checks each packet's SYNC, PID and CRC, and says so.
+        assert not any("ERR" in text for text in texts(found)), texts(found)
+        request = f"SETUP in: {show(GET_DEVICE_DESCRIPTOR)}{show(USB_DEVICE_DESCRIPTOR)} : ACK"
+        assert request in texts(wires.decode(stack + ",usb_request", "usb_request"))
+        # D+ held high through the device's first data packet: not that packet.
+        a, b = next((a, b) for a, b, text in found if text == first)
+        assert first not in texts(wires.forced("dp", a, b, 1).decode(stack, "usb_packet"))
     packets = usb_packets(trace)
     assert all(isinstance(b, list) for _, b in packets), f"undecodable: {packets}"
     pids = [(who, b[0]) for who, b in packets]
@@ -3202,7 +3246,9 @@ async def test_ethernet(dut):
     """10BASE-T Ethernet transmit at a 40 MHz clock: whole frames from the
     packet buffer, with the preamble, the Manchester code, the CRC-32 and
     the idle signal made on the chip. An ARP request, the same with one
-    more byte (an odd length), and a frame of the largest size."""
+    more byte (an odd length), and a frame of the largest size. Then the
+    link pulses the chip sends between frames, with the time between them
+    cut from 16 ms to 100 us so that a few go by."""
     await reset(dut, period_ps=25_000)
     chip = pe.Chip(sim_port(dut))
     arp = bytes.fromhex(
@@ -3241,6 +3287,32 @@ async def test_ethernet(dut):
         want = frame + bytes(max(0, 60 - len(frame)))
         assert got == want, f"{len(frame)} bytes sent, {len(got)} received"
         levels.clear()
+
+    @bridge
+    def link_only():
+        more.EthernetTx(chip, firmware("eth_tx"), link_ticks=400)
+
+    await link_only()
+    watcher = cocotb.start_soon(watch())
+    await ClockCycles(dut.clk, 4 * 4030)
+    watcher.kill()
+    # A link pulse is TD+ high and TD- low for 100 ns, four clocks; the
+    # rest of the time the pair is idle.
+    pulses, t = [], 0
+    while t < len(levels):
+        if levels[t] == (1, 0):
+            length = 1
+            while t + length < len(levels) and levels[t + length] == (1, 0):
+                length += 1
+            pulses.append((t, length))
+            t += length
+        else:
+            assert levels[t][0] == levels[t][1], f"TD+ low and TD- high between frames, clock {t}"
+            t += 1
+    assert len(pulses) >= 3, f"{len(pulses)} link pulses in {len(levels)} clocks"
+    assert all(length == 4 for _, length in pulses), f"link pulses not 4 clocks long: {pulses}"
+    gaps = [b[0] - a[0] for a, b in zip(pulses, pulses[1:])]
+    assert all(4000 <= gap <= 4060 for gap in gaps), f"link pulses not 10 waits of 400 apart: {gaps}"
 
 
 def ethernet_line(frame, start_ps, bit_ps=100_000, jitter_ps=0, rng=None, bad_fcs=False):
@@ -3332,3 +3404,226 @@ async def test_ethernet_receive(dut):
     for n, (g, w) in enumerate(zip(got, want)):
         assert g[1] == w[1], f"frame {n}: CRC {'good' if g[1] else 'bad'}, should be the other"
         assert g[0] == w[0], f"frame {n}: {len(w[0])} bytes sent, {len(g[0])} read back, or they differ"
+
+
+async def spi_device(dut, replies):
+    """A device on the SPI controller's pins that answers each selection
+    with the next string of bytes from [replies], most significant bit
+    first, the first bit as CS_N falls and each next one as SCK falls: what
+    a mode-0 device does. High when it has nothing left to say."""
+    selections, was_cs, was_sck, bits = 0, 1, 0, []
+    while True:
+        await FallingEdge(dut.clk)  # mid-cycle: chip outputs have settled
+        out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+        sck = out & oe & 1
+        cs = (out >> 3) & 1 if (oe >> 3) & 1 else 1  # not selected until the chip drives it
+        step = False
+        if was_cs and not cs:
+            data = replies[selections] if selections < len(replies) else b""
+            selections += 1
+            bits = [(byte >> k) & 1 for byte in data for k in range(7, -1, -1)]
+            step = True
+        elif not cs and was_sck and not sck:
+            step = True
+        if step:
+            dut.uio_in.value = (int(dut.uio_in.value) & ~4) | ((bits.pop(0) if bits else 1) << 2)
+        was_cs, was_sck = cs, sck
+
+
+async def spi_device_session(dut, transfers):
+    """Runs [transfers], each (bytes sent, bytes the device answers), on the
+    SPI controller against [spi_device]. Returns the recorded pins and what
+    the controller read back in each."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    trace = sigrok.Trace(dut, {
+        "sck": lambda: int(dut.uio_out.value) & 1,
+        "mosi": lambda: (int(dut.uio_out.value) >> 1) & 1,
+        "miso": lambda: (int(dut.uio_in.value) >> 2) & 1,
+        "cs": lambda: (int(dut.uio_out.value) >> 3) & 1 if (int(dut.uio_oe.value) >> 3) & 1 else 1,
+    })
+    device = cocotb.start_soon(spi_device(dut, [bytes(reply) for _, reply in transfers]))
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def run():
+        spi = pe.SpiController(chip, firmware("spi_fast"))
+        return [bytes(spi.transfer(list(sent))) for sent, _ in transfers]
+
+    read = await run()
+    await ClockCycles(dut.clk, 500)
+    trace.stop()
+    device.kill()
+    for (sent, reply), got in zip(transfers, read):
+        want = bytes(reply) + bytes([0xFF] * (len(sent) - len(reply)))
+        assert got == want, f"sent {bytes(sent).hex()}: read {got.hex()}, the device answered {want.hex()}"
+    return trace
+
+
+SPI_BUS = "spi:clk=sck:mosi=mosi:miso=miso:cs=cs"
+
+
+def spi_judged(trace, decoder, want, damage, line):
+    """sigrok's [decoder], stacked on its SPI decoder, must read [want] in
+    the recording: every text, in that order. Then, with [line] held high
+    for as long as the text [damage] spans, that text must be gone."""
+    stack = SPI_BUS + "," + decoder
+    found = trace.decode(stack, decoder)
+    read = iter(texts(found))
+    assert all(text in read for text in want), texts(found)
+    spans = [(a, b) for a, b, text in found if text == damage]
+    assert len(spans) == 1, f"{damage!r} read {len(spans)} times"
+    a, b = spans[0]
+    assert damage not in texts(trace.forced(line, a, b, 1).decode(stack, decoder)), damage
+
+
+H = bytes.fromhex
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_nrf24l01(dut):
+    """An nRF24L01 radio on the SPI controller: two registers set, a
+    payload queued, a register read back, the transmit FIFO flushed.
+    sigrok's nRF24L01 decoder must read each command, and the register the
+    device answered with."""
+    trace = await spi_device_session(dut, [
+        (H("200e"), H("0e")), (H("254c"), H("0e")), (H("a0deadbeef"), H("0e")),
+        (H("05ff"), H("0e4c")), (H("e1"), H("0e"))])
+    if sigrok.available():
+        spi_judged(trace, "nrf24l01",
+                   ['Cmd W_REGISTER: CONFIG = "0E"', 'Cmd W_REGISTER: RF_CH = "4C"', 'Cmd W_TX_PAYLOAD',
+                    'Cmd R_REGISTER "RF_CH"', 'Reg RF_CH = "4C"', 'Cmd FLUSH_TX'],
+                   damage='Reg RF_CH = "4C"', line="miso")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_cc1101(dut):
+    """A CC1101 sub-GHz radio on the SPI controller: a reset strobe, the
+    channel register written and read back, a no-operation strobe. sigrok's
+    CC1101 decoder must read all four, with the status byte the device
+    returns each time."""
+    trace = await spi_device_session(dut, [
+        (H("30"), H("0f")), (H("0a05"), H("0f0f")), (H("8a00"), H("0f05")), (H("3d"), H("0f"))])
+    if sigrok.available():
+        spi_judged(trace, "cc1101",
+                   ["Strobe SRES", "Status = 0F; STATE is IDLE, 15 bytes free in TX FIFO",
+                    "Write: CHANNR (0A) = 05", "Read: CHANNR (0A) = 05", "Strobe SNOP"],
+                   damage="Write: CHANNR (0A) = 05", line="mosi")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_adf435x(dut):
+    """An ADF4350 synthesiser on the SPI controller: 32-bit register
+    writes, latched as the select line rises. sigrok's ADF435x decoder must
+    read the fields of registers 5 and 4; it shows a write once the next
+    one begins, so a third follows."""
+    trace = await spi_device_session(dut, [(H("00580005"), b""), (H("008c803c"), b""), (H("000004b3"), b"")])
+    if sigrok.available():
+        spi_judged(trace, "adf435x",
+                   ["Register: 5", "LD Pin Mode: Digital Lock Detect", "Register: 4", "Output Power: +5dBm",
+                    "Output Enable: Enabled", "Band Select Clock Divider: 200", "RF Divider Select: ÷1"],
+                   damage="Band Select Clock Divider: 200", line="mosi")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_enc28j60(dut):
+    """An ENC28J60 Ethernet controller on the SPI controller: a system
+    reset, a control register written, read back, and one of its bits set.
+    sigrok's ENC28J60 decoder must read each command and the value the
+    device returned."""
+    trace = await spi_device_session(dut, [
+        (H("ff"), b""), (H("5f03"), b""), (H("1f00"), H("ff05")), (H("9f80"), b"")])
+    if sigrok.available():
+        spi_judged(trace, "enc28j60",
+                   ["System Reset Command", "Write Control Register", "Reg ECON1", "Data 0x03",
+                    "Read Control Register", "Reg ECON1", "Data 0x05", "Bit Field Set", "Reg ECON1",
+                    "Data 0b10000000"],
+                   damage="Data 0x05", line="miso")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_mrf24j40(dut):
+    """An MRF24J40 802.15.4 radio on the SPI controller: a short-address
+    register written, another read, and a long-address register written.
+    sigrok's MRF24J40 decoder must read all three, and what the status
+    register's bits mean."""
+    trace = await spi_device_session(dut, [(H("3701"), b""), (H("4800"), H("ff20")), (H("c01003"), b"")])
+    if sigrok.available():
+        spi_judged(trace, "mrf24j40",
+                   ["TXNCON: 0x1", "TXSTAT: 0x20", "CCAFAIL (channel busy)", "RFCON0: 0x3"],
+                   damage="TXSTAT: 0x20", line="miso")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_sd_card(dut):
+    """An SD card in SPI mode on the SPI controller: the first two commands
+    of every initialisation, CMD0 and CMD8, each answered by the card with
+    "idle". sigrok's SD card decoder must read the commands, their
+    arguments and CRCs, and the card's answers."""
+    trace = await spi_device_session(dut, [
+        (H("400000000095ffff"), H("ffffffffffffff01")),
+        (H("48000001aa87ffffffffffff"), H("ffffffffffffff01000001aa"))])
+    if sigrok.available():
+        spi_judged(trace, "sdcard_spi",
+                   ["Command: CMD0 (GO_IDLE_STATE)", "CRC7: 0x4a", "R1: 0x01", "Card is in idle state",
+                    "Command: CMD8 (SEND_IF_COND)", "Argument: 0x01aa", "CRC7: 0x43", "R1: 0x01"],
+                   damage="Argument: 0x01aa", line="mosi")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_rfm12(dut):
+    """An RFM12 radio module on the SPI controller: its 16-bit
+    configuration, power and frequency commands, and a status read.
+    sigrok's RFM12 decoder must read the band and the crystal load the
+    configuration command sets."""
+    trace = await spi_device_session(dut, [
+        (H("80e7"), b""), (H("8209"), b""), (H("a640"), b""), (H("0000"), H("4000"))])
+    if sigrok.available():
+        spi_judged(trace, "rfm12",
+                   ["Configuration command", "Frequency: 868MHz", "Capacitance: 12.0pF", "Power management",
+                    "Frequency setting"],
+                   damage="Frequency: 868MHz", line="mosi")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_ws2812(dut):
+    """The WS2812 driver that was written blind (examples/ws2812), on the
+    chip, with its own host-side encoder: two LEDs' colours. sigrok's WS281x
+    decoder must read both from the pin."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "ws2812_host", os.path.join(os.path.dirname(__file__), "..", "examples", "ws2812", "host.py"))
+    encoder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(encoder)
+    await reset(dut)
+    # The strip's data input has no pull-up: low until the chip drives it.
+    trace = sigrok.Trace(dut, {"din": lambda: int(dut.uio_out.value) & int(dut.uio_oe.value) & 1})
+    chip = pe.Chip(sim_port(dut))
+    leds = [(0xFF, 0x80, 0x00), (0x00, 0x40, 0xFF)]  # red, green, blue each
+
+    @bridge
+    def light():
+        chip.stop()
+        chip.load(firmware("ws2812"))
+        chip.configure(start=5, sideset_base=0, sideset_count=1, threshold=16, out_msb_first=True)
+        # The whole frame queued before the thread starts, so no bit waits
+        # on the host; the pin made an output once the thread holds it low.
+        for word in encoder.encode([leds]):
+            chip.push(word)
+        chip.run()
+        chip.set_pin_modes({0: pe.PUSH_PULL})
+
+    await light()
+    await ClockCycles(dut.clk, 8000)
+    trace.stop()
+    if sigrok.available():
+        def colours(found):
+            return [text for text in texts(found) if text.startswith("#")]
+
+        found = trace.decode("rgb_led_ws281x:din=din", "rgb_led_ws281x")
+        assert colours(found) == ["#ff8000", "#0040ff"], texts(found)
+        # The line held high through one bit time of the second LED: not
+        # its colour.
+        a, b = next((a, b) for a, b, text in found if text == "#0040ff")
+        wrong = colours(trace.forced("din", a + 26, a + 39, 1).decode("rgb_led_ws281x:din=din", "rgb_led_ws281x"))
+        assert wrong[:1] == ["#ff8000"] and "#0040ff" not in wrong, wrong

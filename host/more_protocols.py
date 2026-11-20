@@ -449,13 +449,18 @@ class EthernetTx:
     """10BASE-T Ethernet transmit (eth_tx.hex): TD+ on pin 0 and TD- on pin
     1, to a transformer through series resistors. The chip's clock must be
     40 MHz. The chip makes the preamble, the Manchester code, the CRC-32
-    and the idle signal; the host supplies the frame."""
+    and the idle signal, and between frames the link pulses that tell the
+    other end someone is there; the host supplies the frame."""
 
     START = 51  # eth_tx_origin; an odd number of bytes starts two words on
-    PARK = 113  # where the program waits once a frame is out
+    LINK = 113  # eth_tx_link: where the program sends link pulses between frames
+    TICK = 115  # eth_tx_tick: its timeout vector, which counts the waits between pulses
 
-    def __init__(self, chip, image):
+    def __init__(self, chip, image, link_ticks=64000):
+        """[link_ticks] is a tenth of the time between link pulses, in
+        clocks: 64000 is 16 ms at 40 MHz."""
         self.chip = chip
+        self.link_ticks = link_ticks
         chip.stop()
         chip.load(image)
         set_crc(chip, 0xEDB88320, 0xFFFFFFFF)
@@ -463,6 +468,13 @@ class EthernetTx:
         # Pins reset high. Both high is no voltage across the pair, which is
         # idle, so they can drive from now on; the program idles both low.
         chip.set_pin_modes({0: pe.PUSH_PULL, 1: pe.PUSH_PULL})
+        self._configure(self.LINK)
+        chip.run()
+
+    def _configure(self, start):
+        self.chip.configure(start=start, threshold=16, sideset_base=0, sideset_count=2,
+                            timeout_vector=self.TICK, timeout=self.link_ticks,
+                            auto=AUTOPULL | CRC_INVERT)
 
     def send(self, frame):
         """Send one frame: destination address to the end of the data, no
@@ -475,14 +487,14 @@ class EthernetTx:
             frame = b"\x00" + frame  # the first word holds one byte, in its top half
         words = [frame[k] | (frame[k + 1] << 8) for k in range(0, len(frame), 2)]
         self.chip.stop()
-        self.chip.configure(start=self.START + 2 * odd, threshold=16, sideset_base=0,
-                            sideset_count=2, auto=AUTOPULL | CRC_INVERT)
+        self._configure(self.START + 2 * odd)
         self.buffer.load(words)
         self.buffer.play(len(words))
         self.chip.run()
 
     def sent(self):
-        return self.chip.status()["pc"] == self.PARK
+        """True once the frame is out and the program is back to link pulses."""
+        return self.LINK <= self.chip.status()["pc"] <= self.LINK + 4
 
 
 def set_sampler(chip, pin, blank, sample, wrap, sync=None, misses=0, invert=False):

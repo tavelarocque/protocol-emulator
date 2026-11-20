@@ -319,6 +319,36 @@ let%test_unit "Ethernet: thread 1 receives the frame thread 0 sends" =
     expect_frame ~what:(sprintf "%d bytes" length) frame (Firmware.eth_rx_frame (Queue.to_list words)))
 ;;
 
+let%test_unit "Ethernet: the chip's own link pulses reach its receiver and record nothing" =
+  (* Thread 0 with nothing to send, so only link pulses; thread 1 receiving
+     from the same pin. Two pulses go by. *)
+  let modes = Array.init Isa.num_pins ~f:(fun i -> if i < 2 then Isa.Pin_mode.Push_pull else Input) in
+  let rx = Asm.assemble (String.substr_replace_all Firmware.eth_rx ~pattern:"pin 3" ~with_:"pin 1") in
+  let rx_image = Asm.link [ Firmware.eth_rx_origin, rx ] in
+  let m =
+    Isa.create_separate
+      ~programs:[| Firmware.eth_tx_image (); rx_image |]
+      ~pin_modes:modes
+      ~threads:
+        [ { (Firmware.eth_tx_config ~odd:false) with start = Firmware.eth_tx_link }
+        ; { Firmware.eth_rx_config with in_base = 0 }
+        ]
+  in
+  Isa.set_sampler m { Firmware.eth_rx_sampler with pin = 0 };
+  let pulses = ref 0 in
+  let high = ref false in
+  for _ = 1 to 2 * 641_000 do
+    Isa.step m ~inputs:(Isa.pin_out m);
+    let now = Isa.pin_out m land 3 = 1 in
+    if now && not !high then incr pulses;
+    high := now;
+    match Isa.pop_rx m ~thread:1 with
+    | Some word -> raise_s [%message "a link pulse was taken for data" (word : int)]
+    | None -> ()
+  done;
+  [%test_result: int] !pulses ~expect:2
+;;
+
 (* --- The sampler on its own -------------------------------------------------------- *)
 
 (* The bits a thread would be handed: the data pin at each pulse. *)

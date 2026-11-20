@@ -14,9 +14,9 @@ AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
 |---|---|---|---|
 | C1 | The RTL does what the instruction set and register map say, in every state, including states no test reaches | SAT equivalence proof of the whole chip against an independent spec; the spec checked against the reference model | Proof, for the RTL. The spec's agreement with the reference model is tested, not proven (section 3) |
 | C2 | The firmware implements each protocol correctly at the pins | Protocol oracles on the model and the RTL; device models written by other people from real datasheets and standards | Tests, judged by independent oracles |
-| C3 | The gate-level netlist behaves like the RTL | Formal equivalence of the post-layout netlist and the generated Verilog (Yosys, in CI after every layout); the cocotb suite rerun on the netlist; LVS | Proof, from the first cycle after a reset, on every output pin and every pin of the two memories, whatever the memories hold; Hardcaml's Verilog generation and the SRAM macro itself are trusted (section 7) |
-| C4 | The chip meets timing at the 10 MHz the firmware runs it at (12 MHz for USB), with room to 50 MHz | Static timing analysis of the 8x4 layout at a 20 ns target (50 MHz), three corners | Setup and hold met at every corner, with about 4 ns to spare between flip-flops at the slow one. Slew and capacitance warnings stand at all three corners and are not yet explained (section 7). No test runs the chip above 12 MHz |
-| C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb, and in MicroPython on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL: UART, I2C, SPI, JTAG, SWD and USB against the same devices (1-Wire's driver runs there on a simulated bus; PS/2 and CAN do not run there yet; the v2.0 drivers run there against a chip that only records what it is asked, and must ask the same as under CPython) | Tests in simulation and emulation; not yet run on hardware |
+| C3 | The gate-level netlist behaves like the RTL | Formal equivalence of the post-layout netlist and the generated Verilog (Yosys, in CI after every layout); the cocotb suite rerun on the netlist; LVS | Proof, from the first cycle after a reset, on every output pin and every pin of the three memories, whatever the memories hold; Hardcaml's Verilog generation and the SRAM macro itself are trusted (section 7) |
+| C4 | The chip meets timing at the 10 MHz the firmware runs it at (12 MHz for USB, 40 MHz for Ethernet), with room to 50 MHz | Static timing analysis of the 8x4 layout at a 20 ns target (50 MHz), three corners | Setup and hold met at every corner. Slew and capacitance warnings stand at all three corners and are not yet explained (section 7). The Ethernet tests clock the chip at 40 MHz, but no simulation here has gate delays in it, so the speed rests on static timing analysis alone |
+| C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb, and in MicroPython on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL: UART, I2C, SPI, JTAG, SWD and USB against the same devices (1-Wire's driver runs there on a simulated bus; PS/2 and CAN do not run there yet; the drivers added since v2.0 run there against a chip that only records what it is asked, and must ask the same as under CPython) | Tests in simulation and emulation; not yet run on hardware |
 
 ## 2. Design
 
@@ -42,10 +42,14 @@ anyone likes.
 | Two threads (the model always had two) | Four, as PIO has | Two cover the useful pairings (TX+RX, controller+bridge). Layout time was the constraint when this was decided: two-thread layouts on 6x4 tiles took 4 to 5 hours against GitHub's 6-hour job limit, where the one-thread v1.1 took 91 minutes |
 | Program memory in SRAM macros, 256 words per thread (v2.0) | v1.4's 64 words of flip-flops shared by both threads; a larger flip-flop memory | A flip-flop memory could not grow: 256 words placed and then could not be routed, and 128 did not finish in GitHub's 6 hours either ([`metrics.md`](metrics.md)). An SRAM macro of 256 words is 2% of the die. It reads one word a clock, so each thread has its own. The chip came out smaller and faster: 10,359 cells against 17,925, laid out in 20 to 30 minutes |
 | A PAGE register for jumps (v2.0) | Widening the jump address | `jmp` holds 6 bits and every 16-bit word is already a defined instruction. A page register, set by an encoding that was a NOP until then, leaves every v1.4 program encoding and running as before |
+| A packet buffer in a third SRAM, which the chip plays into a thread's FIFO or records from one, a word a cycle (v2.1) | Deeper FIFOs; a faster host port | An Ethernet frame is up to 12,144 bits with no pause, 625,000 words a second, and the host port moves about 260,000 at 50 MHz. FIFOs deep enough for a frame would be a memory anyway. A buffer that only moves words into and out of the FIFOs the threads already have leaves every instruction as it was, and serves any protocol whose data outruns the host |
+| Autopull and autopush: a shift register that refills or empties itself (v2.1) | PULL and PUSH instructions, as every engine before used | At four clocks a bit there is no cycle to spend fetching a word. Off unless a thread's configuration asks for it |
+| A CRC register per thread with the polynomial, start value and inversion in registers, taking one bit for each shift instruction (v2.1) | The CRC in the host driver, as for USB and CAN; a CRC-32 block for Ethernet alone; a register taking a whole word a cycle | The judges ask for the CRC on the chip. A register with a programmable polynomial serves every serial CRC: the tests confirm the published check values of CRC-32, CRC-16/USB and CRC-15/CAN. One bit per instruction is how a serial protocol shifts anyway, and the version that took 16 bits a cycle made the datapath proof run for minutes without finishing; this one proves in about one |
+| A bit sampler: clock recovery for one pin, in hardware, from samples on both clock edges (v2.2) | Clock recovery in firmware, as the USB engine does it; a fixed Ethernet receiver | Low-speed USB has 8 clocks to the bit. 10 Mbit Ethernet at 40 MHz has 4, and at some alignments of the two clocks 4 samples a bit leave no margin at all. Both edges give 8. The block does the timing and waits for a sync word, and nothing else: its three timing numbers are registers, so it recovers other Manchester and NRZ codes, and the frame is still firmware's. It changes no instruction: the threads see the recovered bit and a pulse on two pins |
 | SPI host port, 24-bit transactions | A UART or a parallel bus | Any microcontroller can drive SPI: the demo board's RP2350 (or the older boards' RP2040) can bit-bang it from MicroPython, or run it from PIO where timing matters (USB) |
 | Two-flip-flop synchronisers on every protocol input, bypassable per pin | No synchronisers | Found in a review for silicon, which simulation cannot find (ISA v1.3). The bypass exists because side-set SPI samples MISO one clock after SCK falls, and a test shows it fails with the extra two cycles |
 | Shift direction per thread | Bit-reversal in the host | MSB-first protocols (SPI, I2C) take and return plain bytes, and one thread can bridge an MSB-first protocol into an LSB-first one |
-| Freeze the hardware at v1.4, and change it once more only for the memory (v2.0) | Keep adding features | Every other change is firmware, tests or docs, so none of it can put the tapeout at risk. v1.4 stays on `main`, laid out and passing, as the fallback |
+| Freeze the hardware at v1.4, and change it only when a protocol cannot be done without it: the memory (v2.0), the buffer and CRC register (v2.1), the bit sampler (v2.2) | Keep adding features | Every other change is firmware, tests or docs, so none of it can put the tapeout at risk. Each hardware change is off by default, leaves every earlier program running unchanged, and went in with its model, specifications, proofs and planted bugs. v1.4 and v2.0 stay on their branches, laid out and passing, as fallbacks |
 
 Each ISA revision came from building something that did not fit. The I2C
 controller needed more than 32 words and a longer timeout (v1). SPI needed
@@ -55,7 +59,11 @@ and CHAIN, so the host could leave the data path (v1.2). The silicon review
 found the missing synchronisers (v1.3). The bit-reversal wart led to the
 shift direction (v1.4). The I2C target, at 63 of the 64 words, left no
 room for anything beside it, and a CAN node that acknowledges did not fit
-at all, which led to the SRAM (v2.0). [`isa.md`](isa.md) records each one.
+at all, which led to the SRAM (v2.0). Ethernet, which this report used
+to list under what the architecture could not do, needed its data, its CRC
+and its bit timing faster than a thread or the host could supply them,
+which led to the packet buffer, the refill and the CRC register (v2.1) and
+the bit sampler (v2.2). [`isa.md`](isa.md) records each one.
 
 ### The architecture's test: protocols added after the freeze
 
@@ -102,13 +110,46 @@ written with no RTL change:
 | NES gamepad | 7 words | side-set for latch and clock |
 | Drivers for all of these | 386 lines of MicroPython, a second file | the register map only |
 
-Nine further protocols needed no firmware: MIDI and Modbus RTU on the UART
-transmitter, LIN on the DMX512 transmitter (a UART that can send a break),
-24Cxx EEPROMs, the DS1307 clock and the LM75 sensor on the I2C controller,
-SPI NOR flash, WS2801 LEDs and the MAX7219 on the SPI controller. Each of
-these eighteen protocols is judged by sigrok's decoder for it, which this
-project did not write. The two receivers have no outside judge: their
-sources are written here, from the protocols' rules.
+Sixteen further protocols needed no firmware: MIDI and Modbus RTU on the
+UART transmitter, LIN on the DMX512 transmitter (a UART that can send a
+break), 24Cxx EEPROMs, the DS1307 clock and the LM75 sensor on the I2C
+controller, and ten devices on the SPI controller: NOR flash, WS2801 LEDs,
+the MAX7219, the nRF24L01, CC1101, RFM12 and MRF24J40 radios, the ENC28J60
+Ethernet controller, the ADF435x synthesiser and an SD card in SPI mode.
+Each of these twenty-five protocols is judged by sigrok's decoder for it,
+which this project did not write. For the last seven the device is a
+script of the bytes the part would answer, not a model of the part: the
+decoder judges the commands the chip sent and reads the answers off the
+wire, and the test checks the controller read the same bytes. The two
+receivers have no outside judge: their sources are written here, from
+the protocols' rules.
+
+**Ethernet: where the hardware had to change.** Every protocol before it
+fitted the frozen hardware. 10 Mbit Ethernet did not, and what matters is
+how little of it ended up in gates. The four additions are a memory, a
+refill rule, a CRC register and a clock-recovery block; none of them knows
+what a preamble, a Manchester cell or a frame is.
+
+| Part of 10BASE-T | Done by |
+|---|---|
+| Preamble and start delimiter, sent | firmware: a counted loop |
+| Manchester coding, sent | firmware: side-set, four clocks a bit |
+| The frame's data at 10 Mbit/s | the packet buffer, played into the FIFO |
+| CRC-32, sent | the CRC register; firmware moves it into the shift register after the last data bit |
+| CRC-32, checked | the CRC register follows the received bits; the host compares what is left in it with one constant |
+| Start of idle | firmware |
+| Link pulses between frames, 100 ns every 16 ms | firmware: ten waits that time out, then a pulse |
+| Clock recovery and Manchester decoding, received | the bit sampler |
+| Finding the start of the frame | the bit sampler's sync word, set to 0xD5 by the host |
+| Taking the bits, counting them, finding the end | firmware: one IN per bit, a wait with a timeout |
+| Storing the frame | the packet buffer, recording |
+
+The transmitter is 70 instructions, the first program longer than a page,
+and the receiver 14. Apart from `mov` to and from the CRC register, both
+use only instructions that existed before. What Ethernet does not have is an outside judge: the receiver that checks
+the transmitter and the sender that feeds the receiver are written here
+from IEEE 802.3, and only the CRC-32 they check with is someone else's
+(`zlib`).
 
 ## 3. How the evidence chains
 
@@ -117,8 +158,8 @@ flowchart TB
     doc["docs/isa.md and the register map<br/>(prose)"]
     model["model/isa.ml<br/>executable reference model"]
     sstep["sim/spec_step.ml<br/>one thread's datapath, as a circuit"]
-    score["sim/spec_core.ml<br/>memories, synchronisers, FIFOs, CHAIN, pins"]
-    ihp["IHP's behavioural model<br/>of the SRAM macro"]
+    score["sim/spec_core.ml<br/>memories, synchronisers, FIFOs, CHAIN,<br/>buffer, bit sampler, pins"]
+    ihp["IHP's behavioural models<br/>of the SRAM macros"]
     stop["sim/spec_top.ml<br/>SPI host port and register file"]
     rtl["hw/top.ml + hw/pe_core.ml<br/>the RTL"]
     v["src/protocol_emulator.v<br/>generated Verilog"]
@@ -130,11 +171,11 @@ flowchart TB
     model -- "tested: all 65,536 words,<br/>two random states each" --> sstep
     sstep --> score --> stop
     stop -- "PROVED: one clock equal<br/>from every state (SAT)" --> rtl
-    model -- "tested: lockstep, 400 random<br/>programs + 12 directed" --> rtl
+    model -- "tested: lockstep, 400 random<br/>programs + 18 directed" --> rtl
     rtl -- "Hardcaml generator;<br/>CI checks it is current" --> v
     v -- "PROVED: equal on every pin<br/>after reset (Yosys)" --> gl
     fw -- "run on model, RTL<br/>and gates" --> oracles
-    rtl -- "PROVED: its memories equal<br/>IHP's model (Yosys)" --> ihp
+    rtl -- "PROVED: its memories equal<br/>IHP's models (Yosys)" --> ihp
 ```
 
 **The proof.** Hardcaml_verify cuts both circuits at their registers, pairs
@@ -160,7 +201,7 @@ types and constants (port records, the thread state record, the pin count).
 A bug in a shared interface definition would be on both sides.
 
 **Why the proof is not vacuous.** A proof that cannot fail proves nothing,
-so the suite plants bugs and requires each to break it. All 13 planted RTL
+so the suite plants bugs and requires each to break it. All 26 planted RTL
 bugs come back SAT with a counterexample, and so do the 2 planted in the
 host port and register file. So do 3 bugs planted in the specs
 themselves (CHAIN ignoring a full FIFO, STATUS levels swapped, RX popped by a
@@ -183,9 +224,12 @@ therefore rest on testing:
 The lockstep test runs 400 random two-thread programs for 300 cycles each,
 with random configurations, pins, host traffic and enables. Coverage counts
 fail the build if any instruction outcome, stall, timeout or FIFO extreme
-never occurs. Sixteen cross bins (two threads on one pin, CHAIN in the same
-cycle as a pull, a wait expiring on a divided thread, and so on) are closed
-by 12 directed scenarios.
+never occurs. The state compared includes the packet buffer's pointer and
+every register of the bit sampler, and the random host rewrites the
+buffer's and the sampler's registers as a trial runs. Sixteen cross bins
+(two threads on one pin, CHAIN in the same cycle as a pull, a wait
+expiring on a divided thread, and so on) are closed by directed scenarios,
+18 of them now.
 
 **The memories.** In the OCaml tests and in both proofs, a program memory
 is a description in flip-flops of what the SRAM macro does: it registers
@@ -196,8 +240,21 @@ IHP's own behavioural model of the macro, tied off as the chip ties it,
 take the same next value in all 256 words and the output register, for
 every state and every input. Both sides are generated from the one
 function the chip is built from. A bug planted in the description (the
-output not held on a write cycle) must make the proof fail. What stays
-trusted is that the silicon macro behaves as IHP's model says.
+output not held on a write cycle) must make the proof fail. The packet
+buffer's 1,024-word macro is proved the same way, with its own planted
+bug. What stays trusted is that the silicon macros behave as IHP's models
+say.
+
+The packet buffer is handled differently inside the two SAT proofs. With
+its 16,384 bits as flip-flops they did not finish in 50 minutes, so both
+the RTL and the specification instantiate the buffer as a box with the
+same name and nothing inside. The checker gives both boxes the same
+arbitrary word to read out and requires every input to them, address,
+data and write enable, to be equal in every state. That is the cut the
+RTL-to-gates proof makes for all three memories (below). What the buffer
+then does with those inputs is covered by the lockstep test, which runs
+the full description, and by the proof that the description equals IHP's
+model.
 
 **Firmware.** The protocols are judged at the pins, on the model, the RTL
 and the gate netlist. Oracles written for this project (cycle-exact UART
@@ -216,6 +273,14 @@ firmware and those oracles:
   answers. Five lines are changed, each marked: three make it connect at
   low speed, and two fix a bug the chip's host found in it (section 5).
 
+Ethernet has none of these. Its receiver and its sender are written here
+from IEEE 802.3, on the model and again in Python for the chip-level
+tests, and they take their CRC-32 from `zlib`. The sender is given what a
+real one has and a model usually lacks: its own clock, 100 ppm from the
+chip's, at any phase, with every edge moved by a random amount, and the
+chip looks at the line where its rising and falling clock edges fall. On
+the model, thread 1 also receives what thread 0 sends.
+
 Two device models were written for this project because no third-party one
 fits: the JTAG device (`test/jtag_tap.v`, IEEE 1149.1) and the SWD target
 (`test/swd_dp.v`, Arm ADIv5). JTAG still has the third-party monitor as a
@@ -224,9 +289,13 @@ which is a weaker check, so the recorded pins also go to sigrok's SWD
 decoder.
 
 The protocols added on v2.0 are judged from the outside first. In cocotb
-the pins are recorded and handed to sigrok's decoder for the protocol, 18
+the pins are recorded and handed to sigrok's decoder for the protocol, 25
 tests beside the three for SWD, PS/2 and CAN, and the decoder must read
-back exactly what the host asked for. A decoder forgives timing a device
+back exactly what the host asked for. Three older tests gained the same
+judge beside their device models: the USB enumeration (sigrok's decoders
+for the line states, the packets and the request, with no SYNC, PID or CRC
+error allowed), the 1-Wire sessions, and WS2812, where the driver that
+was written blind is loaded on the chip with its own encoder. A decoder forgives timing a device
 might not, so each engine is also checked on the model against the
 protocol's own numbers: every interval, every pulse width, and for the two
 receivers a source that runs fast, slow, cuts frames short and repeats.
@@ -234,8 +303,8 @@ receivers a source that runs fast, slow, cuts frames short and repeats.
 **From the RTL to the gates.** After every layout, CI proves the
 post-layout netlist equal to the generated Verilog (`gl_equiv/`, Yosys).
 Every flip-flop in the netlist keeps its RTL register's name, so the two
-sides are paired by name: 1,082 pairs, every output pin, every one of the
-netlist's 796 flip-flops and everything driven into the two memories. A
+sides are paired by name: 1,507 pairs, every output pin, every one of the
+netlist's 1,076 flip-flops and everything driven into the three memories. A
 pairing is only a candidate invariant; a wrong one makes the proof fail,
 never pass. Two proofs then cover every run from reset:
 
@@ -257,7 +326,7 @@ for ever read out the same.
 So from the first cycle after a reset, the netlist and the RTL drive the same
 value on every output pin, whatever the inputs. The base case can rest on one
 reset cycle because every register in the generated Verilog has a
-synchronous clear: all 92 register blocks begin with it. Five bugs planted in the netlist must each break the
+synchronous clear: all 121 register blocks begin with it. Five bugs planted in the netlist must each break the
 proof: a gate's function changed, a flip-flop held in reset, two
 flip-flops' inputs crossed, two address bits of a memory crossed (all four
 break the induction step), and a flip-flop that comes out of reset with
@@ -265,11 +334,21 @@ the wrong value (breaks the base case). Tiny Tapeout's own action set has
 an `eqy` check of this kind for its Sky130 process only; this one is
 adapted to IHP's cells.
 
+One flip-flop is outside what either proof says about time. The bit
+sampler's first sample is taken on the falling clock edge. The SAT proof
+and this one both step every register once per cycle: they show that
+flip-flop takes the right value and that everything after it is right for
+whatever it holds, but not that it samples in the middle of the cycle.
+That is shown by simulation only: the chip-level Ethernet receive test
+puts the sender's edges between clock edges, on the RTL and on the gate
+netlist, and synthesis and static timing analysis report the half-cycle
+paths into and out of it as met.
+
 ## 4. Which layer catches which bug
 
 | Bug class | Example | Caught by | Cannot be caught by |
 |---|---|---|---|
-| Wrong instruction semantics in the RTL | X never decrements | the proof (every state); lockstep (within 27 programs) | protocol tests, unless the firmware happens to use that path |
+| Wrong instruction semantics in the RTL | X never decrements | the proof (every state); lockstep (within 46 programs) | protocol tests, unless the firmware happens to use that path |
 | Two threads interacting wrongly | pin priority inverted; CHAIN into a full FIFO | the whole-core proof; lockstep with cross bins | the datapath-only proof in general: it shares the composition logic on both sides, so it refutes the planted composition bugs only because they are planted on one side |
 | Host port or register map | STATUS bits swapped | the whole-chip proof; cocotb register tests | the core proof |
 | RTL and spec agree, both misread the ISA document | (none found) | lockstep against the reference model, which was written separately | the proof |
@@ -292,11 +371,11 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 103 in all:
+fails if any survives. There are 119 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
-| core RTL | 13 | `Pe_core.Mutation`: lockstep and both core proofs |
+| core RTL | 26 | `Pe_core.Mutation`: lockstep and both core proofs. Thirteen from v1.4 and v2.0; eight for v2.1 (refill, CRC register, buffer); five for the bit sampler |
 | specs | 3 | `Spec_top.Plant`, `Spec_core`: the proofs |
 | UART bring-up | 3 | `sim/test_uart_tx.ml` |
 | UART TX firmware | 2 | `sim/test_isa.ml` |
@@ -315,8 +394,9 @@ fails if any survives. There are 103 in all:
 | USB driver | 2 | `test_usb_driver_planted_bugs` in `test/test.py` |
 | Driver on the emulated board | 2 | `test/board_emu`: `run_usb.mjs --mutant push-after-start`, `run_board.mjs --mutant cpython-only-call` |
 | v2.0 engines, one each | 11 | `sim/test_tx_engines.ml` |
+| Ethernet firmware, one each way | 2 | `sim/test_ethernet.ml`, `sim/test_ethernet_rx.ml` |
 | gate netlist | 5 | `gl_equiv/check.py`: the RTL-to-netlist proof |
-| memory description | 1 | `formal/sram_equiv.py`: the proof against IHP's model |
+| memory description, one for each size | 2 | `formal/sram_equiv.py`: the proofs against IHP's models |
 
 The driver bugs are planted by replacing one driver method for one
 scenario. The same test first runs each scenario with the real driver and
@@ -325,7 +405,7 @@ count as a catch. The host-port and register-file bugs are a parameter of
 `hw/top.ml`, off by default, following `hw/pe_core.ml`; the generated
 Verilog is byte-identical with or without the parameter in the source.
 
-All 103 are caught. Two candidates turned out not to be bugs, and the
+All 119 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -345,7 +425,7 @@ fast, which is also how the receiver's one real bug was found.
 
 ### Real bugs found
 
-Eleven of these are told in full in [`bug-ledger.md`](bug-ledger.md).
+Thirteen of these are told in full in [`bug-ledger.md`](bug-ledger.md).
 
 | What was wrong | Found by |
 |---|---|
@@ -379,6 +459,10 @@ Eleven of these are told in full in [`bug-ledger.md`](bug-ledger.md).
 | The MDIO controller sampled a read bit before a PHY that takes its allowed 300 ns had driven it | a PHY model written from IEEE 802.3 with that delay; the firmware reordered so the sample comes later in the clock |
 | RC-5 and NEC flashed the LED for 30 us at start-up (pins reset high, and the pin was made an output before the thread drove it low), and RC-5 left a gap in the carrier where two bursts meet | sigrok's decoders and the pin trace; the drivers start the thread before setting the pin modes, and the firmware looks one bit ahead |
 | The I2C controller cannot send a repeated START | writing the device tests for the EEPROM, clock and sensor, where sigrok's decoder expected one. Not fixed: documented as a limit |
+| The Ethernet driver made the two pins outputs after it had started the thread, so the first bits of the preamble never reached the pair | the chip-level test, which runs the real driver; on the model, where the test sets the pins itself, every frame had passed. The driver now sets the pins when it is created |
+| The CRC register's first design had one bit for "start from all ones", which is wrong for a CRC narrower than the register; and with a whole word taken each cycle the datapath proof did not finish | the published check values of CRC-16/USB and CRC-15/CAN, and the proof's own run time; the start value is now a 32-bit register and the CRC takes one bit per instruction |
+| A planted bug in the packet buffer (a word played in the cycle after the host writes one) was being caught by one random program in 400. When the bit sampler was added the random stream changed and none caught it | the rule that the random programs must catch every planted bug, which failed the build. The random host now often sets the buffer playing straight after a write, and the eighth program catches it |
+| The board co-simulation's build did not list the packet buffer's SRAM model, and v2.1's first push failed in CI | the board workflow; the driver comparison had been run locally against a build made before the change |
 
 ## 6. AI-assisted verification, and independence
 
@@ -395,13 +479,15 @@ answer it.
 2. **Correctness rests on artefacts written separately.** The reference
    model has no dependency on the hardware. The specs were written from the
    documents in a different style, and share only what the checker needs.
-3. **Judges written by other people.** Every protocol except WS2812 is
+3. **Judges written by other people.** Every protocol except Ethernet is
    checked by something written by someone else: a device model built from
-   the real datasheet or standard, or, for SWD, PS/2, CAN and everything
-   added on v2.0, sigrok's decoder for the protocol. They are the backstop
+   the real datasheet or standard, or sigrok's decoder for the protocol,
+   or both. They are the backstop
    against a shared misreading, and they do not know this project exists.
    The Wiegand and NEC receivers are the exception within v2.0: nothing
-   outside the project sends those protocols to the chip.
+   outside the project sends those protocols to the chip. Ethernet's
+   sender and receiver are written here from the standard; only its
+   CRC-32 is judged by someone else's code.
 4. **Every check is shown to fail.** Planted bugs, kept in the repository
    as code, show each layer can fail (section 5). One caveat from
    [`coverage-closure.md`](coverage-closure.md) applies: the bug-targeted
@@ -420,10 +506,10 @@ answer it.
   cell's logic from IHP's Liberty file. LVS checks the layout against the
   netlist; that each cell's transistors compute its Liberty function is
   IHP's to guarantee.
-- **The SRAM macro is trusted.** It is IHP's layout, placed and powered as
-  Tiny Tapeout's SRAM example does it. The tests and proofs use a
-  description of it that is proven equal to IHP's behavioural model
-  (section 3); that the silicon behaves as that model says is IHP's to
+- **The SRAM macros are trusted.** They are IHP's layouts, placed and
+  powered as Tiny Tapeout's SRAM example does it. The tests and proofs use
+  a description of each that is proven equal to IHP's behavioural model
+  (section 3); that the silicon behaves as those models say is IHP's to
   guarantee. The memories are not cleared by reset, and what they hold
   before the host loads them is undefined: a host must load a program
   before it enables a thread. The layout flow's Magic design-rule step is
@@ -432,17 +518,22 @@ answer it.
 - **The spec against the reference model** is tested over all instruction
   words but sampled over states (section 3).
 - **Metastability** is handled by design: two-flip-flop synchronisers on
-  every protocol input and on the host port. A pin with SYNC_BYPASS set is
+  every protocol input and on the host port. The bit sampler's
+  falling-edge sample also passes through a second flip-flop before any
+  logic uses it, with half a cycle to settle where the others have a
+  whole one. A pin with SYNC_BYPASS set is
   the firmware author's responsibility. The host port requires each SCK
   phase to last at least 4 core clocks.
-- **Timing.** The firmware and every test run the chip at 10 MHz (12 MHz
-  for USB). The layout targets 20 ns and meets setup and hold at every
-  corner, with about 4 ns to spare between flip-flops at the slow one
-  (1.08 V, 125 °C). The same RTL also met 25 ns and 16 ns, the last with
-  under 1 ns to spare; v1.4's builds showed that slack of about a
-  nanosecond moves from one layout run to the next, so nothing above
-  50 MHz is claimed, and 50 MHz itself rests on static timing analysis
-  alone. Maximum-slew and maximum-capacitance warnings are reported at all
+- **Timing.** The firmware and the tests run the chip at 10 MHz, 12 MHz
+  for USB and 40 MHz for Ethernet. The layout targets 20 ns and meets
+  setup and hold at every corner. v2.0 had about 4 ns to spare between
+  flip-flops at the slow corner (1.08 V, 125 °C) and also met 25 ns and
+  16 ns, the last with under 1 ns to spare; the slack of the v2.2 layout
+  has not been read from its report files. v1.4's builds showed that
+  slack of about a nanosecond moves from one layout run to the next, so
+  nothing above 50 MHz is claimed. And 50 MHz, like the 40 MHz Ethernet
+  needs, rests on static timing analysis alone: the simulations that
+  clock the chip at 40 MHz have no gate delays in them. Maximum-slew and maximum-capacitance warnings are reported at all
   three corners. They arrived with the SRAM macros, whose pins are the
   suspect; the cause is not confirmed ([`metrics.md`](metrics.md)).
 - **Pads, reset and power** are Tiny Tapeout's and are not modelled beyond
@@ -476,10 +567,24 @@ answer it.
   board is an RP2040 board; the RP2350 board's pins and PIO window are
   untested until a real board (`test/board_emu/README.md`). One known limit: after a NAK the engine still sends the ACK queued
   behind it, which a device ignores but the spec does not allow.
-- **What the architecture cannot do.** 10 Mbit Ethernet: a frame is at
-  least 576 bits sent without a pause, and the chip can hold 64 bits in a
-  FIFO and take about 260,000 words a second from the host at 50 MHz, where
-  Ethernet needs about 625,000. It would take a packet buffer in hardware.
+- **Ethernet's limits.** The receiver stands less jitter than the
+  standard asks. IEEE 802.3 has a 10BASE-T receiver accept edges up to
+  13.5 ns from their place; measured on the model, this one receives
+  every frame with each edge up to 6 ns off at 40 MHz and 10 ns at
+  50 MHz, and loses frames beyond that. The cause is the sample spacing,
+  12.5 ns or 10 ns, and no setting changes it: it is a receiver for a
+  clean sender and a short cable. The chip has one packet buffer, so it
+  sends a frame or receives frames, not both at once, and it does not
+  listen for a collision while sending. It sends link pulses but does
+  not check for the other end's, so it cannot tell a dead link from a
+  quiet one. It needs a transformer and, to receive, a line receiver
+  outside the chip. And none of it has
+  met a real link: the sender and receiver it is tested against are
+  written here from the standard.
+- **What the architecture cannot do.** Full-speed USB, 12 Mbit/s. The bit
+  sampler can recover its clock, but NRZI decoding and bit unstuffing at
+  four clocks a bit are beyond a thread, and that firmware is not
+  written. Ethernet above 10 Mbit is out of reach of a 50 MHz chip.
 - **What the firmware does not do yet.** A full CAN node: acknowledging
   other nodes' frames means decoding a frame as it arrives. On v1.4 that
   did not fit beside the rest in 64 words; v2.0 has the room and the
@@ -488,7 +593,7 @@ answer it.
   repeated START. Of the protocols added on v2.0, I2S, DMX512, DALI,
   RC-5, MIDI, LIN and Modbus RTU are transmit only.
 - **SWD's, PS/2's and CAN's device models, and WS2812's hidden test,** were
-  written for this project. For the first three, sigrok's protocol
+  written for this project. For all four, sigrok's protocol
   decoders also read the recorded pins (`test/sigrok.py`), which is
   independent but partial: a decoder judges what is on the wire, not
   whether a device would have answered. sigrok's SWD and CAN decoders read
@@ -497,8 +602,12 @@ answer it.
   and, for the host's, inverts the clock; it checks the data bits and
   parity, and the test checks the stop bit. The CAN decoder reports a
   frame's CRC without checking it, so the test compares it with a CRC
-  computed apart from the driver's. WS2812 has no outside judge, and
-  neither have the Wiegand and NEC receivers. The DS1307 and PWM tests
+  computed apart from the driver's. Its 1-Wire decoder samples a slot 15 us
+  in, exactly where the fastest of the three device models lets go of the
+  wire, and reads ones; the chip samples sooner and reads that device
+  right, so sigrok judges the other two. The Wiegand and NEC receivers
+  have no outside judge. The seven devices added last on the SPI
+  controller are scripts of bytes, not models. The DS1307 and PWM tests
   are the two sigrok tests with no fault planted on the wire.
 
 ## 8. Reproducing
@@ -509,7 +618,7 @@ dune runtest    # OCaml suite: ISA, lockstep, coverage closure, formal proofs,
                 # firmware, chip-level tests (the proofs need z3)
 cd test && make # cocotb suite on the RTL (Icarus Verilog)
 python3 formal/sram_equiv.py
-                # the memory the proofs use against IHP's model (Yosys)
+                # the memories the proofs use against IHP's models (Yosys)
 python3 gl_equiv/check.py --netlist <netlist.v> --lib <cells.lib> --mutants
                 # RTL-to-netlist proof (Yosys), on a layout build's netlist
 make -C test/board_emu && cd test/board_emu && node run_usb.mjs
@@ -517,7 +626,8 @@ make -C test/board_emu && cd test/board_emu && node run_usb.mjs
 ```
 
 The setup is in the [README](../README.md). In recent GitHub Actions runs
-the OCaml suite took about 18 minutes and the cocotb suite about 20. The
-layout itself takes 20 to 30 minutes; the gate-level rerun of the cocotb suite
-is the long part of that workflow, over an hour. The RTL-to-netlist proof
-with its five planted bugs takes about 3 minutes.
+the OCaml job took about 55 minutes, more than half of it the proof of
+the packet buffer's memory, and the cocotb suite about 25. The layout itself takes under 40 minutes;
+the gate-level rerun of the cocotb suite is the long part of that
+workflow, about an hour and a half. The RTL-to-netlist proof with its
+five planted bugs takes about 3 minutes.

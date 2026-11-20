@@ -42,7 +42,7 @@ if [ "$mode" != quick ]; then
 stage ocaml    "ISA, lockstep, coverage, firmware and the whole-chip proof" dune runtest --force
 fi
 stage examples "every example program assembles"                           examples
-stage memory   "the memory in the proofs equals IHP's model of the SRAM"   python3 formal/sram_equiv.py
+stage memory   "the memories in the proofs equal IHP's models of the SRAMs" python3 formal/sram_equiv.py
 stage figures  "timing diagrams match the reference model"                 python3 docs/figures.py --check
 stage blind    "blind-written WS2812 firmware passes its hidden test"      blind
 stage drift    "generated files match the committed copies"                git diff --exit-code src/ test/ examples/

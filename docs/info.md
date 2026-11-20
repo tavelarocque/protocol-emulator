@@ -188,7 +188,7 @@ port from one of the microcontroller's PIO state machines so it does
 is derived from. Bit-banged from MicroPython, each register access takes
 milliseconds (`test/board_emu`).
 
-10BASE-T Ethernet transmit: `test/eth_tx.hex` (66 words, loaded with its
+10BASE-T Ethernet transmit: `test/eth_tx.hex` (70 words, loaded with its
 first at 51), TD+ on P0 and TD- on P1, push-pull. The core clock must be
 40 MHz, 4 clocks a bit. The chip makes the preamble, the Manchester code,
 the CRC-32 frame check sequence and the idle signal; the host stores the
@@ -196,9 +196,11 @@ frame in the packet buffer, sets the buffer playing into thread 0 and
 starts the thread (SHIFT 0x14: autopull, CRC read inverted; CRC_POLY
 0xEDB88320, CRC_INIT 0xFFFFFFFF; SIDESET 0x20; THRESHOLD 16; START 51, or
 53 for a frame with an odd number of bytes, whose first word holds one
-byte in its top half). `EthernetTx` in `host/more_protocols.py` does all
-of it: `send(frame)`. It does not yet send the link pulses a switch looks
-for between frames.
+byte in its top half). After a frame, and from the start if the thread
+is started at 113, it sends a link pulse, TD+ high for 100 ns, every ten
+waits of TIMEOUT ticks (TIMEOUT 64000 for 16 ms; TIMEOUT_VECTOR 115).
+`EthernetTx` in `host/more_protocols.py` does all of it: creating it
+starts the link pulses, and `send(frame)` sends a frame.
 
 10BASE-T Ethernet receive: `test/eth_rx.hex` (14 words), the pair on P2
 through a line receiver; P3 is taken too. The bit sampler recovers the
