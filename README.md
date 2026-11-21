@@ -10,8 +10,9 @@ implemented in firmware loaded after fabrication rather than in fixed
 logic. Written in Hardcaml, designed for tapeout through
 [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (8x4 tiles).
 
-> **This branch is v2.2.** Branch `v2` holds v2.0 and `main` holds v1.4,
-> each a complete chip, laid out and passing its own checks.
+> **This is v2.3.** Branches `v2.2`, `v2.1` and `v2` (v2.0) hold the
+> earlier versions, each a complete chip, laid out and passing its own
+> checks.
 
 **In ten minutes:** [`docs/submission.md`](docs/submission.md) is the
 one-page summary for judges. This page is the map.
@@ -42,6 +43,11 @@ one-page summary for judges. This page is the map.
   registers and used by firmware: the preamble, the Manchester code, the
   frame and its end are still programs, 70 instructions to send and 14 to
   receive.
+- **CAN is a node.** It sends, with bit stuffing, CRC and arbitration done
+  on the chip, and it receives: it checks each frame's CRC and
+  acknowledges it. The receiver needed v2.3's three settings for the bit
+  sampler (a prescaler, a pin shift, stuff-bit removal), none of them
+  CAN's own. It sends no error frames.
 - **Three formal proofs.** The whole chip, pins in to pins out, equals an
   independent specification; after every layout the gate netlist equals
   the RTL; and the memories those proofs assume equal IHP's own models of
@@ -146,7 +152,7 @@ the largest engine, Ethernet transmit, uses 70.
 | 10BASE-T Ethernet | transmitter with link pulses, and receiver, 10 Mbit/s | 70 + 14 | a receiver and a sender written from IEEE 802.3, the sender's clock 100 ppm off and its edges jittered; `zlib`'s CRC-32 |
 | WS2812 | driver | 16 | a hidden data-sheet timing test; sigrok's WS281x decoder |
 | PS/2 | host, both directions | 11 + 21 | a device written from the protocol's rules; sigrok's PS/2 decoder |
-| CAN | transmitter that stuffs the bits and makes the CRC on the chip; listen-only receiver | 19 + 89 | a node written from ISO 11898-1; sigrok's CAN decoder |
+| CAN | a node: a transmitter that stuffs the bits, makes the CRC and arbitrates, and a receiver that checks the CRC and acknowledges, all on the chip | 59 + 89 | a node written from ISO 11898-1; sigrok's CAN decoder |
 | I2C to SPI | bridge, no host in the data path | 25 + 26 | the I2C and SPI oracles together |
 | I2S | transmitter, 16-bit stereo | 11 | sigrok's I2S decoder |
 | DMX512 | transmitter | 26 | sigrok's DMX512 decoder |
@@ -192,21 +198,22 @@ a bug.
 | Question | Answer | How |
 |---|---|---|
 | Does the RTL match the specification? | Proven, for the whole chip | SAT equivalence (Hardcaml_verify + Z3) of one clock of the top level against an independent spec, for every state and every input |
-| Does the silicon netlist match the RTL? | Proven, after every layout | Yosys equivalence over every output, all 1,076 flip-flops and every pin of the three memories ([`gl_equiv/`](gl_equiv)) |
+| Does the silicon netlist match the RTL? | Proven, after every layout | Yosys equivalence over every output, all 1,107 flip-flops and every pin of the three memories ([`gl_equiv/`](gl_equiv)) |
 | Is the memory in the proofs the memory on the chip? | Proven against IHP's models of the macros | Yosys: the flip-flop description the tests and proofs use, at both sizes, equals IHP's behavioural model of each SRAM, tied off as the chip ties it ([`formal/`](formal)). That the silicon macros match IHP's models is IHP's to guarantee |
 | Is every instruction defined? | Yes, all 65,536 words | exhaustive round trips, and the spec's datapath matched on every word |
 | Do the protocols work? | Each judged by an independent oracle | third-party device models and sigrok's decoders in cocotb, on the RTL and the gate netlist |
 | Does the host driver work? | The same file, unchanged | in cocotb, then in MicroPython on an emulated board (rp2040js) wired to the RTL |
-| Would the tests notice a bug? | 126 planted bugs, all caught | kept in the repo; the suite fails if one survives |
+| Would the tests notice a bug? | 140 planted bugs, all caught | kept in the repo; the suite fails if one survives |
 | Did the random tests reach everything? | Coverage is counted | any instruction, stall or timeout never seen fails the build |
 
 Generated files cannot drift: CI regenerates the Verilog, the firmware
 images, the example programs and the timing diagrams, and fails if a
 committed copy differs.
 
-The hardware has changed three times since v1.4: the program memory
+The hardware has changed four times since v1.4: the program memory
 (v2.0), the packet buffer, automatic refill and the CRC register (v2.1),
-and the bit sampler (v2.2). Each time the model, both independent
+the bit sampler (v2.2), and three settings for it, a prescaler, a pin
+shift and stuff-bit removal (v2.3). Each time the model, both independent
 specifications, the proofs, the planted bugs and the coverage that the
 build requires were extended first, and every earlier program still runs
 unchanged. Everything else since v1.4 is firmware, testing and
@@ -277,9 +284,9 @@ then `node run_usb.mjs` there (see `test/board_emu/README.md`).
 
 ## Metrics
 
-The v2.2 layout, on Tiny Tapeout's ttihp27a flow (8x4 tiles, 20 ns
-target): 14,083 standard cells and three SRAM macros, 23.3% utilisation,
-0.70 m of wire, setup and hold met at every corner, LVS and the Tiny
+The v2.3 layout, on Tiny Tapeout's ttihp27a flow (8x4 tiles, 20 ns
+target): 14,837 standard cells and three SRAM macros, 23.8% utilisation,
+0.75 m of wire, setup and hold met at every corner, LVS and the Tiny
 Tapeout precheck passing, laid out in under 40 minutes. The firmware here
 runs the chip at 10 MHz, 12 MHz for USB and 40 MHz for Ethernet. Slew and
 capacitance warnings remain and are not yet explained. The comparison

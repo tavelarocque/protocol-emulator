@@ -55,73 +55,84 @@ found and closed, and how the result is kept honest.
 ## Results
 
 The random trials run 120,000 cycles (400 programs of 300). The directed
-suite is 18 scenarios, each run under 3 seeds for a few hundred cycles.
+suite is 19 scenarios, each run under 3 seeds for a few hundred cycles.
 
 | Cross bin | Random trials | Directed suite |
 |---|---:|---:|
-| pins: both threads write the same pin | 5,292 | 399 |
-| chain: move into thread 1 TX holding 0 | 185 | 12 |
-| chain: move into thread 1 TX holding 1 | 61 | 36 |
+| pins: both threads write the same pin | 5,248 | 399 |
+| chain: move into thread 1 TX holding 0 | 179 | 12 |
+| chain: move into thread 1 TX holding 1 | 58 | 36 |
 | chain: move into thread 1 TX holding 2 | 45 | 33 |
-| chain: move into thread 1 TX holding 3 | 77 | 1,230 |
-| chain: move in a cycle thread 1 pulls | **6** | 420 |
-| chain: move in a cycle thread 0 pushes | **6** | 558 |
-| chain: thread 0 PUSH stalled behind a full chain | 1,445 | 1,626 |
-| divider: timed wait expires on a divided thread | 461 | 42 |
-| divider: delay counted on a divided thread | 10,612 | 534 |
-| divider: side-set on a divided thread | 15,259 | 780 |
-| enable: disabled during a delay | 207 | 9 |
+| chain: move into thread 1 TX holding 3 | 78 | 1,230 |
+| chain: move in a cycle thread 1 pulls | **3** | 420 |
+| chain: move in a cycle thread 0 pushes | **4** | 558 |
+| chain: thread 0 PUSH stalled behind a full chain | 1,040 | 1,626 |
+| divider: timed wait expires on a divided thread | 450 | 42 |
+| divider: delay counted on a divided thread | 10,447 | 534 |
+| divider: side-set on a divided thread | 15,374 | 780 |
+| enable: disabled during a delay | 198 | 9 |
 | enable: disabled during a timed wait | 43 | 6 |
-| enable: disabled between divider ticks | 213 | 6 |
-| side-set: driven during a stall | 38,160 | 351 |
-| fifo: both threads stalled on FIFOs | 1,032 | 1,176 |
+| enable: disabled between divider ticks | 211 | 6 |
+| side-set: driven during a stall | 38,071 | 351 |
+| fifo: both threads stalled on FIFOs | 1,029 | 1,176 |
 
 The two bins random testing almost never reached, a word crossing the chain
 in the same cycle that thread 1 pulls or thread 0 pushes, are the
 simultaneous-access cases a FIFO is most likely to get wrong. Random trials
-hit them 6 and 6 times in 120,000 cycles; the directed suite hits them
+hit them 3 and 4 times in 120,000 cycles; the directed suite hits them
 hundreds of times.
 
-Planted RTL bugs caught by the directed suite (all 26; random trials needed
-up to 46 programs to catch the slowest):
+Planted RTL bugs caught by the directed suite (all 33; random trials needed
+up to 23 programs to catch the slowest):
 
 | Bug | Directed scenarios that catch it |
 |---|---:|
-| X never decrements (thread 1) | 2 of 18 |
-| Wait timeout ignores its budget (thread 1) | 3 of 18 |
-| Delay field ignored (thread 1) | 4 of 18 |
-| SET writes one pin too many (thread 1) | 4 of 18 |
-| PUSH not right-justified (thread 1) | 3 of 18 |
-| Pin priority inverted | 1 of 18 |
-| Thread 1 fetches from thread 0's PC | 18 of 18 |
-| CHAIN moves a word into a full FIFO | 3 of 18 |
-| PUSH ignores the IN shift direction (thread 1) | 1 of 18 |
-| Synchroniser bypass read with inverted polarity | 2 of 18 |
-| A jump ignores PAGE | 1 of 18 |
-| A host write lands in a running thread's memory | 1 of 18 |
-| No hold after a write to a thread's memory | 1 of 18 |
-| Autopull fetches from an empty FIFO | 1 of 18 |
-| Autopush pushes into a full FIFO | 1 of 18 |
-| The CRC register ignores the shift direction | 1 of 18 |
-| The CRC register keeps following after it is read | 1 of 18 |
-| The buffer plays into a full FIFO | 2 of 18 |
-| The buffer plays past its end | 2 of 18 |
-| A recording buffer lets the host pop as well | 1 of 18 |
-| A word is played in the cycle after a write | 1 of 18 |
-| The sampler takes a cycle's two samples in the wrong order | 1 of 18 |
-| The sampler accepts an edge one sample too soon | 1 of 18 |
-| The sampler passes bits on before the sync word | 1 of 18 |
-| The sampler keeps its carrier after a bit time with no edge | 1 of 18 |
-| The sampler's pulse shows on the wrong pin | 1 of 18 |
+| X never decrements (thread 1) | 2 of 19 |
+| Wait timeout ignores its budget (thread 1) | 3 of 19 |
+| Delay field ignored (thread 1) | 5 of 19 |
+| SET writes one pin too many (thread 1) | 4 of 19 |
+| PUSH not right-justified (thread 1) | 3 of 19 |
+| Pin priority inverted | 1 of 19 |
+| Thread 1 fetches from thread 0's PC | 19 of 19 |
+| CHAIN moves a word into a full FIFO | 3 of 19 |
+| PUSH ignores the IN shift direction (thread 1) | 1 of 19 |
+| Synchroniser bypass read with inverted polarity | 3 of 19 |
+| A jump ignores PAGE | 1 of 19 |
+| A host write lands in a running thread's memory | 1 of 19 |
+| No hold after a write to a thread's memory | 1 of 19 |
+| Autopull fetches from an empty FIFO | 1 of 19 |
+| Autopush pushes into a full FIFO | 2 of 19 |
+| The CRC register ignores the shift direction | 1 of 19 |
+| The CRC register keeps following after it is read | 1 of 19 |
+| The buffer plays into a full FIFO | 2 of 19 |
+| The buffer plays past its end | 2 of 19 |
+| A recording buffer lets the host pop as well | 1 of 19 |
+| A word is played in the cycle after a write | 1 of 19 |
+| The sampler takes a cycle's two samples in the wrong order | 1 of 19 |
+| The sampler accepts an edge one sample too soon | 1 of 19 |
+| The sampler passes bits on before the sync word | 1 of 19 |
+| The sampler keeps its carrier after a bit time with no edge | 1 of 19 |
+| The sampler's pulse shows on the wrong pin | 2 of 19 |
+| The sampler's prescaler counts one cycle too many | 1 of 19 |
+| The prescaled sampler takes both of a cycle's samples | 1 of 19 |
+| The sampler's pin shift is ignored | 1 of 19 |
+| The prescaled sampler's pulse lasts one cycle, not until the next sample | 1 of 19 |
+| The sampler takes a stuff bit out one bit late | 1 of 19 |
+| The sampler drops the bit after a run whatever its level | 1 of 19 |
+| A stuff bit does not start the next run | 2 of 19 |
 
 Three bugs and the two scenarios written for them (one jumps between
 pages, one rewrites a thread's program while it is stopped, while it
 runs, and just before it starts) came with v2.0's program memory. Eight
 bugs and five scenarios came with v2.1: the automatic refill, the CRC
 register, and the buffer playing, recording, and written just before it
-is set playing. The last five bugs and one scenario came with v2.2's bit
+is set playing. Five bugs and one scenario came with v2.2's bit
 sampler: a short Manchester transmission placed sample by sample, with one
-edge on the last sample at which it must still be ignored.
+edge on the last sample at which it must still be ignored. The last seven
+bugs and one scenario came with v2.3's settings for it: a line sampled
+once every three cycles, eight samples to the bit, with stuff bits to
+take out after runs of five at both levels, a run that goes on past five,
+the recovered bit shown two pins from the line, and one late edge.
 
 **The checks rejected a generated test.** The first version of the
 streaming scenario used two-instruction loops for both producer and

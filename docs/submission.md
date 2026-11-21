@@ -32,7 +32,7 @@ no change to the RTL:
 | Low-speed USB host, with clock recovery (a stretch goal) | nothing new; a 12 MHz clock | 49 |
 | 1-Wire, with ROM search | nothing new | 25 |
 | PS/2 host, receiving and sending on the two threads | nothing new | 11 + 21 |
-| CAN transmitter and listen-only receiver, to 1 Mbit/s | nothing new | 19 + 27 (89 since the transmitter makes the whole frame, on v2.1's CRC register) |
+| CAN transmitter and listen-only receiver, to 1 Mbit/s | nothing new | 19 + 27 (now a node, 59 + 89, on later hardware: see below) |
 | WS2812 LEDs | nothing new | 16 |
 
 The last was a blind test. A programmer who had never seen the project (an
@@ -71,6 +71,18 @@ ends are still programs: 70 instructions to send, 14 to receive. Every
 earlier program runs unchanged, and no instruction changed its meaning.
 That makes 36 protocols, with both of the competition's stretch goals
 among them.
+
+**Then CAN, from a transmitter to a node.** The v1.4 engine sent frames
+the host had made and listened. On v2.1's CRC register the transmitter
+makes the whole frame itself: bit stuffing, CRC-15, arbitration. A node
+must also acknowledge the frames of others, which means deciding within
+one bit time of a frame's last CRC bit whether the frame was good. v2.3
+gave the bit sampler three settings for that, and again none is CAN's: a
+prescaler (one sample every n clocks, so a slow line is sampled at a
+thread's own tick), a pin shift (the recovered bit shown on a pin other
+than the one it listens to) and stuff-bit removal (the bit after n equal
+bits dropped). With them a 59-instruction receiver reads a frame a bit at
+a time, checks the CRC on the CRC register and drives the ACK slot.
 
 ## What it is, and what is different
 
@@ -115,7 +127,7 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 | Low-speed USB | host, with clock recovery | 49 |
 | 1-Wire | bus controller, ROM search | 25 |
 | PS/2 | host, both directions | 11 + 21 |
-| CAN | transmitter, with bit stuffing and CRC on the chip, and listen-only receiver | 19 + 89 |
+| CAN | a node: sends with bit stuffing, CRC and arbitration; receives, checks the CRC and acknowledges | 59 + 89 |
 | 10BASE-T Ethernet, 10 Mbit/s | transmitter with link pulses; receiver with clock recovery | 70, 14 |
 | WS2812 LEDs | driver | 16 |
 | I2S | transmitter, 16-bit stereo | 11 |
@@ -146,7 +158,7 @@ runs a program on the reference model and prints the pins.
 2. **Three formal proofs.** The whole chip's RTL, pins to pins, is proven
    equivalent to an independent specification (SAT, Z3). After every
    layout, the post-layout gate netlist is proven equal to the RTL (Yosys:
-   every output pin, all 1,076 flip-flops and every pin of the three
+   every output pin, all 1,107 flip-flops and every pin of the three
    memories). And the memories those two proofs assume are proven equal to
    IHP's own models of the SRAM macros.
 3. **Judges written by other people.** Every protocol except Ethernet is
@@ -158,7 +170,7 @@ runs a program on the reference model and prints the pins.
    fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
    receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
    sender has its own clock, 100 ppm off, and jitter on every edge.
-4. **Tests that are themselves tested.** 126 bugs are planted in the RTL,
+4. **Tests that are themselves tested.** 140 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
@@ -176,8 +188,8 @@ runs a program on the reference model and prints the pins.
 | | |
 |---|---|
 | Tiles | 8x4 |
-| Standard cells | 14,083, and three SRAM macros; 23.3% utilisation |
-| Flip-flops | 1,076 |
+| Standard cells | 14,837, and three SRAM macros; 23.8% utilisation |
+| Flip-flops | 1,107 |
 | Clock target | 20 ns (50 MHz); the firmware here runs the chip at 10 MHz, 12 MHz for USB and 40 MHz for Ethernet |
 | Setup and hold, every corner | met |
 | LVS, antenna | pass; Tiny Tapeout precheck (IHP's KLayout rule deck) passes |
@@ -212,14 +224,14 @@ Stated here so nobody has to find it.
   IHP's behavioural models of them. That the silicon macros behave as
   those models say is IHP's to guarantee.
 - **USB is low speed, host only**, and needs a 12 MHz core clock.
-- **CAN is not a full node.** It sends, making the whole frame on the chip
-  (bit stuffing, CRC, arbitration, the ACK slot), and it listens, but it
-  does not acknowledge other nodes' frames or send error frames. That
-  takes a receiver that decodes the frame as it arrives, on a clock
-  recovered from the bus. The bit sampler recovers such a clock only up to
-  16 core clocks a bit, and at that ratio the host port cannot carry the
-  frames; a thread doing it alone needs every path through the decoder to
-  take the same number of ticks, with four registers. Neither is done.
+- **CAN is a node with limits.** It sends data frames, and receives and
+  acknowledges other nodes' data and remote frames with 11-bit
+  identifiers. It sends no error frames (a frame it finds wrong it does
+  not acknowledge), it neither receives nor acknowledges 29-bit
+  identifiers, and it sends no remote frames. After losing arbitration
+  the chip tells the host, and the driver sends the frame again. The host
+  must take a word every 15 bit times while a frame arrives, or that frame
+  goes unacknowledged.
 - **The I2C controller cannot send a repeated START.** It starts a
   transfer only after a STOP, so a device that insists on one between
   setting a register pointer and reading is out of reach.

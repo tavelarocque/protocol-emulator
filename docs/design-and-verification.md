@@ -46,10 +46,11 @@ anyone likes.
 | Autopull and autopush: a shift register that refills or empties itself (v2.1) | PULL and PUSH instructions, as every engine before used | At four clocks a bit there is no cycle to spend fetching a word. Off unless a thread's configuration asks for it |
 | A CRC register per thread with the polynomial, start value and inversion in registers, taking one bit for each shift instruction (v2.1) | The CRC in the host driver, as USB's still is and CAN's was; a CRC-32 block for Ethernet alone; a register taking a whole word a cycle | The judges ask for the CRC on the chip. A register with a programmable polynomial serves every serial CRC: the tests confirm the published check values of CRC-32, CRC-16/USB and CRC-15/CAN. One bit per instruction is how a serial protocol shifts anyway, and the version that took 16 bits a cycle made the datapath proof run for minutes without finishing; this one proves in about one |
 | A bit sampler: clock recovery for one pin, in hardware, from samples on both clock edges (v2.2) | Clock recovery in firmware, as the USB engine does it; a fixed Ethernet receiver | Low-speed USB has 8 clocks to the bit. 10 Mbit Ethernet at 40 MHz has 4, and at some alignments of the two clocks 4 samples a bit leave no margin at all. Both edges give 8. The block does the timing and waits for a sync word, and nothing else: its three timing numbers are registers, so it recovers other Manchester and NRZ codes, and the frame is still firmware's. It changes no instruction: the threads see the recovered bit and a pulse on two pins |
+| Three settings for the sampler: a prescaler, a pin shift and stuff-bit removal (v2.3) | A CAN receiver in firmware alone; a CAN block | A CAN node must decide whether a frame was good within one bit of its last CRC bit, and acknowledge. A thread decoding the bus alone needs every path through the decoder to take the same number of ticks, with four registers to hold a run length, a field count, a level and the data. With the sampler taking one sample every n clocks, a thread on the same divider sees one pulse for each bit; with the stuff bits already taken out, the bits it counts are the frame's; with the recovered bit moved off the pin it listens to, the thread can also read the line itself. None of the three knows what CAN is: the run length is a register, so the same setting serves any code that stuffs after n equal bits at either level. A code that stuffs after ones only, as USB does, it does not serve. All three are off after reset |
 | SPI host port, 24-bit transactions | A UART or a parallel bus | Any microcontroller can drive SPI: the demo board's RP2350 (or the older boards' RP2040) can bit-bang it from MicroPython, or run it from PIO where timing matters (USB) |
 | Two-flip-flop synchronisers on every protocol input, bypassable per pin | No synchronisers | Found in a review for silicon, which simulation cannot find (ISA v1.3). The bypass exists because side-set SPI samples MISO one clock after SCK falls, and a test shows it fails with the extra two cycles |
 | Shift direction per thread | Bit-reversal in the host | MSB-first protocols (SPI, I2C) take and return plain bytes, and one thread can bridge an MSB-first protocol into an LSB-first one |
-| Freeze the hardware at v1.4, and change it only when a protocol cannot be done without it: the memory (v2.0), the buffer and CRC register (v2.1), the bit sampler (v2.2) | Keep adding features | Every other change is firmware, tests or docs, so none of it can put the tapeout at risk. Each hardware change is off by default, leaves every earlier program running unchanged, and went in with its model, specifications, proofs and planted bugs. v1.4 and v2.0 stay on their branches, laid out and passing, as fallbacks |
+| Freeze the hardware at v1.4, and change it only when a protocol cannot be done without it: the memory (v2.0), the buffer and CRC register (v2.1), the bit sampler (v2.2) and three settings for it (v2.3) | Keep adding features | Every other change is firmware, tests or docs, so none of it can put the tapeout at risk. Each hardware change is off by default, leaves every earlier program running unchanged, and went in with its model, specifications, proofs and planted bugs. v2.0, v2.1 and v2.2 stay on their branches, laid out and passing, as fallbacks |
 
 Each ISA revision came from building something that did not fit. The I2C
 controller needed more than 32 words and a longer timeout (v1). SPI needed
@@ -63,7 +64,10 @@ at all, which led to the SRAM (v2.0). Ethernet, which this report used
 to list under what the architecture could not do, needed its data, its CRC
 and its bit timing faster than a thread or the host could supply them,
 which led to the packet buffer, the refill and the CRC register (v2.1) and
-the bit sampler (v2.2). [`isa.md`](isa.md) records each one.
+the bit sampler (v2.2). A CAN node, which this report also used to list
+under what was not done, needed a frame's bits one to a tick with the
+stuff bits gone, which led to the sampler's prescaler, pin shift and
+stuff-bit removal (v2.3). [`isa.md`](isa.md) records each one.
 
 ### The architecture's test: protocols added after the freeze
 
@@ -80,8 +84,8 @@ The freeze put that claim to the test. Since v1.4, with no hardware change:
 | WS2812 LED driver, written blind: by an AI agent given only `docs/isa.md`, the simulator and the LEDs' timing, never the repository; it passed a hidden data-sheet timing test on its first submission (`examples/ws2812`) | 16 words | side-set on P0, 13-cycle bits; the host sends each frame's bit count first so the firmware ends it with a 310 us latch |
 | 1-Wire bus engine (reset and presence, read and write time slots), with the ROM commands, ROM search and CRC8 in the host driver: a protocol the chip was not designed for, added once the hardware was finished | 25 words | open-drain DQ; CLKDIV set to the core clock in MHz so a tick is 1 us, and Y loops of 16 us for the long waits; a slot that writes a 1 and samples is a read, so one 8-instruction slot does both |
 | PS/2 host for keyboards and mice: a receiver that never stops listening on one thread, a transmitter on the other; added after 1-Wire, on the same finished hardware | 11 + 21 words | open-drain DATA and CLK; wait timeouts to abandon a frame the device gave up; a spare pin driven by the receiver's side-set and read by the transmitter's `wait`, so that one thread tells the other a frame is under way |
-| CAN: a transmitter that arbitrates and reads the ACK slot, and a listen-only receiver; not a full node (it does not acknowledge other nodes' frames or send error frames, which need the frame decoded as it arrives). Since v2.1's CRC register the transmitter makes the whole frame: bit stuffing and CRC-15 on the chip | 19 + 27 words; 19 + 89 with the framing | a wait with a zero timeout as the branch that reads the bus after every recessive bit sent; a timed wait as the watch for the edge to resynchronise on; `mov osr, isr` and an OUT with the other shift direction to branch on the bit just recorded. In the transmitter: the last level sent is which of two loops it is in, the run of equal bits is the ISR's shift count, and stuff bits are written without an OUT, so the CRC register never sees them |
-| Host driver for the demo board | 1,298 lines of MicroPython | the register map only; for USB, a 7-instruction PIO program (RP2040 or RP2350) that runs the host port |
+| CAN: a transmitter that arbitrates and reads the ACK slot, and a listen-only receiver. Since v2.1's CRC register the transmitter makes the whole frame: bit stuffing and CRC-15 on the chip. Since v2.3's sampler settings the receiver is a node's: it checks the CRC and acknowledges (it sends no error frames) | 19 + 27 words on v1.4; 59 + 89 as a node | a wait with a zero timeout as the branch that reads the bus after every recessive bit sent; a timed wait as the watch for the edge to resynchronise on; `mov osr, isr` and an OUT with the other shift direction to branch on the bit just recorded. In the transmitter: the last level sent is which of two loops it is in, the run of equal bits is the ISR's shift count, and stuff bits are written without an OUT, so the CRC register never sees them. In the receiver: the sampler's pulse is the bit clock, the CRC register left at zero is the verdict, a timed wait on the line itself finds the gap between frames, and TXD read at one bit of the frame tells its own frames from another node's |
+| Host driver for the demo board | 1,277 lines of MicroPython | the register map only; for USB, a 7-instruction PIO program (RP2040 or RP2350) that runs the host port |
 
 None of these is mentioned in the ISA's design or its revisions, which were
 driven by the controllers. That they fit is the strongest evidence that the
@@ -201,7 +205,7 @@ types and constants (port records, the thread state record, the pin count).
 A bug in a shared interface definition would be on both sides.
 
 **Why the proof is not vacuous.** A proof that cannot fail proves nothing,
-so the suite plants bugs and requires each to break it. All 26 planted RTL
+so the suite plants bugs and requires each to break it. All 33 planted RTL
 bugs come back SAT with a counterexample, and so do the 2 planted in the
 host port and register file. So do 3 bugs planted in the specs
 themselves (CHAIN ignoring a full FIFO, STATUS levels swapped, RX popped by a
@@ -229,7 +233,7 @@ every register of the bit sampler, and the random host rewrites the
 buffer's and the sampler's registers as a trial runs. Sixteen cross bins
 (two threads on one pin, CHAIN in the same cycle as a pull, a wait
 expiring on a divided thread, and so on) are closed by directed scenarios,
-18 of them now.
+19 of them now.
 
 **The memories.** In the OCaml tests and in both proofs, a program memory
 is a description in flip-flops of what the SRAM macro does: it registers
@@ -303,8 +307,8 @@ receivers a source that runs fast, slow, cuts frames short and repeats.
 **From the RTL to the gates.** After every layout, CI proves the
 post-layout netlist equal to the generated Verilog (`gl_equiv/`, Yosys).
 Every flip-flop in the netlist keeps its RTL register's name, so the two
-sides are paired by name: 1,507 pairs, every output pin, every one of the
-netlist's 1,076 flip-flops and everything driven into the three memories. A
+sides are paired by name: 1,538 pairs, every output pin, every one of the
+netlist's 1,107 flip-flops and everything driven into the three memories. A
 pairing is only a candidate invariant; a wrong one makes the proof fail,
 never pass. Two proofs then cover every run from reset:
 
@@ -348,7 +352,7 @@ paths into and out of it as met.
 
 | Bug class | Example | Caught by | Cannot be caught by |
 |---|---|---|---|
-| Wrong instruction semantics in the RTL | X never decrements | the proof (every state); lockstep (within 46 programs) | protocol tests, unless the firmware happens to use that path |
+| Wrong instruction semantics in the RTL | X never decrements | the proof (every state); lockstep (within 23 programs) | protocol tests, unless the firmware happens to use that path |
 | Two threads interacting wrongly | pin priority inverted; CHAIN into a full FIFO | the whole-core proof; lockstep with cross bins | the datapath-only proof in general: it shares the composition logic on both sides, so it refutes the planted composition bugs only because they are planted on one side |
 | Host port or register map | STATUS bits swapped | the whole-chip proof; cocotb register tests | the core proof |
 | RTL and spec agree, both misread the ISA document | (none found) | lockstep against the reference model, which was written separately | the proof |
@@ -371,11 +375,11 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 126 in all:
+fails if any survives. There are 140 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
-| core RTL | 26 | `Pe_core.Mutation`: lockstep and both core proofs. Thirteen from v1.4 and v2.0; eight for v2.1 (refill, CRC register, buffer); five for the bit sampler |
+| core RTL | 33 | `Pe_core.Mutation`: lockstep and both core proofs. Thirteen from v1.4 and v2.0; eight for v2.1 (refill, CRC register, buffer); five for the bit sampler; seven for its prescaler, pin shift and stuff-bit removal |
 | specs | 3 | `Spec_top.Plant`, `Spec_core`: the proofs |
 | UART bring-up | 3 | `sim/test_uart_tx.ml` |
 | UART TX firmware | 2 | `sim/test_isa.ml` |
@@ -389,8 +393,8 @@ fails if any survives. There are 126 in all:
 | USB firmware (4 sending, 3 receiving) | 7 | `sim/test_usb.ml` |
 | 1-Wire firmware | 6 | `sim/test_onewire.ml` |
 | PS/2 firmware (3 receiving, 6 sending) | 9 | `sim/test_ps2.ml` |
-| CAN firmware (4 receiving, 12 sending) | 16 | `sim/test_can.ml` |
-| JTAG, SWD, 1-Wire, PS/2, CAN and host drivers | 8 | `test_driver_planted_bugs` in `test/test.py` |
+| CAN firmware (10 receiving, 2 of them in the sampler's settings; 12 sending) | 22 | `sim/test_can.ml` |
+| JTAG, SWD, 1-Wire, PS/2, CAN and host drivers | 9 | `test_driver_planted_bugs` in `test/test.py` |
 | USB driver | 2 | `test_usb_driver_planted_bugs` in `test/test.py` |
 | Driver on the emulated board | 2 | `test/board_emu`: `run_usb.mjs --mutant push-after-start`, `run_board.mjs --mutant cpython-only-call` |
 | v2.0 engines, one each | 11 | `sim/test_tx_engines.ml` |
@@ -405,7 +409,7 @@ count as a catch. The host-port and register-file bugs are a parameter of
 `hw/top.ml`, off by default, following `hw/pe_core.ml`; the generated
 Verilog is byte-identical with or without the parameter in the source.
 
-All 126 are caught. Two candidates turned out not to be bugs, and the
+All 140 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -464,6 +468,8 @@ Thirteen of these are told in full in [`bug-ledger.md`](bug-ledger.md).
 | The CRC register's first design had one bit for "start from all ones", which is wrong for a CRC narrower than the register; and with a whole word taken each cycle the datapath proof did not finish | the published check values of CRC-16/USB and CRC-15/CAN, and the proof's own run time; the start value is now a 32-bit register and the CRC takes one bit per instruction |
 | A planted bug in the packet buffer (a word played in the cycle after the host writes one) was being caught by one random program in 400. When the bit sampler was added the random stream changed and none caught it | the rule that the random programs must catch every planted bug, which failed the build. The random host now often sets the buffer playing straight after a write, and the eighth program catches it |
 | The board co-simulation's build did not list the packet buffer's SRAM model, and v2.1's first push failed in CI | the board workflow; the driver comparison had been run locally against a build made before the change |
+| The reference model kept the sampler's prescaler count when the host switched the prescaler off in mid-run; the RTL clears it | lockstep, whose random host rewrites the sampler's registers as a trial runs. The model now clears it |
+| The CAN receiver's first version found the gap between frames by counting ten recessive bits from the sampler. With the stuff bits taken out, a frame with enough 0xFF bytes has ten in a row, and the receiver took the middle of a frame for the start of one. Its second version missed a frame that follows a bad one at the shortest spacing the standard allows | the model test's random traffic and its wrong-CRC case, judged by the second node. The receiver now times ten bit times on the line itself, and after a bad frame takes the next dominant bit as a start |
 
 ## 6. AI-assisted verification, and independence
 
@@ -529,7 +535,7 @@ answer it.
   for USB and 40 MHz for Ethernet. The layout targets 20 ns and meets
   setup and hold at every corner. v2.0 had about 4 ns to spare between
   flip-flops at the slow corner (1.08 V, 125 °C) and also met 25 ns and
-  16 ns, the last with under 1 ns to spare; the slack of the v2.2 layout
+  16 ns, the last with under 1 ns to spare; the slack of the v2.3 layout
   has not been read from its report files. v1.4's builds showed that
   slack of about a nanosecond moves from one layout run to the next, so
   nothing above 50 MHz is claimed. And 50 MHz, like the 40 MHz Ethernet
@@ -586,16 +592,13 @@ answer it.
   sampler can recover its clock, but NRZI decoding and bit unstuffing at
   four clocks a bit are beyond a thread, and that firmware is not
   written. Ethernet above 10 Mbit is out of reach of a 50 MHz chip.
-- **What the firmware does not do yet.** A full CAN node: acknowledging
-  other nodes' frames means decoding a frame as it arrives, on a clock
-  recovered from the bus. On v1.4 that did not fit beside the rest in 64
-  words. v2.0 has the room, and the transmitter now stuffs its own bits
-  and makes its own CRC, but the receiver is harder than room: the bit
-  sampler recovers a clock only up to 16 core clocks a bit, where the host
-  port cannot carry the frames, and a thread doing it alone must take the
-  same number of ticks along every path through the decoder with four
-  registers to hold a run length, a field count, a level and the data.
-  That firmware is not written, so the chip sends, arbitrates and listens. The
+- **What the firmware does not do yet.** The CAN node sends no error
+  frames: a frame it finds wrong it does not acknowledge, and it relies on
+  the other nodes to signal the error. It neither receives nor
+  acknowledges frames with 29-bit identifiers, it sends no remote frames,
+  and after losing arbitration it is the driver, not the chip, that sends
+  the frame again. While a frame arrives the host must take a word every
+  15 bit times. The
   I2C controller starts a transfer only after a STOP, so it cannot send a
   repeated START. Of the protocols added on v2.0, I2S, DMX512, DALI,
   RC-5, MIDI, LIN and Modbus RTU are transmit only.

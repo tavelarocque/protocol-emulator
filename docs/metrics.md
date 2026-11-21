@@ -17,7 +17,8 @@ for USB and 40 MHz for Ethernet.
 | Full chip v1.4 on the ttihp27a flow, 8x4, 25 ns target (the layout on `main`) | 17,925 | 20.8% | +6.85 ns | +0.12 ns |
 | **Full chip v2.0** (program memory in two SRAM macros), 8x4, 20 ns target | 10,359, and 2 macros | 13.4% | about +4 ns | met |
 | Full chip v2.1 (adds the packet buffer in a third macro, autopull and autopush, the CRC register), 8x4, 20 ns target | 13,787, and 3 macros | 22.9% | met | met |
-| **Full chip v2.2** (adds the bit sampler), 8x4, 20 ns target | 14,083, and 3 macros | 23.3% | met | met |
+| Full chip v2.2 (adds the bit sampler), 8x4, 20 ns target | 14,083, and 3 macros | 23.3% | met | met |
+| **Full chip v2.3** (adds the sampler's prescaler, pin shift and stuff-bit removal), 8x4, 20 ns target | 14,837, and 3 macros | 23.8% | met | met |
 
 The first v1.4 build missed 50 MHz by 0.14 ns on one path, at the slow
 corner only (1.08 V, 125 °C). The current build, the same logic with its
@@ -133,7 +134,7 @@ whole cocotb suite passes on the gate-level netlist with IHP's own model
 of the SRAM, and the netlist is proven equal to the RTL after every
 layout.
 
-## v2.1 and v2.2: the packet buffer and the bit sampler
+## v2.1 to v2.3: the packet buffer, the bit sampler and its settings
 
 Two revisions added hardware for 10 Mbit Ethernet
 ([`isa.md`](isa.md), revision history). v2.1 added a third SRAM macro,
@@ -142,32 +143,41 @@ buffer, with the logic that plays it and records into it, the automatic
 refill of the shift registers and a 32-bit CRC register for each thread.
 v2.2 added the bit sampler.
 
-| | v2.0 | v2.1 | v2.2 |
-|---|---|---|---|
-| Standard cells | 10,359 | 13,787 | 14,083 |
-| Flip-flops | 796 | 1,022 | 1,076 |
-| SRAM macros | 2 | 3 | 3 |
-| Utilisation | 13.4% | 22.9% | 23.3% |
-| Wire | 0.44 m | 0.69 m | 0.70 m |
-| Reported power at 50 MHz | 3.2 mW | 4.1 mW | 4.3 mW |
-| Setup and hold at 20 ns, every corner | met | met | met |
-| Detailed routing, first run | 5 passes | 6 passes, then the router jumped to its 17th setting | 5 passes |
-| Detailed routing time | about 12 minutes | 30 minutes | 18 minutes |
-| Layout time (the gds job) | 20 to 30 minutes | 37 minutes | 37 minutes |
+v2.3 gave the sampler three settings, for CAN: a prescaler, a pin shift
+and stuff-bit removal.
 
-The 14,083 cells of v2.2 are 1,076 flip-flops, 9,496 gates of more than
-one input, 404 inverters, 2,877 buffers the tools added to repair timing,
-181 clock buffers and inverters, 23 other buffers and 26 antenna diodes.
+| | v2.0 | v2.1 | v2.2 | v2.3 |
+|---|---|---|---|---|
+| Standard cells | 10,359 | 13,787 | 14,083 | 14,837 |
+| Flip-flops | 796 | 1,022 | 1,076 | 1,107 |
+| SRAM macros | 2 | 3 | 3 | 3 |
+| Utilisation | 13.4% | 22.9% | 23.3% | 23.8% |
+| Wire | 0.44 m | 0.69 m | 0.70 m | 0.75 m |
+| Reported power at 50 MHz | 3.2 mW | 4.1 mW | 4.3 mW | 4.5 mW |
+| Setup and hold at 20 ns, every corner | met | met | met | met |
+| Detailed routing, first run | 5 passes | 6 passes, then the router jumped to its 17th setting | 5 passes | 5 passes |
+| Detailed routing time | about 12 minutes | 30 minutes | 18 minutes | 18 minutes |
+| Layout time (the gds job) | 20 to 30 minutes | 37 minutes | 37 minutes | 42 minutes |
+
+The 14,837 cells of v2.3 are 1,107 flip-flops, 9,771 gates of more than
+one input, 793 inverters, 2,913 buffers the tools added to repair timing,
+191 clock buffers and inverters, 23 other buffers and 39 antenna diodes.
 Most of what v2.1 added is registers and the multiplexers that read them:
 each thread's CRC register, polynomial and start value are 96 flip-flops.
-The bit sampler is 54 flip-flops and about 300 cells in all.
+The bit sampler was 54 flip-flops and about 300 cells in all on v2.2.
+v2.3 added 31 flip-flops: 15 in the sampler (a 10-bit count for the
+prescaler, a 4-bit run length and the level of the run) and its new
+16-bit register. The cell count rose by 754, of which 389 are inverters
+(404 on v2.2, 793 now) and 275 are gates. That is more than the new logic
+needs, and why synthesis chose so many more inverters has not been looked
+into.
 
 **Routing has less room than the utilisation suggests.** v2.1's and
 v2.2's placements both began with about 5% of the router's tiles over
-capacity, where v2.0's began with 0.5%. v2.1's detailed routing did not
+capacity and v2.3's with about 6%, where v2.0's began with 0.5%. v2.1's detailed routing did not
 clear its violations in its usual passes and the router escalated to a
-later, more aggressive setting before it did; v2.2, slightly larger,
-cleared them in the same five passes as v2.0. That difference is one
+later, more aggressive setting before it did; v2.2 and v2.3, each
+slightly larger, cleared them in the same five passes as v2.0. That difference is one
 placement against another, not a trend: the lesson from v1.4 is that
 layout runs vary, and a design this close to a hard run can have one.
 
@@ -179,24 +189,24 @@ checks the half-cycle paths into it (from the pin, and from the register
 that selects the pin) and out of it (to the rising-edge flip-flop that
 takes its value), and reports no setup or hold violation at any corner.
 
-**Exact slack is not known for v2.1 and v2.2.** The checker reports no
+**Exact slack is not known for v2.1, v2.2 and v2.3.** The checker reports no
 violations at 20 ns at any corner, and that is what the table says. The
-build log cuts the slack figures off, and the report files of these two
-builds have not been read. Ethernet needs 40 MHz, 25 ns, so it has at
+build log cuts the slack figures off, and the report files of these
+three builds have not been read. Ethernet needs 40 MHz, 25 ns, so it has at
 least 5 ns more than whatever the 20 ns figure is.
 
 **The same warnings as v2.0.** Maximum-slew and maximum-capacitance
-warnings are reported at all three corners in both builds, still
+warnings are reported at all three corners in all three builds, still
 unexplained. The overlap check counts 78 illegal overlaps on v2.1 and 80
-on v2.2, where v2.0 with two macros had 52. Twenty-six for each macro
+on v2.2 and on v2.3, where v2.0 with two macros had 52. Twenty-six for each macro
 accounts for 78 and not for 80, so that is not the whole explanation;
 which shapes the other two are has not been looked up. LVS, the antenna
 check and the Tiny Tapeout precheck, which runs IHP's KLayout design-rule
-deck on the whole layout, pass on both.
+deck on the whole layout, pass on all three.
 
-After each of the two layouts the netlist is proven equal to the RTL
-(1,507 signals on v2.2: every output, all 1,076 flip-flops and every pin
-of the three memories), and the whole cocotb suite, 59 tests on v2.2,
+After each of the three layouts the netlist is proven equal to the RTL
+(1,538 signals on v2.3: every output, all 1,107 flip-flops and every pin
+of the three memories), and the whole cocotb suite, 59 tests on v2.3,
 passes on the gate-level netlist, the Ethernet tests at a 40 MHz clock.
 Those simulations have no gate delays in them: the speed rests on static
 timing analysis.
