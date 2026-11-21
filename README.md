@@ -24,13 +24,15 @@ one-page summary for judges. This page is the map.
   protocol pins (input, push-pull or open-drain each), loaded over an SPI
   host port. LVS and the Tiny Tapeout precheck pass, and timing is met at
   50 MHz at every corner ([`docs/metrics.md`](docs/metrics.md)).
-- **36 protocols as firmware**, two running at a time. UART, SPI and I2C as
+- **39 protocols as firmware**, two running at a time. UART, SPI and I2C as
   required, in both roles for SPI and I2C; both stretch goals, low-speed
   USB as a host and 10 Mbit Ethernet, sending and receiving; JTAG, SWD,
   1-Wire, WS2812, PS/2 and CAN; I2S, DMX512, Wiegand, NEC and RC-5
-  infrared, MDIO, DALI, PWM and a NES gamepad. Twenty have firmware of
-  their own. Sixteen more (MIDI, LIN, Modbus RTU and thirteen devices on
-  I2C and SPI) run on those engines with framing in the host driver.
+  infrared, MDIO, DALI, PWM and a NES gamepad; Microwire, HDMI-CEC and
+  RC-6 infrared. Twenty-two have firmware of their own. RC-6 is framed by
+  the driver on an infrared burst sender that knows no code, and sixteen
+  more (MIDI, LIN, Modbus RTU and thirteen devices on I2C and SPI) run on
+  the other engines with framing in the host driver.
 - **Hardware that did not need to know the protocols.** Nine engines were
   added to v1.4 with no RTL change. v2.0 changed one thing, the program
   memory, and eleven more engines followed, again with no RTL change.
@@ -53,7 +55,7 @@ one-page summary for judges. This page is the map.
   the RTL; and the memories those proofs assume equal IHP's own models of
   the SRAM macros.
 - **Judged by tools this project did not write.** Device models by other
-  people where one exists; for 34 tests the recorded pins go to sigrok's
+  people where one exists; for 37 tests the recorded pins go to sigrok's
   protocol decoders.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
@@ -163,6 +165,9 @@ the largest engine, Ethernet transmit, uses 70.
 | RC-5 infrared | transmitter, 36 kHz carrier included; receiver, through the bit sampler | 37, 9 | sigrok's RC-5 decoder |
 | PWM, RC servo | generator | 8 | sigrok's PWM decoder; exact to the cycle |
 | NES gamepad | host | 7 | a pad's shift register written from its data sheet; sigrok's gamepad decoder |
+| Microwire | controller, any number of bits; a 93C46 EEPROM on it | 10 | an EEPROM written from the datasheet; sigrok's Microwire and 93xx decoders |
+| HDMI-CEC | initiator: sends messages, reads each block's acknowledgement, stops at a block that fails | 38 | a follower written from the specification's timing limits; sigrok's CEC decoder |
+| RC-6 infrared | transmitter, 36 kHz carrier included, on a burst sender | 7, framing in the driver | a receiver written from RC-6's rules; sigrok's RC-6 decoder |
 | MIDI | on the UART transmitter | no new firmware | sigrok's MIDI decoder |
 | LIN | master frames, on the DMX512 transmitter | no new firmware | sigrok's LIN decoder |
 | Modbus RTU | requests, on the UART transmitter | no new firmware | sigrok's Modbus decoder, which checks the CRC |
@@ -177,7 +182,7 @@ the pins are also recorded and handed to sigrok's protocol decoders, which
 this project did not write ([`test/sigrok.py`](test/sigrok.py)). Every
 protocol from I2S down is judged the same way, by sigrok's decoder for it.
 The USB, 1-Wire and WS2812 recordings go to sigrok as well, beside the
-device models. In all but two of the 34 tests (DS1307 and PWM) one bit is
+device models. In all but two of the 37 tests (DS1307 and PWM) one bit is
 then forced on the recorded wire, and the decoder's verdict must change.
 Ethernet has only the receiver and sender written here from the standard,
 with the CRC-32 from `zlib`.
@@ -203,7 +208,7 @@ a bug.
 | Is every instruction defined? | Yes, all 65,536 words | exhaustive round trips, and the spec's datapath matched on every word |
 | Do the protocols work? | Each judged by an independent oracle | third-party device models and sigrok's decoders in cocotb, on the RTL and the gate netlist |
 | Does the host driver work? | The same file, unchanged | in cocotb, then in MicroPython on an emulated board (rp2040js) wired to the RTL |
-| Would the tests notice a bug? | 158 planted bugs, all caught | kept in the repo; the suite fails if one survives |
+| Would the tests notice a bug? | 176 planted bugs, all caught | kept in the repo; the suite fails if one survives |
 | Did the random tests reach everything? | Coverage is counted | any instruction, stall or timeout never seen fails the build |
 
 Generated files cannot drift: CI regenerates the Verilog, the firmware

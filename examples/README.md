@@ -33,6 +33,9 @@ them, so they cannot drift.
 | [`nec_rx.s`](nec_rx.s) | NEC infrared receiver | 33 |
 | [`dali_rx.s`](dali_rx.s) | DALI receiver, through the bit sampler | 9 |
 | [`rc5_rx.s`](rc5_rx.s) | RC-5 infrared receiver, through the bit sampler | 9 |
+| [`microwire.s`](microwire.s) | Microwire controller | 10 |
+| [`cec.s`](cec.s) | HDMI-CEC initiator | 38 |
+| [`ir_tx.s`](ir_tx.s) | Infrared burst sender (RC-6 is sent with it) | 7 |
 | [`pwm.s`](pwm.s) | PWM, RC servo pulses | 8 |
 | [`nes_pad.s`](nes_pad.s) | NES gamepad | 7 |
 | [`echo.s`](echo.s) | TX FIFO to RX FIFO, for bring-up | 5 |

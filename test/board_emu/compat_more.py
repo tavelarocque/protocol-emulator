@@ -235,3 +235,44 @@ for _address in (0x03, 0x05, 0x03):
     except DaliError as e:
         print("dali query error:", e)
 _show("dali controller", _chip)
+
+# Microwire and a 93C46: enable, a write, the ready check, a read, and a
+# read with no device there (the line stays high).
+_chip = _Recorder(line=0x0001, words=[0x01FF, 0x01FF, 0xFFFF, 0x0001, 0xFF5F, 0x00EF, 0xFFFF, 0x01FF])
+_chip.pop = lambda thread=0: _chip.words.pop(0) if _chip.words else 0xFFFF
+_m = Microwire(_chip, _image)
+Microwire(_chip, _image, clkdiv=5)
+_e = Eeprom93c46(_m)
+_e.write_enable()
+_e.write(5, 0xBEEF)
+print("93c46 ready", _e.ready())
+print("93c46 read", hex(_e.read(5)))
+try:
+    print("93c46 read", hex(_e.read(6)))
+except MicrowireError as e:
+    print("93c46 error:", e)
+try:
+    Microwire(_chip, _image, clkdiv=2)
+except ValueError as e:
+    print("microwire error:", e)
+_show("microwire", _chip)
+
+# HDMI-CEC: a message acknowledged, one not, one to everyone that nobody
+# objects to, and one to everyone that a follower rejects.
+_chip = _Recorder(words=[0, 0, 1, 1, 1, 1, 1, 0])
+_chip.pop = lambda thread=0: _chip.words.pop(0) if _chip.words else 1
+_x = Cec(_chip, _image, address=1)
+Cec(_chip, _image, address=4, clock_hz=12_000_000)
+print("cec", _x.send(4, [0x04]), _x.send(5, [0x8F, 0x00]), _x.send(15, [0x82, 0x10]),
+      _x.send(15, [0x36]))
+_show("cec", _chip)
+
+# RC-6 on the infrared burst sender: the bursts of two frames and the words
+# for one.
+_chip = _Recorder()
+_r = Rc6Tx(_chip, _image)
+Rc6Tx(_chip, _image, clock_hz=12_000_000)
+IrTx(_chip, _image, carrier_hz=38_000)
+print("rc6 runs", Rc6Tx.runs(0x04, 0x0C, 1), Rc6Tx.runs(0xFF, 0xFF, 0))
+_r.send(0x04, 0x0C, toggle=1)
+_show("rc6", _chip)

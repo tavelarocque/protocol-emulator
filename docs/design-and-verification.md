@@ -114,7 +114,10 @@ written with no RTL change:
 | DALI receiver (on v2.3) | 9 words | a frame begins on an edge between bits, so the sampler cannot lock to the middles: it takes every edge and a sample every half bit, and the driver pairs the halves. The count that ends a frame's words is told from data because the sampler never passes more than three equal half bits |
 | PWM and RC servo pulses | 8 words | the two counts kept in the two shift registers, leaving X to count |
 | NES gamepad | 7 words | side-set for latch and clock |
-| Drivers for all of these | 386 lines of MicroPython, a second file | the register map only |
+| Microwire controller | 10 words | chip select active high and transfers of any number of bits, which is why SPI's engines do not serve; the bit read on a clock is the device's answer to that clock |
+| HDMI-CEC initiator | 38 words | every path through a bit the same number of ticks; the ACK bit read 1.0 ms after its edge; a message that fails ends there, and the blocks still queued for it are taken from the FIFO unsent |
+| Infrared burst sender | 7 words | bursts and silences as whole carrier periods, counted from the host's word; it knows no code, so RC-6 is framed by the driver |
+| Drivers for all of these | 931 lines of MicroPython, a second file | the register map only |
 
 Sixteen further protocols needed no firmware: MIDI and Modbus RTU on the
 UART transmitter, LIN on the DMX512 transmitter (a UART that can send a
@@ -122,7 +125,8 @@ break), 24Cxx EEPROMs, the DS1307 clock and the LM75 sensor on the I2C
 controller, and ten devices on the SPI controller: NOR flash, WS2801 LEDs,
 the MAX7219, the nRF24L01, CC1101, RFM12 and MRF24J40 radios, the ENC28J60
 Ethernet controller, the ADF435x synthesiser and an SD card in SPI mode.
-Each of these twenty-five protocols is judged by sigrok's decoder for it,
+Each of these twenty-five protocols, and the three that came after
+(Microwire, HDMI-CEC, RC-6), is judged by sigrok's decoder for it,
 which this project did not write. For the last seven the device is a
 script of the bytes the part would answer, not a model of the part: the
 decoder judges the commands the chip sent and reads the answers off the
@@ -377,7 +381,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 158 in all:
+fails if any survives. There are 176 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -401,6 +405,7 @@ fails if any survives. There are 158 in all:
 | Driver on the emulated board | 2 | `test/board_emu`: `run_usb.mjs --mutant push-after-start`, `run_board.mjs --mutant cpython-only-call` |
 | v2.0 engines, one each | 11 | `sim/test_tx_engines.ml` |
 | DALI and RC-5 receivers and their sampler settings (7, 6) | 13 | `sim/test_slow_rx.ml` |
+| Microwire, HDMI-CEC and the infrared burst sender (4, 9, 5) | 18 | `sim/test_microwire.ml`, `sim/test_cec.ml`, `sim/test_ir.ml` |
 | Ethernet firmware, one each way | 2 | `sim/test_ethernet.ml`, `sim/test_ethernet_rx.ml` |
 | gate netlist | 5 | `gl_equiv/check.py`: the RTL-to-netlist proof |
 | memory description, one for each size | 2 | `formal/sram_equiv.py`: the proofs against IHP's models |
@@ -412,7 +417,7 @@ count as a catch. The host-port and register-file bugs are a parameter of
 `hw/top.ml`, off by default, following `hw/pe_core.ml`; the generated
 Verilog is byte-identical with or without the parameter in the source.
 
-All 158 are caught. Two candidates turned out not to be bugs, and the
+All 176 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.

@@ -2470,6 +2470,265 @@ let rc5_rx_sampler ~clkdiv =
   }
 ;;
 
+(* Microwire controller, as the 93Cxx serial EEPROMs speak it: chip select
+   high for a transfer, one bit to the device and one from it on every
+   clock, any number of bits.
+
+   Microwire is SPI's older relative, but the SPI engines do not fit it:
+   chip select is active high, and a transfer is not a whole number of
+   bytes (a 93C46 command is a start bit, two opcode bits and six address
+   bits, with sixteen data bits after it one way or the other).
+
+   Pins: P0 = CS (push-pull, high for a transfer), P1 = SK (side-set), P2 =
+   DI, to the device; P3 = DO, from it. Config: [microwire_config]:
+   sideset_base 1, sideset_count 1; set_base 0, set_count 1; out_base 2,
+   out_count 1; in_base 3; threshold 16; autopull, autopush; out and in
+   most significant bit first. A bit is 5 ticks, SK low for 3 and high for
+   2: CLKDIV 3 for 667 kHz at 10 MHz.
+
+   The device takes DI as SK rises and changes DO just after; DO is read
+   one tick after SK rises, so the bit read on a clock is the device's
+   answer to that clock. DO comes through the input synchroniser, which
+   takes two cycles, so a tick must be at least three: CLKDIV 3 or more.
+
+   Host protocol:
+     TX : the number of bits, less one; then the bits to send, 16 to a
+          word, the first in the top bit (a last word's bits at its top).
+     RX : the bits read, one for every clock, 16 to a word, first in the
+          top bit; the last word holds what is left, lowest bits, and is
+          empty when nothing is. *)
+let microwire =
+  {|
+        .side_set 1
+idle:   set pins, 0         side 0     ; CS low: no transfer
+        pull                side 0     ; the number of bits, less one
+        out y, 16           side 0
+        set pins, 1         side 0     ; CS high
+bit:    out pins, 1         side 0 [1] ; DI while SK is low
+        nop                 side 1     ; SK rises: the device takes the bit
+        in pins, 1          side 1     ; and its answer is read before SK falls
+        jmp y-- bit         side 0
+        push                side 0     ; what is left of the last word
+        jmp idle            side 0
+|}
+;;
+
+let microwire_config ~clkdiv =
+  { Isa.Thread_config.default with
+    sideset_base = 1
+  ; sideset_count = 1
+  ; set_base = 0
+  ; set_count = 1
+  ; out_base = 2
+  ; out_count = 1
+  ; in_base = 3
+  ; threshold = 16
+  ; autopull = true
+  ; autopush = true
+  ; out_msb_first = true
+  ; in_msb_first = true
+  ; clkdiv
+  }
+;;
+
+(* The TX words for a transfer of [bits] (0 or 1 each, in order). *)
+let microwire_words (bits : int list) =
+  let n = List.length bits in
+  (n - 1)
+  :: List.map (List.chunks_of bits ~length:16) ~f:(fun chunk ->
+    List.foldi chunk ~init:0 ~f:(fun i acc b -> acc lor (b lsl (15 - i))))
+;;
+
+(* The bits read in a transfer of [n] bits, from its RX words. *)
+let microwire_read ~n (words : int list) =
+  List.concat_mapi words ~f:(fun k w ->
+    let width = max 0 (min 16 (n - (16 * k))) in
+    List.init width ~f:(fun i -> (w lsr (width - 1 - i)) land 1))
+;;
+
+(* A 93C46 with 16-bit words (64 of them): the bits of its commands. *)
+module Eeprom93c46 = struct
+  let field ~width v = List.init width ~f:(fun i -> (v lsr (width - 1 - i)) land 1)
+  let command ~opcode ~address = (1 :: field ~width:2 opcode) @ field ~width:6 address
+
+  (* The clocks of a read: the command, whose last clock is answered with
+     a dummy 0, then one for each of the word's 16 bits. *)
+  let read ~address = command ~opcode:0b10 ~address @ List.init 16 ~f:(fun _ -> 0)
+  let write ~address ~value = command ~opcode:0b01 ~address @ field ~width:16 value
+  let write_enable = command ~opcode:0b00 ~address:0b110000
+  let write_disable = command ~opcode:0b00 ~address:0b000000
+
+  (* The word in what a read's clocks read back; bit 8 of them is the
+     dummy 0, by which a device shows it is there. *)
+  let read_value (bits : int list) =
+    List.fold (List.drop bits 9) ~init:0 ~f:(fun acc b -> (acc lsl 1) lor b)
+  ;;
+end
+
+(* HDMI-CEC initiator: the one-wire control bus between HDMI devices. It
+   sends messages and reads each block's acknowledgement.
+
+   A message is a start bit (low 3.7 ms, high 0.8 ms) and then blocks of
+   ten bits: eight of data, most significant first, EOM (1 on the last
+   block) and ACK. Every bit is 2.4 ms long and begins with the line low:
+   for 0.6 ms it is a 1, for 1.5 ms a 0. The initiator sends the ACK bit
+   as a 1, and a follower that accepts the block holds the line low to
+   make it a 0.
+
+   Pins: P0 = the CEC line, open-drain. Config: [cec_config]: set_base 0,
+   set_count 1; in_base 0; out most significant bit first; CLKDIV makes a
+   tick 0.1 ms: 1000 at 10 MHz.
+
+   Host protocol:
+     TX : one word for each block: the byte in bits 15:8, EOM in bit 7,
+          and in bit 6 a 1 if the message is to everyone (address 15).
+          The first block of a message is its header: the initiator's
+          address in the top four bits, the destination's in the low four.
+     RX : one word for each block sent: the line 1.0 ms into its ACK bit,
+          0 if a follower held it low.
+   A message to one device is acknowledged by a 0; in a message to
+   everyone a 0 is a follower's objection. Either way a block that fails
+   ends the message there, as the standard asks: the blocks still queued
+   for it are taken from the FIFO and not sent, so the host sees fewer
+   words than it queued blocks, the last of them the failure.
+
+   The next block must be in the FIFO before the last one's ACK bit is
+   over, or the line stays idle and the followers give the message up.
+   After a message the program keeps off the bus for seven bit times, as
+   an initiator that wants to send again must.
+
+   It does not listen before it sends, or give way to another initiator. *)
+let cec =
+  {|
+idle:   pull                    ; a message's first block
+        set pins, 0 [15]        ; start bit: low for 3.7 ms,
+        nop [15]
+        nop [4]
+        set pins, 1 [5]         ; then high for 0.8 ms
+block:  set y, 8                ; 9 bits: the block's 8 and EOM
+bit:    out x, 1
+        set pins, 0 [4]         ; every bit begins low: 0.6 ms for a 1,
+        jmp !x zero
+        set pins, 1 [14]        ; and high for the rest of its 2.4 ms
+        jmp next
+zero:   nop [8]                 ; 1.5 ms for a 0
+        set pins, 1 [6]
+next:   jmp y-- bit
+        nop                     ; (the last bit's high time, as inside the loop)
+        set pins, 0 [5]         ; ACK bit: sent as a 1,
+        set pins, 1 [3]
+        in pins, 1              ; and 1.0 ms after its edge the line is low if a follower holds it
+        mov y, isr
+        push                    ; the line as it was read
+        jmp !y low
+        out y, 1                ; high: right only in a message to everyone
+        jmp !y abort
+        jmp cont
+low:    out y, 1 [1]            ; low: right only in a message to one device
+        jmp !y cont
+        jmp abort
+cont:   jmp !x more             ; X is the bit sent last: EOM
+end:    set y, 10               ; end of message: seven bit times off the bus
+free:   jmp y-- free [15]
+        jmp idle
+more:   pull [2]                ; the next block: its first bit begins 2.4 ms after the ACK bit did
+        jmp block
+abort:  jmp x-- end             ; the message ends here; was that its last block?
+        pull                    ; no: take the rest of it from the FIFO, unsent
+        out null, 8
+        out x, 1
+        jmp abort
+|}
+;;
+
+let cec_config ~clkdiv =
+  { Isa.Thread_config.default with set_base = 0; set_count = 1; in_base = 0; out_msb_first = true; clkdiv }
+;;
+
+(* The TX words for a message from [initiator] to [destination] (15:
+   everyone) with the bytes [data] after the header. *)
+let cec_words ~initiator ~destination data =
+  let blocks = ((initiator lsl 4) lor destination) :: data in
+  let last = List.length blocks - 1 in
+  List.mapi blocks ~f:(fun i b ->
+    (b lsl 8) lor (Bool.to_int (i = last) lsl 7) lor (Bool.to_int (destination = 15) lsl 6))
+;;
+
+(* Infrared burst sender: bursts of carrier with silences between them, each
+   a whole number of carrier periods. The remote control codes are all
+   made of these; which bursts and silences make a frame is the host's
+   business, so one program sends any of them. RC-6 is sent with it
+   ([rc6_words]); RC-5 and NEC have programs of their own, written before
+   this one.
+
+   Pins: P0 = the LED, push-pull, high = lit (side-set). Config:
+   [ir_tx_config]: sideset_base 0, sideset_count 1; out most significant
+   bit first; CLKDIV makes a tick half a carrier period: 139 for 36 kHz at
+   10 MHz.
+
+   Host protocol: one TX word for a burst and the silence after it: the
+   burst's carrier periods, less one, in bits 15:8, and the silence's, less
+   three, in bits 7:0. The silence is counted from the end of the burst's
+   last period to the start of the next burst, and the three are the ticks
+   this program spends fetching the next word: that word must be in the
+   FIFO by then, or the silence grows. *)
+let ir_tx =
+  {|
+        .side_set 1
+next:   pull                side 0     ; a burst and the silence after it
+        out x, 8            side 0     ; carrier periods, less one
+        out y, 8            side 0     ; periods of silence, less three
+mark:   nop                 side 1     ; a carrier period: lit for a tick,
+        jmp x-- mark        side 0     ; dark for a tick
+space:  jmp y-- space       side 0 [1] ; silence, a period at a time
+        jmp next            side 0
+|}
+;;
+
+let ir_tx_config ~clkdiv =
+  { Isa.Thread_config.default with sideset_base = 0; sideset_count = 1; out_msb_first = true; clkdiv }
+;;
+
+(* The TX words for [runs]: (carrier periods, periods of silence after). *)
+let ir_tx_words (runs : (int * int) list) =
+  List.map runs ~f:(fun (mark, space) -> ((mark - 1) lsl 8) lor (space - 3))
+;;
+
+(* An RC-6 frame, mode 0, as bursts and silences in units of 16 carrier
+   periods (444 us at 36 kHz): a leader of 6 lit and 2 dark; a start bit, a
+   1; three mode bits, 0; the toggle bit, twice as long as the others; 8
+   address bits and 8 command bits, most significant first. A 1 is lit then
+   dark, a 0 dark then lit: the other way round from RC-5. The frame ends
+   with 6 units dark. *)
+let rc6_runs ~toggle ~address ~command =
+  let bit ?(width = 1) b = if b = 1 then [ 1, width; 0, width ] else [ 0, width; 1, width ] in
+  let field ~width v = List.init width ~f:(fun i -> (v lsr (width - 1 - i)) land 1) in
+  let levels =
+    [ 1, 6; 0, 2 ]
+    @ bit 1
+    @ List.concat_map [ 0; 0; 0 ] ~f:bit
+    @ bit ~width:2 (Bool.to_int toggle)
+    @ List.concat_map (field ~width:8 address @ field ~width:8 command) ~f:bit
+    @ [ 0, 6 ]
+  in
+  (* Runs of the same level joined, then paired: lit, and the dark after. *)
+  let joined =
+    List.fold levels ~init:[] ~f:(fun acc (level, n) ->
+      match acc with
+      | (l, m) :: rest when l = level -> (l, m + n) :: rest
+      | _ -> (level, n) :: acc)
+    |> List.rev
+  in
+  let rec pairs = function
+    | (1, mark) :: (0, space) :: rest -> (16 * mark, 16 * space) :: pairs rest
+    | [] -> []
+    | _ -> assert false
+  in
+  pairs joined
+;;
+
+let rc6_words ~toggle ~address ~command = ir_tx_words (rc6_runs ~toggle ~address ~command)
+
 (* PWM, and so RC servo pulses: a pin high for one count and low for
    another, over and over.
 
@@ -2843,6 +3102,9 @@ let all =
   ; "nec_rx", nec_rx
   ; "dali_rx", dali_rx
   ; "rc5_rx", rc5_rx
+  ; "microwire", microwire
+  ; "cec", cec
+  ; "ir_tx", ir_tx
   ; "pwm", pwm
   ; "nes_pad", nes_pad
   ]

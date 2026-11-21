@@ -70,7 +70,10 @@ The preamble, the Manchester code, where the CRC goes and where the frame
 ends are still programs: 70 instructions to send, 14 to receive. Every
 earlier program runs unchanged, and no instruction changed its meaning.
 That makes 36 protocols, with both of the competition's stretch goals
-among them.
+among them. Three more have followed as firmware alone, each judged by a
+sigrok decoder: Microwire with a 93C46 EEPROM, an HDMI-CEC initiator, and
+RC-6 infrared on a burst sender that serves any remote control code.
+That is 39.
 
 **Then CAN, from a transmitter to a node.** The v1.4 engine sent frames
 the host had made and listened. On v2.1's CRC register the transmitter
@@ -144,6 +147,9 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 | MDIO | controller, reads and writes | 7 |
 | DALI | controller: transmitter on one thread, receiver through the bit sampler on the other | 17, 9 |
 | PWM, RC servo | generator, exact to the cycle | 8 |
+| Microwire | controller; a 93C46 EEPROM on it | 10 |
+| HDMI-CEC | initiator, with each block's acknowledgement | 38 |
+| RC-6 infrared | transmitter with its 36 kHz carrier, on a burst sender | 7 |
 | NES gamepad | host | 7 |
 | MIDI, Modbus RTU | on the UART transmitter | no new firmware |
 | LIN | master frames, on the DMX512 transmitter | no new firmware |
@@ -172,15 +178,15 @@ runs a program on the reference model and prints the pins.
    picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
    USB device, sockit_owm's 1-Wire slave. For USB, 1-Wire, WS2812, SWD, PS/2,
    CAN and every protocol added after them but Ethernet, the recorded pins
-   go to sigrok's protocol decoders, 34 tests in all, 32 of them with a
+   go to sigrok's protocol decoders, 37 tests in all, 35 of them with a
    fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
    receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
    sender has its own clock, 100 ppm off, and jitter on every edge.
-4. **Tests that are themselves tested.** 158 bugs are planted in the RTL,
+4. **Tests that are themselves tested.** 176 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
-5. **The gates, not only the RTL.** All 62 chip-level tests pass on the
+5. **The gates, not only the RTL.** All 65 chip-level tests pass on the
    post-layout netlist, with IHP's models of the SRAMs in place of the
    macros. That includes Ethernet at a 40 MHz clock, both ways.
 6. **The software that will run on the board.** The MicroPython driver is

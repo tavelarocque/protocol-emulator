@@ -45,7 +45,11 @@ const more = readFileSync(join(HERE, '..', '..', 'host', 'more_protocols.py'), '
 const compatMore = readFileSync(join(HERE, 'compat_more.py'), 'latin1');
 const second = asModule + more + '\n' + compatMore;
 const cpython2 = execFileSync('python3', ['-c', driver + '\n' + second], { encoding: 'latin1' }).trim();
-const [o2, e2] = board.exec(second);
+// The board compiles what it is given as it arrives, in the memory the
+// first driver has left: the second driver goes in before its checks.
+const [o2a, e2a] = board.exec(asModule + more);
+const [o2b, e2b] = board.exec(compatMore);
+const [o2, e2] = [o2a + o2b, e2a + e2b];
 const micropython2 = (o2 + e2).replace(/\r\n/g, '\n').trim();  // the board's terminal ends lines with CR LF
 if (micropython2 !== cpython2) {
   let at = 0;

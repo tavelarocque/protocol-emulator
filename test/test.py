@@ -2850,6 +2850,54 @@ async def test_rc5_infrared(dut):
         assert wrong != want, wrong
 
 
+@cocotb.test(timeout_time=400, timeout_unit="ms")
+async def test_rc6_infrared(dut):
+    """RC-6 infrared, with its 36 kHz carrier, on the infrared burst
+    sender. The bursts must be whole numbers of carrier periods, as worked
+    out here from RC-6's rules; sigrok's RC-6 decoder is given the LED as
+    a receiver module would report it."""
+    await reset(dut)
+    trace = sigrok.Trace(dut, {"ir": ir_receiver(dut, 0, 417)})  # 1.5 carrier periods
+    led = pin_trace(dut, led=0)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def play():
+        more.Rc6Tx(chip, firmware("ir_tx")).send(0x04, 0x0C, toggle=1)
+
+    await play()
+    await ClockCycles(dut.clk, 300_000)
+    trace.stop()
+    led.stop()
+    rises = [t for t, v in led.level("led") if v == 1][1:]  # [0]: before the pin drives
+    bursts, n = [], 1
+    for a, b in zip(rises, rises[1:]):
+        if b - a == 278:  # one carrier period, 36.0 kHz
+            n += 1
+        else:
+            bursts.append(n)
+            n = 1
+    bursts.append(n)
+    # From RC-6's rules: a leader lit for 6 units of 16 periods and dark for
+    # 2; then a 1 is lit then dark and a 0 dark then lit, the fifth bit
+    # (the toggle) twice as long.
+    bits = "1000" "T" "00000100" "00001100"
+    halves = "11111100" + "".join(
+        ("1100" if i == 4 else "10" if bit == "1" else "01") for i, bit in enumerate(bits))
+    want_bursts = [16 * len(run) for run in halves.split("0") if run]
+    assert bursts == want_bursts, (bursts, want_bursts)
+    if sigrok.available():
+        decoder = "ir_rc6:polarity=active-high"
+        fields = lambda found: [t for t in texts(found) if len(t) > 3]
+        found = trace.decode(decoder)
+        want = ["Synchronisation", "Startbit", "Field: 0", "Toggle: 1", "Address: 04", "Data: 0C"]
+        assert fields(found) == want, fields(found)
+        # The last burst blanked out: not command 0C.
+        a, b = next((a, b) for a, b, text in found if text.startswith("Data"))
+        wrong = fields(trace.forced("ir", b - 10_000, b + 1_000, 0).decode(decoder))
+        assert wrong != want, wrong
+
+
 @cocotb.test(timeout_time=100, timeout_unit="ms")
 async def test_lin(dut):
     """A LIN frame from the master (break, sync, identifier, four data bytes,
@@ -3284,6 +3332,246 @@ async def test_rc5_receive(dut):
         a, b = next((a, b) for a, b, text in found if text.startswith("Command"))
         wrong = fields(trace.forced("ir", b - 3 * half, b + half, 1).decode("ir_rc5"))
         assert wrong != want, wrong
+
+
+class Eeprom93c46Model:
+    """A 93C46 serial EEPROM, 64 words of 16 bits, from its datasheet. It
+    takes DI as SK rises while CS is high and changes DO at that edge. A
+    command is a start bit, two opcode bits and six address bits; a read
+    answers the last of them with a 0 and then sends the word, and the
+    words after it for as long as it is clocked. A write is stored when CS
+    falls, if writing is enabled, and for [busy] cycles after that the part
+    takes no command and holds DO low whenever CS is high."""
+
+    def __init__(self, busy=3000):
+        self.mem = [0xFFFF] * 64
+        self.enabled = False
+        self.taken, self.to_send = [], []
+        self.do, self.cs, self.sk = 1, 0, 0
+        self.busy, self.busy_until, self.cycle = busy, 0, 0
+        self.log = []
+
+    @staticmethod
+    def _value(bits):
+        return int("".join(map(str, bits)), 2)
+
+    def step(self, cs, sk, di):
+        self.cycle += 1
+        busy = self.cycle < self.busy_until
+        if self.cs and not cs:
+            t = self.taken
+            if len(t) == 25 and t[:3] == [1, 0, 1]:
+                address, word = self._value(t[3:9]), self._value(t[9:])
+                if self.enabled:
+                    self.mem[address] = word
+                    self.busy_until = self.cycle + self.busy
+                self.log.append(("write", address, word, self.enabled))
+            self.taken, self.to_send, self.do = [], [], 1
+        if cs and not self.cs:
+            self.do = 0 if busy else 1
+        if cs and busy:
+            self.do = 0
+        elif cs and not self.taken and not self.to_send:
+            self.do = 1
+        if cs and sk and not self.sk and not busy:
+            if self.to_send:
+                self.do = self.to_send.pop(0)
+            elif self.taken or di:
+                self.taken.append(di)
+                t = self.taken
+                if len(t) == 9 and t[:3] == [1, 1, 0]:
+                    address = self._value(t[3:])
+                    self.log.append(("read", address))
+                    self.do = 0
+                    self.to_send = [(w >> k) & 1 for w in self.mem[address:]
+                                    for k in range(15, -1, -1)]
+                elif len(t) == 9 and t[:5] == [1, 0, 0, 1, 1]:
+                    self.enabled = True
+                    self.log.append(("enable",))
+                elif len(t) == 9 and t[:5] == [1, 0, 0, 0, 0]:
+                    self.enabled = False
+                    self.log.append(("disable",))
+        self.cs, self.sk = cs, sk
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_microwire_eeprom(dut):
+    """A 93C46 EEPROM on the Microwire controller: a write refused because
+    writing is not enabled, the enable, two writes with the part's busy
+    time waited out by asking it, and reads. The EEPROM is a model written
+    from the datasheet; sigrok's Microwire decoder and its 93xx decoder on
+    top read the wires and must name every command with its address and
+    data."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    model = Eeprom93c46Model()
+
+    async def wires():
+        while True:
+            await FallingEdge(dut.clk)
+            out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+            driven = out & oe
+            model.step(driven & 1, (driven >> 1) & 1, (driven >> 2) & 1)
+            dut.uio_in.value = 0xF7 | (model.do << 3)
+
+    line = lambda k: (lambda: (int(dut.uio_out.value) & int(dut.uio_oe.value)) >> k & 1)
+    trace = sigrok.Trace(dut, {"cs": line(0), "sk": line(1), "si": line(2),
+                               "so": lambda: (int(dut.uio_in.value) >> 3) & 1})
+    bus = cocotb.start_soon(wires())
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        eeprom = more.Eeprom93c46(more.Microwire(chip, firmware("microwire")))
+        eeprom.write(5, 0x1234)  # writing is not enabled yet
+        refused = eeprom.read(5)
+        eeprom.write_enable()
+        waits = []
+        for address, value in ((5, 0xBEEF), (63, 0x8001)):
+            eeprom.write(address, value)
+            waits.append(0)
+            while not eeprom.ready():
+                waits[-1] += 1
+        return refused, waits, [eeprom.read(a) for a in (5, 63, 0)]
+
+    refused, waits, read = await session()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    bus.cancel()
+    assert refused == 0xFFFF and read == [0xBEEF, 0x8001, 0xFFFF], (refused, read)
+    assert all(w > 0 for w in waits), f"the busy time was never seen: {waits}"
+    assert (model.mem[5], model.mem[63]) == (0xBEEF, 0x8001)
+    assert model.log[0] == ("write", 5, 0x1234, False), model.log
+    if sigrok.available():
+        decoder = "microwire,eeprom93xx:addresssize=6"
+        named = lambda found: [t for t in texts(found) if t.startswith(
+            ("Read word", "Write word", "Write enable", "Address: ", "Data: "))]
+        word = lambda kind, address, data: [kind, "Address: 0x%04x" % address, "Data: 0x%04x" % data]
+        want = (word("Write word", 5, 0x1234) + word("Read word", 5, 0xFFFF) + ["Write enable"]
+                + word("Write word", 5, 0xBEEF) + word("Write word", 63, 0x8001)
+                + word("Read word", 5, 0xBEEF) + word("Read word", 63, 0x8001)
+                + word("Read word", 0, 0xFFFF))
+        found = trace.decode(decoder, "eeprom93xx")
+        assert named(found) == want, named(found)
+        # The part's busy time shows too: the Microwire decoder sees it.
+        assert "Busy" in texts(trace.decode("microwire")), "no busy time on the wire"
+        # DO held low through the word read back from address 5: not 0xbeef.
+        a, b = next((a, b) for a, b, text in found if text == "Data: 0xbeef" and a > found[10][0])
+        wrong = named(trace.forced("so", a, b, 0).decode(decoder, "eeprom93xx"))
+        assert wrong != want, wrong
+
+
+class CecFollower:
+    """A CEC follower at [address], from the specification's timing table
+    for receivers: a start bit is low for 3.5 to 3.9 ms of a 4.3 to 4.7 ms
+    period; a bit is 2.05 to 2.75 ms long and low for 0.4 to 0.8 ms (a 1)
+    or 1.3 to 1.7 ms (a 0). It acknowledges the blocks of a message sent
+    to it by holding the line low for 1.5 ms from the ACK bit's edge. It
+    looks at the line every [step] cycles of the 10 MHz clock."""
+
+    def __init__(self, dut, address, step=200):
+        self.dut, self.address, self.step = dut, address, step
+        self.messages, self.errors = [], []
+
+    @staticmethod
+    def _within(us, lo, hi):
+        return lo * 1000 <= us <= hi * 1000
+
+    def _pulse(self, low, period):
+        if self.ack_bit:
+            self.ack_bit = False
+            if period is not None and not self._within(period, 2.05, 2.75):
+                self.errors.append(f"ACK bit {period} us long")
+            self.bits = []
+        elif self._within(low, 3.5, 3.9) and (period is None or self._within(period, 4.3, 4.7)):
+            # A start bit begins a message whenever it comes.
+            self.in_message, self.bits, self.blocks = True, [], []
+        elif not self.in_message:
+            self.errors.append(f"not a start bit: low {low} us")
+        else:
+            bit = 1 if self._within(low, 0.4, 0.8) else 0 if self._within(low, 1.3, 1.7) else None
+            if bit is None or (period is not None and not self._within(period, 2.05, 2.75)):
+                self.errors.append(f"a bit low {low} us of {period}")
+                self.in_message = False
+            else:
+                self.bits.append(bit)
+
+    async def run(self):
+        dut, us = self.dut, self.step / 10
+        t, line, fell, low, hold_until = 0, 1, None, 0, -1
+        self.in_message, self.bits, self.blocks, self.ack_bit = False, [], [], False
+        for_me = False
+        while True:
+            await ClockCycles(dut.clk, self.step)
+            t += us
+            chip_low = bool(int(dut.uio_oe.value) & 1) and not int(dut.uio_out.value) & 1
+            now = 0 if chip_low or t < hold_until else 1
+            drive_pin(dut, 0, now)
+            if line and not now:
+                if fell is not None:
+                    self._pulse(low, t - fell)
+                fell = t
+                if self.in_message and len(self.bits) == 9:  # this pulse is the ACK bit
+                    data = int("".join(map(str, self.bits[:8])), 2)
+                    if not self.blocks:
+                        for_me = data & 0xF == self.address
+                    self.blocks.append(data)
+                    self.ack_bit = True
+                    if for_me:
+                        hold_until = t + 1500
+                    if self.bits[8]:
+                        self.messages.append(self.blocks)
+                        self.in_message = False
+            elif not line and now and fell is not None:
+                low = t - fell
+            elif line and now and fell is not None and t - fell > 5000:
+                self._pulse(low, None)
+                fell = None
+            line = now
+
+
+@cocotb.test(timeout_time=900, timeout_unit="ms")
+async def test_hdmi_cec(dut):
+    """The HDMI-CEC initiator: a message a follower acknowledges; one to an
+    address nobody has, which must stop at its header; and one to
+    everyone. The follower is written from the specification's receiver
+    timing and rejects any pulse outside it. sigrok's CEC decoder reads the
+    same wire: it must name the three messages with their
+    acknowledgements, and warn about nothing."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    follower = CecFollower(dut, 4)
+    listening = cocotb.start_soon(follower.run())
+    trace = sigrok.Trace(dut, {"cec": lambda: int(dut.uio_in.value) & 1})
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        cec = more.Cec(chip, firmware("cec"), address=1)
+        return [cec.send(4, [0x04]), cec.send(5, [0x8F]), cec.send(15, [0x82, 0x10, 0x00])]
+
+    got = await session()
+    await ClockCycles(dut.clk, 60_000)
+    trace.stop()
+    listening.cancel()
+    assert got == [True, False, True], got
+    assert follower.errors == [], follower.errors
+    assert follower.messages == [[0x14, 0x04], [0x1F, 0x82, 0x10, 0x00]], follower.messages
+    if sigrok.available():
+        found = trace.decode("cec")
+        frames = lambda found: [t for a, b, t in found
+                                if re.fullmatch(r"[0-9a-f]{2}(:[0-9a-f]{2})*", t) and b - a > 100_000]
+        results = [t.rsplit("| R: ", 1)[1] for t in texts(found) if "| R: " in t]
+        warnings = [t for t in texts(found) if re.search(r"Invalid|Expected|ERROR|exceeds|below", t)]
+        assert frames(found) == ["14:04", "15", "1f:82:10:00"], frames(found)
+        assert results == ["ACK", "NACK", "ACK"], results
+        assert warnings == [], warnings
+        # The first message's data block cut short by a line held high: not 14:04.
+        a, b = next((a, b) for a, b, text in found if text == "14:04")
+        wrong = frames(trace.forced("cec", (a + b) // 2, b, 1).decode("cec"))
+        assert "14:04" not in wrong, wrong
 
 
 # --- Devices on the engines the chip already had ------------------------------

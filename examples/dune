@@ -258,3 +258,27 @@
   (with-stdout-to
    rc5_rx.s
    (run %{dep:../bin/firmware_src.exe} rc5_rx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets microwire.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   microwire.s
+   (run %{dep:../bin/firmware_src.exe} microwire %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets cec.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   cec.s
+   (run %{dep:../bin/firmware_src.exe} cec %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets ir_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   ir_tx.s
+   (run %{dep:../bin/firmware_src.exe} ir_tx %{dep:../model/firmware.ml}))))

@@ -743,3 +743,189 @@ class Rc5Rx:
                 extended = 0 if word & 0x1000 else 0x40
                 return (word >> 11) & 1, (word >> 6) & 0x1F, (word & 0x3F) | extended
         raise Rc5Error("no frame")
+
+
+# --- More engines ------------------------------------------------------------------
+
+
+class MicrowireError(Exception):
+    pass
+
+
+class Microwire:
+    """Microwire controller (microwire.hex): CS on pin 0, high for a
+    transfer; SK on pin 1; DI, to the device, on pin 2; DO, from it, on pin
+    3. SK is the core clock / (5 x clkdiv): 667 kHz at 10 MHz with clkdiv
+    3, which is also the least: DO passes the input synchroniser."""
+
+    def __init__(self, chip, image, clkdiv=3):
+        if clkdiv < 3:
+            raise ValueError("clkdiv must be at least 3")
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        chip.configure(sideset_base=1, sideset_count=1, set_base=0, set_count=1,
+                       out_base=2, out_count=1, in_base=3, threshold=16,
+                       out_msb_first=True, in_msb_first=True,
+                       auto=AUTOPULL | AUTOPUSH, clkdiv=clkdiv)
+        chip.run()  # the firmware lowers CS before the pin drives it
+        chip.set_pin_modes({0: pe.PUSH_PULL, 1: pe.PUSH_PULL, 2: pe.PUSH_PULL})
+
+    def transfer(self, bits):
+        """Clock [bits] (0 or 1 each) to the device with CS high; return the
+        bit read on each clock."""
+        chip, n = self.chip, len(bits)
+        got = []
+        chip.push(n - 1)
+        for start in range(0, n, 16):
+            word = 0
+            for k, b in enumerate(bits[start:start + 16]):
+                word |= (b & 1) << (15 - k)
+            chip.push(word)
+            r = chip.try_pop()  # keep RX draining so neither FIFO jams
+            if r is not None:
+                got.append(r)
+        while len(got) < n // 16 + 1:
+            got.append(chip.pop())
+        read = []
+        for k, word in enumerate(got):
+            width = max(0, min(16, n - 16 * k))
+            read += [(word >> (width - 1 - i)) & 1 for i in range(width)]
+        return read
+
+
+class Eeprom93c46:
+    """A 93C46 serial EEPROM, 64 words of 16 bits, on a Microwire bus."""
+
+    def __init__(self, bus):
+        self.bus = bus
+
+    @staticmethod
+    def _field(value, width):
+        return [(value >> (width - 1 - i)) & 1 for i in range(width)]
+
+    def _command(self, opcode, address, more=()):
+        # A start bit, two opcode bits, six address bits.
+        return self.bus.transfer([1] + self._field(opcode, 2) + self._field(address, 6)
+                                 + list(more))
+
+    def read(self, address):
+        got = self._command(0b10, address, [0] * 16)
+        if got[8]:
+            raise MicrowireError("no device: the bit before a read's data is not 0")
+        value = 0
+        for b in got[9:]:
+            value = (value << 1) | b
+        return value
+
+    def write_enable(self):
+        self._command(0b00, 0b110000)
+
+    def write_disable(self):
+        self._command(0b00, 0b000000)
+
+    def write(self, address, value):
+        """Write a word. The part then takes a few milliseconds, and ignores
+        commands until [ready] says it has finished."""
+        self._command(0b01, address, self._field(value, 16))
+
+    def ready(self):
+        """CS high with no start bit: the part shows busy (0) or ready (1)."""
+        return bool(self.bus.transfer([0])[0])
+
+
+class Cec:
+    """HDMI-CEC initiator (cec.hex): the CEC line on pin 0, open-drain,
+    with the bus's pull-up. It sends messages as the device at [address]
+    and reads each block's acknowledgement, ending a message at a block
+    that fails. It does not listen before sending, give way to another
+    initiator, or receive messages."""
+
+    def __init__(self, chip, image, address, clock_hz=10_000_000):
+        self.chip = chip
+        self.address = address
+        chip.stop()
+        chip.load(image)
+        # A tick is 0.1 ms.
+        chip.configure(set_base=0, set_count=1, in_base=0, out_msb_first=True,
+                       clkdiv=(clock_hz + 5_000) // 10_000)
+        chip.set_pin_modes({0: pe.OPEN_DRAIN})
+        chip.run()
+
+    def send(self, destination, data=()):
+        """Send a message of [data] to [destination] (15: everyone). True
+        if every block was acknowledged; for a message to everyone, if no
+        follower objected. A block that fails ends the message there."""
+        blocks = [(self.address << 4) | destination] + list(data)
+        everyone = destination == 15
+        good = 1 if everyone else 0  # the line in the ACK bit when all is well
+        reports = []
+
+        def take(word):
+            if word is not None and (not reports or reports[-1] == good):
+                reports.append(word)
+
+        for i, b in enumerate(blocks):
+            self.chip.push((b << 8) | (0x80 if i == len(blocks) - 1 else 0)
+                           | (0x40 if everyone else 0))
+            take(self.chip.try_pop())  # keep RX draining: a long message is more than the FIFO
+        while len(reports) < len(blocks) and (not reports or reports[-1] == good):
+            take(self.chip.pop())
+        return len(reports) == len(blocks) and reports[-1] == good
+
+
+class IrTx:
+    """Infrared burst sender (ir_tx.hex): an IR LED on pin 0, lit when
+    high. It sends bursts of carrier with silences between them, each a
+    whole number of carrier periods; a remote control code is a list of
+    those."""
+
+    def __init__(self, chip, image, carrier_hz=36_000, clock_hz=10_000_000):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        # A tick is half a carrier period.
+        chip.configure(sideset_base=0, sideset_count=1, out_msb_first=True,
+                       clkdiv=(clock_hz + carrier_hz) // (2 * carrier_hz))
+        chip.run()  # the firmware turns the LED off before the pin drives it
+        chip.set_pin_modes({0: pe.PUSH_PULL})
+
+    def send_runs(self, runs):
+        """[(carrier periods, periods of silence after), ...]: bursts of 1
+        to 256 periods, silences of 3 to 258."""
+        for mark, space in runs:
+            self.chip.push(((mark - 1) << 8) | (space - 3))
+
+
+class Rc6Tx(IrTx):
+    """RC-6 infrared, mode 0, with its 36 kHz carrier, on the burst
+    sender."""
+
+    @staticmethod
+    def runs(address, command, toggle=0):
+        """A frame as bursts and silences. In units of 16 carrier periods:
+        a leader lit for 6 and dark for 2; a start bit, 1; three mode bits,
+        0; the toggle bit, twice as long as the rest; 8 address and 8
+        command bits. A 1 is lit then dark, a 0 dark then lit. 6 units
+        dark end it."""
+        bits = [1, 0, 0, 0, toggle & 1]
+        bits += [(address >> k) & 1 for k in range(7, -1, -1)]
+        bits += [(command >> k) & 1 for k in range(7, -1, -1)]
+        levels = [1] * 6 + [0] * 2
+        for i, b in enumerate(bits):
+            width = 2 if i == 4 else 1
+            levels += ([1] * width + [0] * width) if b else ([0] * width + [1] * width)
+        levels += [0] * 6
+        runs, i = [], 0
+        while i < len(levels):
+            mark = 0
+            while i < len(levels) and levels[i]:
+                mark, i = mark + 1, i + 1
+            space = 0
+            while i < len(levels) and not levels[i]:
+                space, i = space + 1, i + 1
+            runs.append((16 * mark, 16 * space))
+        return runs
+
+    def send(self, address, command, toggle=0):
+        self.send_runs(self.runs(address, command, toggle))

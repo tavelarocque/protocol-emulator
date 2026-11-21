@@ -282,3 +282,27 @@
   (with-stdout-to
    rc5_rx.hex
    (run %{dep:../bin/firmware_hex.exe} rc5_rx))))
+
+(rule
+ (targets microwire.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   microwire.hex
+   (run %{dep:../bin/firmware_hex.exe} microwire))))
+
+(rule
+ (targets cec.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   cec.hex
+   (run %{dep:../bin/firmware_hex.exe} cec))))
+
+(rule
+ (targets ir_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   ir_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} ir_tx))))
