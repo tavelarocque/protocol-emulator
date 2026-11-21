@@ -31,6 +31,8 @@ them, so they cannot drift.
 | [`rc5_tx.s`](rc5_tx.s) | RC-5 infrared transmitter, with carrier | 37 |
 | [`wiegand_rx.s`](wiegand_rx.s) | Wiegand receiver | 16 |
 | [`nec_rx.s`](nec_rx.s) | NEC infrared receiver | 33 |
+| [`dali_rx.s`](dali_rx.s) | DALI receiver, through the bit sampler | 9 |
+| [`rc5_rx.s`](rc5_rx.s) | RC-5 infrared receiver, through the bit sampler | 9 |
 | [`pwm.s`](pwm.s) | PWM, RC servo pulses | 8 |
 | [`nes_pad.s`](nes_pad.s) | NES gamepad | 7 |
 | [`echo.s`](echo.s) | TX FIFO to RX FIFO, for bring-up | 5 |

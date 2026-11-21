@@ -2260,6 +2260,194 @@ let nec_rx_config =
   }
 ;;
 
+(* DALI receiver: the other direction of [dali_tx], for one thread with the
+   bit sampler in front of it. A controller reads a gear's 8-bit answers
+   with it; it reads 16- and 24-bit frames the same way.
+
+   A frame starts with an edge that is not in the middle of a bit (the bus
+   falls for the start bit's first half), so the sampler is not locked to
+   the middles of bits, as it is for Ethernet. It is set to take every
+   edge and a sample every half bit: what reaches this program is the
+   bus's level in each half bit, from the start bit's first half on. The
+   prescaler makes a sample 1/10 of a half bit, and this thread's CLKDIV
+   is the same number, so each of the sampler's pulses is one tick long.
+
+   Pins: P1 = the bus as received, high when idle (input); P2 is taken by
+   the sampler's pulse. Config: [dali_rx_config ~clkdiv], sampler:
+   [dali_rx_sampler ~clkdiv], with CLKDIV 417 for 1200 bit/s at 10 MHz.
+
+   Host protocol, for each frame:
+     RX : the half bits, 16 to a word, the first received in the top bit;
+          the last word holds what is left, lowest bits, and is empty if
+          nothing is; then 0x10000 minus the number of half bits.
+   [dali_rx_frame] pairs the half bits up into the frame's bits. After
+   the last bit the bus is idle and two or three high half bits follow
+   before the sampler gives up: two high in one bit is not a bit, and that
+   is how the end is told from data.
+
+   The count is how the host finds the end of a frame's words: it is
+   0xFF00 or more for anything under 256 half bits, and no other word can
+   be, because the sampler never passes more than three equal half bits
+   in a row and the last word's top bits are clear ([dali_rx_frames]).
+   When the sampler is switched on it reports the idle bus once, as three
+   high half bits: that is no frame, like any other report without a
+   start bit.
+
+   Timing: an edge is taken whenever it comes, and each half bit is
+   sampled in its middle counting from the last edge. Two half bits can
+   pass between edges, so a sender 15% fast or slow is read (DALI allows
+   10%). *)
+let dali_rx =
+  {|
+rx:     mov x, null
+        jmp x-- first           ; X = 0xFFFF: it counts the half bits, downwards
+first:  wait 1 pin 2            ; a frame's first half bit
+half:   in pins, 1              ; take it; sixteen make a word
+        wait 1 pin 2 timeout    ; the next, or the end of the frame
+        jmp x-- half
+eof:    push                    ; what is left of the last word
+        in x, 16                ; then the count
+        jmp rx
+|}
+;;
+
+(* [eof] above: where the thread goes when the half bits stop. *)
+let dali_rx_eof = 6
+
+let dali_rx_config ~clkdiv =
+  { Isa.Thread_config.default with
+    in_base = 1
+  ; threshold = 16
+  ; autopush = true
+  ; in_msb_first = true
+  ; timeout = 24
+  ; timeout_vector = dali_rx_eof
+  ; clkdiv
+  }
+;;
+
+(* Ten samples to the half bit. Every edge is accepted (blank 0), the level
+   is taken five samples after an edge or after the last half bit's end,
+   and three half bits without an edge end the frame: inside a frame there
+   is never more than one. *)
+let dali_rx_sampler ~clkdiv =
+  { Isa.Sampler_config.off with
+    enable = true
+  ; pin = 1
+  ; misses = 2
+  ; blank = 0
+  ; sample = 5
+  ; wrap = 9
+  ; prescale = clkdiv
+  }
+;;
+
+(* The bits of the frame [dali_rx] pushed as [words], start bit left out,
+   or why they are not one frame. *)
+let dali_rx_frame (words : int list) =
+  match List.rev words with
+  | [] | [ _ ] -> Error "fewer than two words"
+  | count :: rev_data ->
+    let n = (0x10000 - count) land 0xFFFF in
+    let data = List.rev rev_data in
+    if List.length data <> (n / 16) + 1
+    then Error (sprintf "%d half bits counted but %d words" n (List.length data))
+    else (
+      let halves =
+        List.concat_mapi data ~f:(fun k w ->
+          let width = min 16 (n - (16 * k)) in
+          List.init width ~f:(fun i -> (w lsr (width - 1 - i)) land 1))
+      in
+      let rec bits acc = function
+        | 0 :: 1 :: rest -> bits (1 :: acc) rest
+        | 1 :: 0 :: rest -> bits (0 :: acc) rest
+        | 0 :: 0 :: _ -> Error "low for a whole bit: not DALI's code"
+        | [] | [ _ ] | 1 :: 1 :: _ -> Ok (List.rev acc)
+        | _ -> Error "a half bit that is neither 0 nor 1"
+      in
+      match bits [] halves with
+      | Ok (1 :: frame) -> Ok frame
+      | Ok _ -> Error "no start bit"
+      | Error _ as e -> e)
+;;
+
+(* Every frame in the words [dali_rx] pushed: a word of 0xFF00 or more is
+   a count and ends one. Words after the last count are a frame still
+   arriving, and are left out. *)
+let dali_rx_frames (words : int list) =
+  let frames, _ =
+    List.fold words ~init:([], []) ~f:(fun (frames, current) w ->
+      if w >= 0xFF00 then dali_rx_frame (List.rev (w :: current)) :: frames, [] else frames, w :: current)
+  in
+  List.rev frames
+;;
+
+(* RC-5 infrared receiver: the other end of [rc5_tx], on the output of an
+   IR receiver module, which is low while it sees carrier. One thread with
+   the bit sampler in front of it, used as it is for Ethernet at a
+   five-thousandth of the speed.
+
+   A frame's first edge is in the middle of its first bit (a 1: silence,
+   then carrier), and every bit has an edge in its middle. The sampler
+   locks to those, ignores the edges between bits, and takes each bit a
+   quarter of a bit after its middle edge: carrier there is a 1. The
+   prescaler makes a sample 1/20 of a bit, and this thread's CLKDIV is the
+   same number, so each of the sampler's pulses is one tick long.
+
+   Pins: P0 = the module's output (input); P1 is taken by the sampler's
+   pulse. Config: [rc5_rx_config ~clkdiv], sampler: [rc5_rx_sampler
+   ~clkdiv], with CLKDIV 889 for RC-5's 1.778 ms bit at 10 MHz.
+
+   Host protocol: one RX word for each frame, its 14 bits in bits 13:0,
+   the first received highest: two start bits, the toggle bit, 5 address
+   bits and 6 command bits ([rc5_word] shifted down by two). A
+   transmission of fewer than 14 bits is dropped.
+
+   Timing: a middle edge is accepted from 3/4 of a bit to 1.4 bits after
+   the last, so a remote 20% fast or slow is read. *)
+let rc5_rx =
+  {|
+rx:     mov isr, null           ; (a frame cut short comes back here)
+        set y, 13               ; 14 bits
+        wait 1 pin 1            ; a frame's first bit
+bit:    in pins, 1
+        jmp y-- next
+        push                    ; the frame
+        jmp rx
+next:   wait 1 pin 1 timeout    ; the next bit, or the frame was cut short
+        jmp bit
+|}
+;;
+
+let rc5_rx_config ~clkdiv =
+  { Isa.Thread_config.default with
+    in_base = 0
+  ; threshold = 14
+  ; in_msb_first = true
+  ; timeout = 40
+  ; timeout_vector = 0
+  ; clkdiv
+  }
+;;
+
+(* Twenty samples to the bit. The edge between two bits shows 10 samples
+   after the one in the middle and is ignored; the next middle edge shows
+   20 after, and is accepted from 15 on. The bit is the level 5 samples
+   after its middle edge, inverted: the module is low for carrier. With no
+   edge by 28 samples the frame is over. *)
+let rc5_rx_sampler ~clkdiv =
+  { Isa.Sampler_config.off with
+    enable = true
+  ; pin = 0
+  ; invert = true
+  ; misses = 0
+  ; blank = 15
+  ; sample = 5
+  ; wrap = 28
+  ; prescale = clkdiv
+  }
+;;
+
 (* PWM, and so RC servo pulses: a pin high for one count and low for
    another, over and over.
 
@@ -2631,6 +2819,8 @@ let all =
   ; "rc5_tx", rc5_tx
   ; "wiegand_rx", wiegand_rx
   ; "nec_rx", nec_rx
+  ; "dali_rx", dali_rx
+  ; "rc5_rx", rc5_rx
   ; "pwm", pwm
   ; "nes_pad", nes_pad
   ]

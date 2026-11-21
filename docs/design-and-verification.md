@@ -108,8 +108,10 @@ written with no RTL change:
 | Wiegand transmitter and receiver | 17, 16 words | equal-length paths so pulses stay 1 ms apart across a word boundary; the receiver copies all eight pins and peels off two, to see both lines in one clock |
 | NEC infrared transmitter and receiver | 25, 33 words | the 38 kHz carrier made in firmware; in the receiver, timed waits whose timeout vector means "the frame was cut short" |
 | RC-5 infrared transmitter | 37 words | a look one bit ahead, so two bursts that meet are one unbroken burst |
+| RC-5 infrared receiver (on v2.3) | 9 words | the bit sampler as Ethernet uses it, 20 samples to a bit of 1.778 ms through the prescaler; a wait's timeout as "the transmission was cut short" |
 | MDIO controller | 7 words | open-drain data; one loop serves reads and writes, since each word shifted out comes back as the word read meanwhile |
 | DALI forward frame transmitter | 17 words | the bit loop written twice, once for each level the bus may hold while the next bit is fetched |
+| DALI receiver (on v2.3) | 9 words | a frame begins on an edge between bits, so the sampler cannot lock to the middles: it takes every edge and a sample every half bit, and the driver pairs the halves. The count that ends a frame's words is told from data because the sampler never passes more than three equal half bits |
 | PWM and RC servo pulses | 8 words | the two counts kept in the two shift registers, leaving X to count |
 | NES gamepad | 7 words | side-set for latch and clock |
 | Drivers for all of these | 386 lines of MicroPython, a second file | the register map only |
@@ -375,7 +377,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 140 in all:
+fails if any survives. There are 153 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -398,6 +400,7 @@ fails if any survives. There are 140 in all:
 | USB driver | 2 | `test_usb_driver_planted_bugs` in `test/test.py` |
 | Driver on the emulated board | 2 | `test/board_emu`: `run_usb.mjs --mutant push-after-start`, `run_board.mjs --mutant cpython-only-call` |
 | v2.0 engines, one each | 11 | `sim/test_tx_engines.ml` |
+| DALI and RC-5 receivers and their sampler settings (7, 6) | 13 | `sim/test_slow_rx.ml` |
 | Ethernet firmware, one each way | 2 | `sim/test_ethernet.ml`, `sim/test_ethernet_rx.ml` |
 | gate netlist | 5 | `gl_equiv/check.py`: the RTL-to-netlist proof |
 | memory description, one for each size | 2 | `formal/sram_equiv.py`: the proofs against IHP's models |
@@ -409,7 +412,7 @@ count as a catch. The host-port and register-file bugs are a parameter of
 `hw/top.ml`, off by default, following `hw/pe_core.ml`; the generated
 Verilog is byte-identical with or without the parameter in the source.
 
-All 140 are caught. Two candidates turned out not to be bugs, and the
+All 153 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -600,8 +603,10 @@ answer it.
   the frame again. While a frame arrives the host must take a word every
   15 bit times. The
   I2C controller starts a transfer only after a STOP, so it cannot send a
-  repeated START. Of the protocols added on v2.0, I2S, DMX512, DALI,
-  RC-5, MIDI, LIN and Modbus RTU are transmit only.
+  repeated START. Of the protocols added on v2.0, I2S, DMX512, MIDI, LIN
+  and Modbus RTU are transmit only. DALI's transmitter and receiver are
+  separate programs: a controller that sends a query and reads the answer
+  in one session is not put together.
 - **SWD's, PS/2's and CAN's device models, and WS2812's hidden test,** were
   written for this project. For all four, sigrok's protocol
   decoders also read the recorded pins (`test/sigrok.py`), which is

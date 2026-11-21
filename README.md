@@ -53,7 +53,7 @@ one-page summary for judges. This page is the map.
   the RTL; and the memories those proofs assume equal IHP's own models of
   the SRAM macros.
 - **Judged by tools this project did not write.** Device models by other
-  people where one exists; for 31 tests the recorded pins go to sigrok's
+  people where one exists; for 33 tests the recorded pins go to sigrok's
   protocol decoders.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
@@ -159,8 +159,8 @@ the largest engine, Ethernet transmit, uses 70.
 | Wiegand | transmitter and receiver | 17 + 16 | sigrok's Wiegand decoder; a reader written from the protocol's rules |
 | NEC infrared | transmitter, 38 kHz carrier included; receiver | 25 + 33 | sigrok's NEC decoder; a remote written from the protocol's rules, 15% fast and slow |
 | MDIO | controller, reads and writes | 7 | a PHY written from IEEE 802.3 clause 22; sigrok's MDIO decoder |
-| DALI | forward frame transmitter | 17 | sigrok's DALI decoder |
-| RC-5 infrared | transmitter, 36 kHz carrier included | 37 | sigrok's RC-5 decoder |
+| DALI | forward frame transmitter; receiver, through the bit sampler, for answers and frames of any length | 17, 9 | sigrok's DALI decoder |
+| RC-5 infrared | transmitter, 36 kHz carrier included; receiver, through the bit sampler | 37, 9 | sigrok's RC-5 decoder |
 | PWM, RC servo | generator | 8 | sigrok's PWM decoder; exact to the cycle |
 | NES gamepad | host | 7 | a pad's shift register written from its data sheet; sigrok's gamepad decoder |
 | MIDI | on the UART transmitter | no new firmware | sigrok's MIDI decoder |
@@ -177,7 +177,7 @@ the pins are also recorded and handed to sigrok's protocol decoders, which
 this project did not write ([`test/sigrok.py`](test/sigrok.py)). Every
 protocol from I2S down is judged the same way, by sigrok's decoder for it.
 The USB, 1-Wire and WS2812 recordings go to sigrok as well, beside the
-device models. In all but two of the 31 tests (DS1307 and PWM) one bit is
+device models. In all but two of the 33 tests (DS1307 and PWM) one bit is
 then forced on the recorded wire, and the decoder's verdict must change.
 Ethernet has only the receiver and sender written here from the standard,
 with the CRC-32 from `zlib`.
@@ -203,7 +203,7 @@ a bug.
 | Is every instruction defined? | Yes, all 65,536 words | exhaustive round trips, and the spec's datapath matched on every word |
 | Do the protocols work? | Each judged by an independent oracle | third-party device models and sigrok's decoders in cocotb, on the RTL and the gate netlist |
 | Does the host driver work? | The same file, unchanged | in cocotb, then in MicroPython on an emulated board (rp2040js) wired to the RTL |
-| Would the tests notice a bug? | 140 planted bugs, all caught | kept in the repo; the suite fails if one survives |
+| Would the tests notice a bug? | 153 planted bugs, all caught | kept in the repo; the suite fails if one survives |
 | Did the random tests reach everything? | Coverage is counted | any instruction, stall or timeout never seen fails the build |
 
 Generated files cannot drift: CI regenerates the Verilog, the firmware

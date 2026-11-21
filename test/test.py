@@ -10,6 +10,7 @@
 
 import os
 import random
+import re
 import zlib
 
 import cocotb
@@ -2978,6 +2979,158 @@ async def test_nec_receive(dut):
     await rest
     assert await read() == (0xFF, 0x00)
     assert await waiting() == 0
+
+
+async def dali_send(dut, value, bits, half=4167, pin=1):
+    """The DALI bus on [pin] for one frame: the start bit, a 1, then [bits]
+    bits of [value], the highest first. A 1 is low for half a bit and then
+    high. [half]: cycles in the sender's half bit."""
+    for k in [None] + list(range(bits - 1, -1, -1)):
+        b = 1 if k is None else (value >> k) & 1
+        drive_pin(dut, pin, 1 - b)
+        await ClockCycles(dut.clk, half)
+        drive_pin(dut, pin, b)
+        await ClockCycles(dut.clk, half)
+    drive_pin(dut, pin, 1)
+
+
+@cocotb.test(timeout_time=900, timeout_unit="ms")
+async def test_dali_receive(dut):
+    """DALI received through the bit sampler and its prescaler: a forward
+    frame; the answer to it 2.9 ms later, the shortest DALI allows; a
+    24-bit frame from a sender 10% fast; a bus held low, which is no frame;
+    and a forward frame from a sender 10% slow. The host takes the words
+    as they come, as it must: a frame is more words than the FIFO holds.
+    sigrok's DALI decoder reads the first two frames off the same wire
+    and must find what the chip found."""
+    await reset(dut)
+    dut.dev_mode.value = 0  # an earlier test's device may still be wired to the pins
+    dut.uio_in.value = 0xFF
+    trace = sigrok.Trace(dut, {"dali": lambda: (int(dut.uio_in.value) >> 1) & 1})
+    chip = pe.Chip(sim_port(dut))
+    rx = []
+    half = 4167
+
+    @bridge
+    def start():
+        rx.append(more.DaliRx(chip, firmware("dali_rx")))
+
+    @bridge
+    def read():
+        try:
+            return rx[0].read(patience=4000)
+        except more.DaliError as e:
+            return str(e)
+
+    async def bus():
+        await ClockCycles(dut.clk, 12 * half)
+        await dali_send(dut, 0xFF90, 16)  # broadcast: query status
+        await ClockCycles(dut.clk, 7 * half)
+        await dali_send(dut, 0xC4, 8)  # the gear's answer
+        await ClockCycles(dut.clk, 12 * half)
+        trace.stop()
+        await dali_send(dut, 0xC1A55A, 24, half=3750)
+        await ClockCycles(dut.clk, 12 * half)
+        drive_pin(dut, 1, 0)
+        await ClockCycles(dut.clk, 20 * half)
+        drive_pin(dut, 1, 1)
+        await ClockCycles(dut.clk, 12 * half)
+        await dali_send(dut, 0x02A5, 16, half=4584)
+
+    await start()
+    sender = cocotb.start_soon(bus())
+    got = [await read() for _ in range(5)]
+    await sender
+    assert got == [(0xFF90, 16), (0xC4, 8), (0xC1A55A, 24), "low for a whole bit", (0x02A5, 16)], got
+    if sigrok.available():
+        wire = lambda found: [t for t in texts(found)
+                              if re.fullmatch(r"(Raw data|Reply): [0-9A-F]{2}", t)]
+        found = trace.decode("dali")
+        assert wire(found) == ["Raw data: FF", "Raw data: 90", "Reply: C4"], \
+            [t for t in texts(found) if len(t) > 1]
+        # The answer's last bit, a 0, held high throughout: not 0xC4.
+        a, b = next((a, b) for a, b, text in found if text == "Reply: C4")
+        wrong = texts(trace.forced("dali", b - 2 * half, b, 1).decode("dali"))
+        assert "Reply: C4" not in wrong, wrong
+
+
+async def rc5_send(dut, bits, half=8890):
+    """An IR receiver module's output (pin 0, low while it sees carrier) for
+    the bits of an RC-5 transmission: a 1 is silence and then carrier, a 0
+    carrier and then silence. [half]: cycles in the remote's half bit."""
+    for b in bits:
+        drive_pin(dut, 0, b)
+        await ClockCycles(dut.clk, half)
+        drive_pin(dut, 0, 1 - b)
+        await ClockCycles(dut.clk, half)
+    drive_pin(dut, 0, 1)
+
+
+def rc5_bits(toggle, address, command):
+    word = (0b11 << 12) | (toggle << 11) | (address << 6) | command
+    return [(word >> k) & 1 for k in range(13, -1, -1)]
+
+
+@cocotb.test(timeout_time=900, timeout_unit="ms")
+async def test_rc5_receive(dut):
+    """RC-5 from a receiver module, through the bit sampler and its
+    prescaler: a frame; a transmission that stops after nine bits, which
+    must be dropped; a frame from a remote 15% slow and one from a remote
+    15% fast. sigrok's RC-5 decoder reads the first frame off the same
+    wire and must find what the chip found."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    trace = sigrok.Trace(dut, {"ir": lambda: int(dut.uio_in.value) & 1})
+    chip = pe.Chip(sim_port(dut))
+    rx = []
+    half = 8890
+    rest = ClockCycles(dut.clk, 12 * half)
+
+    @bridge
+    def start():
+        rx.append(more.Rc5Rx(chip, firmware("rc5_rx")))
+
+    @bridge
+    def read():
+        try:
+            return rx[0].read(patience=4)
+        except more.Rc5Error as e:
+            return str(e)
+
+    @bridge
+    def waiting():
+        return chip.status()["rx_level"]
+
+    await start()
+    await rest
+    await rc5_send(dut, rc5_bits(1, 5, 0x35))
+    await rest
+    trace.stop()
+    assert await read() == (1, 5, 0x35)
+
+    await rc5_send(dut, rc5_bits(0, 21, 42)[:9])
+    await rest
+    assert await waiting() == 0, "a transmission cut short was taken for a frame"
+
+    await rc5_send(dut, rc5_bits(0, 16, 12), half=10_224)
+    await rest
+    assert await read() == (0, 16, 12)
+
+    await rc5_send(dut, rc5_bits(1, 0, 63), half=7557)
+    await rest
+    assert await read() == (1, 0, 63)
+    assert await waiting() == 0
+    if sigrok.available():
+        fields = lambda found: [t for t in texts(found) if not t.isdigit()]
+        want = ["Startbit1: 1", "Startbit2: 1", "Togglebit: 1",
+                "Address: 5 (Video cassette recorder 1)", "Command: 53 (Play)"]
+        found = trace.decode("ir_rc5")
+        assert fields(found) == want, fields(found)
+        # The last bit's carrier blanked out: not command 53.
+        a, b = next((a, b) for a, b, text in found if text.startswith("Command"))
+        wrong = fields(trace.forced("ir", b - 3 * half, b + half, 1).decode("ir_rc5"))
+        assert wrong != want, wrong
 
 
 # --- Devices on the engines the chip already had ------------------------------

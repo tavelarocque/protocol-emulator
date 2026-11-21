@@ -266,3 +266,19 @@
   (with-stdout-to
    ws2812.hex
    (run %{dep:../bin/pe_sim.exe} asm %{dep:../examples/ws2812/ws2812.s}))))
+
+(rule
+ (targets dali_rx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dali_rx.hex
+   (run %{dep:../bin/firmware_hex.exe} dali_rx))))
+
+(rule
+ (targets rc5_rx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   rc5_rx.hex
+   (run %{dep:../bin/firmware_hex.exe} rc5_rx))))

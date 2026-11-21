@@ -585,3 +585,114 @@ class EthernetRx:
             words = words[:len(words) - 3 - used]
         found.reverse()
         return found
+
+
+# --- v2.3: slow codes through the bit sampler's prescaler -----------------------
+
+
+class DaliError(Exception):
+    pass
+
+
+class DaliRx:
+    """DALI receiver (dali_rx.hex): the bus as received, high when idle, on
+    pin 1. Pin 2 is taken too, by the bit sampler, which recovers the
+    sender's clock: a sender 15% fast or slow is read. It reads a gear's
+    8-bit answers and frames of 16 and 24 bits alike."""
+
+    EOF = 6  # dali_rx_eof: where the program goes when a frame's half bits stop
+
+    def __init__(self, chip, image, clock_hz=10_000_000):
+        self.chip = chip
+        self._words = []
+        chip.stop()
+        chip.load(image)
+        # A sample, and a tick, is a tenth of a half bit: 1/24000 s.
+        n = (clock_hz + 12_000) // 24_000
+        chip.configure(in_base=1, threshold=16, in_msb_first=True, auto=AUTOPUSH,
+                       timeout=24, timeout_vector=self.EOF, clkdiv=n)
+        chip.set_pin_modes({1: pe.INPUT, 2: pe.INPUT})
+        set_sampler(chip, pin=1, blank=0, sample=5, wrap=9, misses=2, prescale=n)
+        chip.run()
+
+    @staticmethod
+    def frame(words):
+        """The bits of one frame from the receiver's words for it, start bit
+        left out; None for a report with no start bit, which is an idle
+        bus. Raises DaliError for anything else that is not a frame."""
+        n = (0x10000 - words[-1]) & 0xFFFF
+        data = words[:-1]
+        if len(data) != n // 16 + 1:
+            raise DaliError("%d half bits counted but %d words" % (n, len(data)))
+        halves = []
+        for k, word in enumerate(data):
+            width = min(16, n - 16 * k)
+            halves += [(word >> (width - 1 - i)) & 1 for i in range(width)]
+        bits = []
+        for k in range(0, len(halves) - 1, 2):
+            pair = (halves[k], halves[k + 1])
+            if pair == (1, 1):
+                break  # the bus idle again
+            if pair == (0, 0):
+                raise DaliError("low for a whole bit")
+            bits.append(pair[1])
+        if not bits or bits[0] != 1:
+            if bits:
+                raise DaliError("no start bit")
+            return None
+        return bits[1:]
+
+    def read(self, patience=200000):
+        """Wait for a frame; return (value, number of bits), the first bit
+        received highest. Raises DaliError for a bus that broke DALI's code
+        or stayed silent."""
+        for _ in range(patience):
+            word = self.chip.try_pop()
+            if word is None:
+                continue
+            self._words.append(word)
+            if word >= 0xFF00:  # a count: no data word can be one
+                words, self._words = self._words, []
+                bits = self.frame(words)
+                if bits is not None:
+                    value = 0
+                    for b in bits:
+                        value = (value << 1) | b
+                    return value, len(bits)
+        raise DaliError("no frame")
+
+
+class Rc5Error(Exception):
+    pass
+
+
+class Rc5Rx:
+    """RC-5 infrared receiver (rc5_rx.hex): an IR receiver module's output,
+    low while it sees carrier, on pin 0. Pin 1 is taken too, by the bit
+    sampler, which recovers the remote's clock: one 20% fast or slow is
+    read."""
+
+    def __init__(self, chip, image, clock_hz=10_000_000):
+        self.chip = chip
+        chip.stop()
+        chip.load(image)
+        # A sample, and a tick, is 1/20 of a bit, which is 64 periods of 36 kHz.
+        n = (clock_hz + 5_625) // 11_250
+        chip.configure(in_base=0, threshold=14, in_msb_first=True, timeout=40,
+                       timeout_vector=0, clkdiv=n)
+        chip.set_pin_modes({0: pe.INPUT, 1: pe.INPUT})
+        set_sampler(chip, pin=0, blank=15, sample=5, wrap=28, invert=True, prescale=n)
+        chip.run()
+
+    def read(self, patience=200000):
+        """Wait for a frame; return (toggle, address, command). The command
+        has 7 bits: the top one is the second start bit inverted, as
+        extended RC-5 has it, so plain RC-5's commands are 0 to 63."""
+        for _ in range(patience):
+            word = self.chip.try_pop()
+            if word is not None:
+                if not word & 0x2000:
+                    raise Rc5Error("no start bit in 0x%04X" % word)
+                extended = 0 if word & 0x1000 else 0x40
+                return (word >> 11) & 1, (word >> 6) & 0x1F, (word & 0x3F) | extended
+        raise Rc5Error("no frame")

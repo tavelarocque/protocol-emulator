@@ -37,6 +37,8 @@ the rest.
 | RC-5 infrared transmitter | 37 | the 36 kHz carrier included; looks one bit ahead so that where a 1 meets a 0 their two bursts are one unbroken burst |
 | Wiegand receiver | 16 | any frame length; looks at both lines at once by copying all eight pins and peeling off the first two, so pulses down to a microsecond are seen |
 | NEC infrared receiver | 33 | on an IR receiver module's output; reads each bit once, 1.3 units after its burst; tolerates a remote 20% fast or slow, ignores repeat codes, and never lets a frame cut short put the host's pairs of words out of step |
+| DALI receiver | 9 | through the bit sampler and its prescaler (v2.3): every edge taken and a sample every half bit, since a frame begins on an edge between bits; frames of any length, an answer 2.9 ms after a forward frame; a sender 15% fast or slow |
+| RC-5 infrared receiver | 9 | through the bit sampler as Ethernet uses it, at a five-thousandth of the speed; a remote 20% fast or slow; a transmission cut short is dropped |
 | PWM, and RC servo pulses | 8 | high time and period each exact to the tick; the two counts live in the two shift registers, which leaves X free to count |
 | NES gamepad | 7 | read as the console reads it: latch, then eight clocks, a button read as each clock falls |
 | 10BASE-T Ethernet transmitter | 70 | a whole frame at 10 Mbit/s with a 40 MHz clock, 4 clocks a bit: preamble, start-of-frame delimiter, the frame played from the packet buffer, its CRC-32 from the CRC register, the idle signal. Frames up to the full 1514 bytes. Between frames, a link pulse of 100 ns every 16 ms, timed by ten waits that run out. The first program longer than a page |

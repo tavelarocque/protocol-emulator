@@ -84,6 +84,12 @@ than the one it listens to) and stuff-bit removal (the bit after n equal
 bits dropped). With them a 59-instruction receiver reads a frame a bit at
 a time, checks the CRC on the CRC register and drives the ACK slot.
 
+The prescaler also takes the sampler down to slow codes. DALI at 1200
+bit/s and RC-5 infrared at 562 are received through the block that
+recovers 10 Mbit Ethernet, with 9 instructions each: RC-5 locked to the
+edge in the middle of each bit, as Ethernet is, and DALI, whose frames
+begin on an edge between bits, sampled every half bit.
+
 ## What it is, and what is different
 
 Two threads run at once, each from its own 256-word program memory, over 8
@@ -134,9 +140,9 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 | DMX512 | transmitter | 26 |
 | Wiegand | transmitter and receiver | 17, 16 |
 | NEC infrared | transmitter with its 38 kHz carrier; receiver | 25, 33 |
-| RC-5 infrared | transmitter with its 36 kHz carrier | 37 |
+| RC-5 infrared | transmitter with its 36 kHz carrier; receiver through the bit sampler | 37, 9 |
 | MDIO | controller, reads and writes | 7 |
-| DALI | forward frame transmitter | 17 |
+| DALI | forward frame transmitter; receiver through the bit sampler | 17, 9 |
 | PWM, RC servo | generator, exact to the cycle | 8 |
 | NES gamepad | host | 7 |
 | MIDI, Modbus RTU | on the UART transmitter | no new firmware |
@@ -166,15 +172,15 @@ runs a program on the reference model and prints the pins.
    picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
    USB device, sockit_owm's 1-Wire slave. For USB, 1-Wire, WS2812, SWD, PS/2,
    CAN and every protocol added after them but Ethernet, the recorded pins
-   go to sigrok's protocol decoders, 31 tests in all, 29 of them with a
+   go to sigrok's protocol decoders, 33 tests in all, 31 of them with a
    fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
    receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
    sender has its own clock, 100 ppm off, and jitter on every edge.
-4. **Tests that are themselves tested.** 140 bugs are planted in the RTL,
+4. **Tests that are themselves tested.** 153 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
-5. **The gates, not only the RTL.** All 59 chip-level tests pass on the
+5. **The gates, not only the RTL.** All 61 chip-level tests pass on the
    post-layout netlist, with IHP's models of the SRAMs in place of the
    macros. That includes Ethernet at a 40 MHz clock, both ways.
 6. **The software that will run on the board.** The MicroPython driver is
@@ -239,8 +245,10 @@ Stated here so nobody has to find it.
   sampler's falling-edge flip-flop is in both proofs as a register like
   any other; that it samples half a cycle from the rest is exercised only
   by the Ethernet receive test, on the RTL and the gates.
-- **Several of the v2.0 protocols transmit only:** I2S, DMX512, DALI,
-  RC-5, MIDI, LIN and Modbus RTU. Wiegand and NEC infrared go both ways.
+- **Several of the v2.0 protocols transmit only:** I2S, DMX512, MIDI, LIN
+  and Modbus RTU. Wiegand, NEC and RC-5 infrared and DALI go both ways,
+  but DALI's two directions are separate programs: sending a query and
+  reading its answer in one session is not put together yet.
 - **The blind firmware test used an AI agent, not a person.**
 - More in section 7 of the report, "What is not covered".
 

@@ -196,3 +196,29 @@ print("ethernet rx", _e.frames())
 _chip.reads = {BUF_PTR: [4], BUF_DATA: [0x0201, 0xFFD8, 0x20E3, 0xDEBB]}
 print("ethernet rx", _e.frames())
 _show("ethernet rx", _chip)
+
+# v2.3: DALI and RC-5 received through the sampler's prescaler. The words are
+# what the programs leave: an idle bus's report, the answer 0xA5, the frame
+# 0x5A as its two words and count, a bus held low; then three RC-5 frames,
+# the second extended, the third without its start bit.
+_chip = _Recorder(words=[0x0007, 0xFFFD, 0x59A6, 0x0007, 0xFFEC, 0x6659, 0x0017, 0xFFEB,
+                         0x0000, 0xFFFD])
+_d = DaliRx(_chip, _image)
+DaliRx(_chip, _image, clock_hz=12_000_000)
+for _ in range(4):
+    try:
+        print("dali rx", _d.read(patience=40))
+    except DaliError as e:
+        print("dali rx error:", e)
+print("dali rx frame", DaliRx.frame([0x59A6, 0x0007, 0xFFEC]), DaliRx.frame([0x0007, 0xFFFD]))
+_show("dali rx", _chip)
+
+_chip = _Recorder(words=[0x3975, 0x2001, 0x1975])
+_r = Rc5Rx(_chip, _image)
+Rc5Rx(_chip, _image, clock_hz=12_000_000)
+for _ in range(4):
+    try:
+        print("rc5 rx", _r.read(patience=3))
+    except Rc5Error as e:
+        print("rc5 rx error:", e)
+_show("rc5 rx", _chip)

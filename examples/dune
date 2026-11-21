@@ -242,3 +242,19 @@
   (with-stdout-to
    nes_pad.s
    (run %{dep:../bin/firmware_src.exe} nes_pad %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets dali_rx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dali_rx.s
+   (run %{dep:../bin/firmware_src.exe} dali_rx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets rc5_rx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   rc5_rx.s
+   (run %{dep:../bin/firmware_src.exe} rc5_rx %{dep:../model/firmware.ml}))))
