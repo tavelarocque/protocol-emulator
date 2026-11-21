@@ -14,7 +14,7 @@ them, so they cannot drift.
 | [`spi_fast.s`](spi_fast.s) | SPI controller, side-set, 2 cycles per bit | 26 |
 | [`spi_target.s`](spi_target.s) | SPI device, mode 0 | 23 |
 | [`i2c_controller.s`](i2c_controller.s) | I2C controller, writes, timed by loops | 49 |
-| [`i2c.s`](i2c.s) | I2C controller, reads and writes, timed by the clock divider | 25 |
+| [`i2c.s`](i2c.s) | I2C controller, reads and writes, timed by the clock divider | 30 |
 | [`i2c_target.s`](i2c_target.s) | I2C target, 7-bit address, clock stretching | 63 |
 | [`jtag.s`](jtag.s) | JTAG controller | 11 |
 | [`swd.s`](swd.s) | Arm SWD clock engine | 11 |

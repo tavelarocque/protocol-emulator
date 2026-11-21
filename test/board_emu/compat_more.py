@@ -19,7 +19,7 @@ class _Recorder:
     def stop(self):
         self.log.append("stop")
 
-    def load(self, image):
+    def load(self, image, threads=(0, 1)):
         self.log.append(("load", len(image)))
 
     def configure(self, **fields):
@@ -28,7 +28,7 @@ class _Recorder:
     def set_pin_modes(self, modes):
         self.log.append(("modes", sorted(modes.items())))
 
-    def run(self):
+    def run(self, threads=(0,)):
         self.log.append("run")
 
     def write(self, addr, value):
@@ -47,13 +47,13 @@ class _Recorder:
     def status(self):
         return {"pc": getattr(self, "pc", 0)}
 
-    def push(self, value):
+    def push(self, value, thread=0):
         self.log.append(("push", value))
 
     def pop(self):
         return self.line
 
-    def try_pop(self):
+    def try_pop(self, thread=0):
         # Every third look finds a word, as when frames are still arriving.
         self.looks = getattr(self, "looks", 0) + 1
         if self.looks % 3 or not self.words:
@@ -222,3 +222,16 @@ for _ in range(4):
     except Rc5Error as e:
         print("rc5 rx error:", e)
 _show("rc5 rx", _chip)
+
+# A DALI controller on both threads: a query whose answer comes, one that
+# nothing answers, and one where the bus did not carry the chip's frame.
+_chip = _Recorder(words=[0x6AA9, 0x5A6A, 0x0017, 0xFFDB, 0x56A6, 0x0017, 0xFFEB,
+                         0x6AA6, 0x5A6A, 0x0017, 0xFFDB])
+_c = Dali(_chip, _image, _image)
+Dali(_chip, _image, _image, clock_hz=12_000_000)
+for _address in (0x03, 0x05, 0x03):
+    try:
+        print("dali query", _c.query(_address, 0x90, patience=40, wait=12))
+    except DaliError as e:
+        print("dali query error:", e)
+_show("dali controller", _chip)

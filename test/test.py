@@ -15,7 +15,7 @@ import zlib
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, FallingEdge, RisingEdge
+from cocotb.triggers import ClockCycles, FallingEdge, RisingEdge, ValueChange
 
 HALF = 6  # core clocks per SCK phase (must be >= 4)
 
@@ -525,7 +525,7 @@ async def test_two_protocols(dut):
 # --- I2C controller v2 (clock divider; reads and writes) ---------------------
 
 CLKDIV = 0x4D
-I2C_STUCK = 18  # Firmware.i2c_stuck; checked by the OCaml tests
+I2C_STUCK = 23  # Firmware.i2c_stuck; checked by the OCaml tests
 
 
 async def configure_i2c(dut, bank=0, clkdiv=3):
@@ -538,8 +538,9 @@ async def configure_i2c(dut, bank=0, clkdiv=3):
     await write(dut, CLKDIV + bank, clkdiv)
 
 
-def i2c_write_word(b, stop):
-    return rev8(b) | (1 << 8) | (int(stop) << 9)
+def i2c_write_word(b, stop, restart=False):
+    """[restart]: a repeated START after this byte, in place of a STOP."""
+    return rev8(b) | (1 << 8) | (int(stop) << 9) | (int(restart) << 10)
 
 
 def i2c_read_word(last):
@@ -577,7 +578,7 @@ async def test_i2c_register_read(dut):
 
 # --- The bridge: I2C read in, SPI out, chained, no host in the data path -----
 
-BRIDGE_SPI_ORIGIN = 25  # Firmware.Bridge.spi_origin; checked by the OCaml tests
+BRIDGE_SPI_ORIGIN = 30  # Firmware.Bridge.spi_origin; checked by the OCaml tests
 
 
 @cocotb.test()
@@ -758,6 +759,17 @@ async def test_thirdparty_i2c_eeprom(dut):
     reports = [await pop(dut) for _ in words]
     got = [rev8(r & 0xFF) for r in reports[3:]]
     assert got == data, f"read back {got}"
+    # And as devices expect a register read: a repeated START where that
+    # STOP was. The bus is never free between the pointer and the read.
+    words = [i2c_write_word(0x50 << 1, False), i2c_write_word(pointer + 1, False, restart=True),
+             i2c_write_word((0x50 << 1) | 1, False)]
+    words += [i2c_read_word(i == 1) for i in range(2)]
+    for w in words:
+        await push(dut, w)
+    reports = [await pop(dut) for _ in words]
+    assert all(r & 0x100 == 0 for r in reports[:3]), f"NACKed: {[hex(r) for r in reports]}"
+    got = [rev8(r & 0xFF) for r in reports[3:]]
+    assert got == data[1:], f"read back after a repeated START: {got}"
 
 
 @cocotb.test(timeout_time=40, timeout_unit="ms")
@@ -2137,6 +2149,38 @@ def _can_frame_words_of_sixteen(frame):
     return classmethod(wrong)
 
 
+async def _dali_query_ok(dut):
+    """A DALI controller asks a gear for its status and reads the answer."""
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    bus = DaliBus(dut)
+    tasks = [cocotb.start_soon(bus.follow(dut.uio_out)), cocotb.start_soon(bus.follow(dut.uio_oe)),
+             cocotb.start_soon(dali_gear(bus, 0x03, {0x90: 0xC4}))]
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def query():
+        try:
+            controller = more.Dali(chip, firmware("dali_tx"), firmware("dali_rx"))
+            return controller.query(0x03, 0x90, patience=6000, wait=3000)
+        except more.DaliError:
+            return None
+
+    got = await query()
+    for task in tasks:
+        task.cancel()
+    return got == 0xC4
+
+
+def _dali_frame_backwards(frame):
+    """A frame's bits handed over last first."""
+    def wrong(words):
+        bits = frame.__func__(words)
+        return bits if bits is None else bits[::-1]
+
+    return staticmethod(wrong)
+
+
 DRIVER_BUGS = [
     ("pin modes packed one bit per pin", pe.Chip, "set_pin_modes",
      lambda _: _pin_modes_one_bit_per_pin, _flash_read_ok),
@@ -2156,6 +2200,8 @@ DRIVER_BUGS = [
      _can_words_sixteen_bits, _can_send_ok),
     ("CAN received words read 16 bits each", pe.Can, "frame",
      _can_frame_words_of_sixteen, _can_receive_ok),
+    ("DALI frames read last bit first", more.DaliRx, "frame",
+     _dali_frame_backwards, _dali_query_ok),
 ]
 
 
@@ -3054,6 +3100,113 @@ async def test_dali_receive(dut):
         assert "Reply: C4" not in wrong, wrong
 
 
+class DaliBus:
+    """A DALI bus between the chip and one gear: low while either pulls it
+    low. The chip sends on pin 0 and listens on pin 1."""
+
+    def __init__(self, dut):
+        self.dut = dut
+        self.gear = 1
+
+    def chip(self):
+        return (int(self.dut.uio_out.value) & 1) if int(self.dut.uio_oe.value) & 1 else 1
+
+    def update(self):
+        drive_pin(self.dut, 1, self.chip() & self.gear)
+
+    async def follow(self, signal):
+        while True:
+            await ValueChange(signal)
+            self.update()
+
+
+async def dali_gear(bus, address, answers, half=4167):
+    """A DALI gear, written from the standard's description of a frame. It
+    reads each forward frame off the bus by looking at the middle of every
+    half bit from the frame's first edge, and answers the commands in
+    [answers] ({command: byte}) sent to [address] or to everyone (0xFF),
+    about ten half bits after the frame: DALI asks for 7 to 22."""
+    dut = bus.dut
+    while True:
+        while bus.chip():
+            await ValueChange(dut.uio_out)
+        await ClockCycles(dut.clk, half // 2)
+        halves = []
+        while halves[-4:] != [1, 1, 1, 1]:
+            halves.append(bus.chip())
+            await ClockCycles(dut.clk, half)
+        pairs = list(zip(halves[0:-4:2], halves[1:-4:2]))
+        if any(a == b for a, b in pairs) or len(pairs) != 17 or pairs[0] != (0, 1):
+            continue  # not a forward frame
+        bits = [b for _, b in pairs[1:]]
+        to = int("".join(map(str, bits[:8])), 2)
+        command = int("".join(map(str, bits[8:])), 2)
+        if to not in (address, 0xFF) or command not in answers:
+            continue
+        await ClockCycles(dut.clk, 6 * half)
+        for k in [None] + list(range(7, -1, -1)):
+            b = 1 if k is None else (answers[command] >> k) & 1
+            bus.gear = 1 - b
+            bus.update()
+            await ClockCycles(dut.clk, half)
+            bus.gear = b
+            bus.update()
+            await ClockCycles(dut.clk, half)
+        bus.gear = 1
+        bus.update()
+
+
+@cocotb.test(timeout_time=900, timeout_unit="ms")
+async def test_dali_query(dut):
+    """A DALI controller on the two threads: the transmitter on one, the
+    receiver, through the bit sampler, on the other. It asks a gear for its
+    status and reads the answer; a query to an address nobody has gets no
+    answer; a broadcast query is answered. The receiver hears each of the
+    chip's own frames first, and the driver checks it. sigrok's DALI
+    decoder reads the first query and its answer off the bus."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    half = 4167
+    bus = DaliBus(dut)
+    tasks = [cocotb.start_soon(bus.follow(dut.uio_out)), cocotb.start_soon(bus.follow(dut.uio_oe)),
+             cocotb.start_soon(dali_gear(bus, 0x03, {0x90: 0xC4, 0xA0: 0x7F}))]
+    trace = sigrok.Trace(dut, {"dali": lambda: (int(dut.uio_in.value) >> 1) & 1})
+    chip = pe.Chip(sim_port(dut))
+    controller = []
+
+    @bridge
+    def start():
+        controller.append(more.Dali(chip, firmware("dali_tx"), firmware("dali_rx")))
+
+    @bridge
+    def query(address, command):
+        try:
+            return controller[0].query(address, command, patience=6000, wait=3000)
+        except more.DaliError as e:
+            return str(e)
+
+    await start()
+    await ClockCycles(dut.clk, 12 * half)
+    assert await query(0x03, 0x90) == 0xC4
+    await ClockCycles(dut.clk, 12 * half)
+    trace.stop()
+    assert await query(0x05, 0x90) is None
+    assert await query(0xFF, 0xA0) == 0x7F
+    for task in tasks:
+        task.cancel()
+    if sigrok.available():
+        wire = lambda found: [t for t in texts(found)
+                              if re.fullmatch(r"(Raw data|Reply): [0-9A-F]{2}", t)]
+        found = trace.decode("dali")
+        assert wire(found) == ["Raw data: 03", "Raw data: 90", "Reply: C4"], \
+            [t for t in texts(found) if len(t) > 1]
+        # The answer's last bit, a 0, held high throughout: not 0xC4.
+        a, b = next((a, b) for a, b, text in found if text == "Reply: C4")
+        wrong = texts(trace.forced("dali", b - 2 * half, b, 1).decode("dali"))
+        assert "Reply: C4" not in wrong, wrong
+
+
 async def rc5_send(dut, bits, half=8890):
     """An IR receiver module's output (pin 0, low while it sees carrier) for
     the bits of an RC-5 transmission: a 1 is silence and then carrier, a 0
@@ -3166,7 +3319,8 @@ async def i2c_session(dut, address, size):
 
     def read_bytes(pointer, n):
         """Set the pointer, repeated START, address + R, n bytes, STOP."""
-        return [i2c_write_word(address << 1, False), i2c_write_word(pointer, True),
+        return [i2c_write_word(address << 1, False),
+                i2c_write_word(pointer, False, restart=True),
                 i2c_write_word((address << 1) | 1, False)] + [
                     i2c_read_word(k == n - 1) for k in range(n)]
 
@@ -3180,28 +3334,39 @@ def i2c_trace(dut):
 
 @cocotb.test(timeout_time=60, timeout_unit="ms")
 async def test_eeprom_24xx(dut):
-    """A 24Cxx EEPROM on the I2C controller: a page write, a byte write and
-    a read from the address they leave behind. sigrok's 24xx decoder, on
-    its I2C decoder, names both writes; cocotbext-i2c's memory holds what
-    was written and supplies what is read."""
+    """A 24Cxx EEPROM on the I2C controller: a page write, a byte write, a
+    read from the address they leave behind, and a read from an address of
+    the host's choosing, which takes a repeated START. sigrok's 24xx
+    decoder, on its I2C decoder, names the writes and that read;
+    cocotbext-i2c's memory holds what was written and supplies what is
+    read."""
     await reset(dut)
     trace = i2c_trace(dut)
-    memory, transfer, write_bytes, _ = await i2c_session(dut, 0x50, 256)
+    memory, transfer, write_bytes, read_bytes = await i2c_session(dut, 0x50, 256)
     await transfer(write_bytes([0x10, 0xDE, 0xAD, 0xBE]))
     await ClockCycles(dut.clk, 200)
     await transfer(write_bytes([0x0F, 0x55]))
     await ClockCycles(dut.clk, 200)
     reports = await transfer([i2c_write_word(0xA1, False)] + [i2c_read_word(k == 2) for k in range(3)])
+    await ClockCycles(dut.clk, 200)
+    random = await transfer(read_bytes(0x11, 2))
     await ClockCycles(dut.clk, 2000)
     trace.stop()
     assert memory.read_mem(0x0F, 4) == bytes([0x55, 0xDE, 0xAD, 0xBE])
     assert [rev8(r & 0xFF) for r in reports[1:]] == [0xDE, 0xAD, 0xBE], reports
+    assert [rev8(r & 0xFF) for r in random[3:]] == [0xAD, 0xBE], random
     if sigrok.available():
         decoder = "i2c,eeprom24xx"
         named = lambda found: [t for t in texts(found) if "(addr=" in t]
-        want = ["Page write (addr=10, 3 bytes): DE AD BE", "Byte write (addr=0F, 1 byte): 55"]
+        want = ["Page write (addr=10, 3 bytes): DE AD BE", "Byte write (addr=0F, 1 byte): 55",
+                "Sequential random read (addr=11, 2 bytes): AD BE"]
         found = trace.decode(decoder, "eeprom24xx")
         assert named(found) == want, named(found)
+        # One START in the session is a repeated one, and no STOP comes
+        # between the pointer and the read.
+        bus = texts(trace.decode("i2c"))
+        assert bus.count("Start repeat") == 1 and bus.count("Stop") == 4, \
+            [t for t in bus if t.startswith(("Start", "Stop"))]
         # The data line held low through the first data byte: not 0xDE.
         a, b = next((a, b) for a, b, text in found if text == "Data byte 10: DE")
         wrong = named(trace.forced("sda", a, b, 0).decode(decoder, "eeprom24xx"))

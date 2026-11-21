@@ -19,7 +19,7 @@ the rest.
 | SPI controller, side-set | 26 | 2 cycles per bit: 5 Mbit/s at 10 MHz |
 | SPI device | 23 | mode 0 up to 625 kHz at 10 MHz; deselect seen even mid-byte |
 | I2C controller, loops | 49 | writes only, timed by counter loops |
-| I2C controller, divider | 25 | reads and writes, timed by the clock divider; clock stretching and timeouts |
+| I2C controller, divider | 30 | reads and writes, timed by the clock divider; clock stretching and timeouts; a repeated START where the host asks for one, as a register read needs |
 | I2C target | 63 | the chip as a 7-bit-address device: address match, ACK, STOP and repeated START detection, stretching while either FIFO waits on the host |
 | JTAG controller | 11 | any TMS/TDI sequence the host asks for, TDO back, TCK at 2 MHz |
 | Arm SWD | 11 | a clock engine; the driver adds the SWD framing: line reset, the JTAG-to-SWD switch, parity, ACK, turnaround, posted AP reads |
@@ -37,7 +37,7 @@ the rest.
 | RC-5 infrared transmitter | 37 | the 36 kHz carrier included; looks one bit ahead so that where a 1 meets a 0 their two bursts are one unbroken burst |
 | Wiegand receiver | 16 | any frame length; looks at both lines at once by copying all eight pins and peeling off the first two, so pulses down to a microsecond are seen |
 | NEC infrared receiver | 33 | on an IR receiver module's output; reads each bit once, 1.3 units after its burst; tolerates a remote 20% fast or slow, ignores repeat codes, and never lets a frame cut short put the host's pairs of words out of step |
-| DALI receiver | 9 | through the bit sampler and its prescaler (v2.3): every edge taken and a sample every half bit, since a frame begins on an edge between bits; frames of any length, an answer 2.9 ms after a forward frame; a sender 15% fast or slow |
+| DALI receiver | 9 | through the bit sampler and its prescaler (v2.3): every edge taken and a sample every half bit, since a frame begins on an edge between bits; frames of any length, an answer 2.9 ms after a forward frame; a sender 15% fast or slow. With the transmitter on the other thread it makes a controller: the driver checks each frame it sends against what the receiver heard, then reads the answer |
 | RC-5 infrared receiver | 9 | through the bit sampler as Ethernet uses it, at a five-thousandth of the speed; a remote 20% fast or slow; a transmission cut short is dropped |
 | PWM, and RC servo pulses | 8 | high time and period each exact to the tick; the two counts live in the two shift registers, which leaves X free to count |
 | NES gamepad | 7 | read as the console reads it: latch, then eight clocks, a button read as each clock falls |
@@ -101,10 +101,11 @@ decoder for the bus:
 | ADF435x synthesiser | SPI controller, 32-bit writes | sigrok's ADF435x decoder reads the fields of each register |
 | SD card, SPI mode | SPI controller | sigrok's SD card decoder reads CMD0 and CMD8 with their arguments and CRCs, and the card's answers |
 
-One limit these tests turned up: the I2C controller starts a transfer only
-after a STOP, so it cannot send the repeated START some devices ask for
-between setting a register pointer and reading. The devices above accept a
-STOP there; one that does not is out of reach until the firmware learns it.
+One limit these tests turned up: the I2C controller started a transfer
+only after a STOP, so it could not send the repeated START some devices
+ask for between setting a register pointer and reading. It can now: a bit
+in the host's word asks for one after a byte, and the three device tests
+above read their registers that way.
 
 For the last seven rows the device is a script of the bytes the part would
 answer, not a model of the part. The drivers for them are the SPI

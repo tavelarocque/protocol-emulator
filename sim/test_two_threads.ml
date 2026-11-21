@@ -368,7 +368,7 @@ let bridge_devices ~target ~i2c_checker ~slave ~spi_checker =
 ;;
 
 let%test_unit "the bridge image: both programs fit" =
-  [%test_result: int] Bridge.spi_origin ~expect:25;
+  [%test_result: int] Bridge.spi_origin ~expect:30;
   [%test_pred: int] (fun n -> n <= Isa.program_size) (Array.length Bridge.image)
 ;;
 

@@ -64,7 +64,7 @@ PAGE_WORDS = 64  # a jump reaches one page; LOAD picks the page a write goes to
 INPUT, PUSH_PULL, OPEN_DRAIN = 0, 1, 2
 
 # Firmware constants (model/firmware.ml; the OCaml tests check them).
-I2C_STUCK = 18  # Firmware.i2c_stuck
+I2C_STUCK = 23  # Firmware.i2c_stuck
 I2C_TARGET_REST = 57  # Firmware.i2c_target_rest
 SPI_TARGET_DESEL = 16  # Firmware.spi_target_desel
 

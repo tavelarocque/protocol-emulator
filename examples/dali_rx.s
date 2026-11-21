@@ -33,7 +33,8 @@
 ; in a row and the last word's top bits are clear ([dali_rx_frames]).
 ; When the sampler is switched on it reports the idle bus once, as three
 ; high half bits: that is no frame, like any other report without a
-; start bit.
+; start bit. A frame that begins inside that report is still read: high
+; half bits before a frame's first low one are the idle bus.
 ;
 ; Timing: an edge is taken whenever it comes, and each half bit is
 ; sampled in its middle counting from the last edge. Two half bits can

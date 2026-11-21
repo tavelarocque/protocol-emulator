@@ -377,7 +377,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 153 in all:
+fails if any survives. There are 158 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -388,7 +388,7 @@ fails if any survives. There are 153 in all:
 | SPI host port and register file | 2 | `Top.Mutation`: the whole-chip proof and `sim/test_top.ml` |
 | SPI controller firmware | 1 | `sim/test_spi_fw.ml` |
 | SPI device firmware | 5 | `sim/test_spi_target.ml` |
-| I2C controller firmware | 2 | `sim/test_i2c_fw.ml` |
+| I2C controller firmware (4 of them in the repeated START) | 6 | `sim/test_i2c_fw.ml`, `sim/test_i2c.ml` |
 | I2C target firmware | 6 | `sim/test_i2c_target.ml` |
 | JTAG firmware | 3 | `sim/test_jtag.ml` |
 | SWD firmware | 3 | `sim/test_swd.ml` |
@@ -396,7 +396,7 @@ fails if any survives. There are 153 in all:
 | 1-Wire firmware | 6 | `sim/test_onewire.ml` |
 | PS/2 firmware (3 receiving, 6 sending) | 9 | `sim/test_ps2.ml` |
 | CAN firmware (10 receiving, 2 of them in the sampler's settings; 12 sending) | 22 | `sim/test_can.ml` |
-| JTAG, SWD, 1-Wire, PS/2, CAN and host drivers | 9 | `test_driver_planted_bugs` in `test/test.py` |
+| JTAG, SWD, 1-Wire, PS/2, CAN, DALI and host drivers | 10 | `test_driver_planted_bugs` in `test/test.py` |
 | USB driver | 2 | `test_usb_driver_planted_bugs` in `test/test.py` |
 | Driver on the emulated board | 2 | `test/board_emu`: `run_usb.mjs --mutant push-after-start`, `run_board.mjs --mutant cpython-only-call` |
 | v2.0 engines, one each | 11 | `sim/test_tx_engines.ml` |
@@ -412,7 +412,7 @@ count as a catch. The host-port and register-file bugs are a parameter of
 `hw/top.ml`, off by default, following `hw/pe_core.ml`; the generated
 Verilog is byte-identical with or without the parameter in the source.
 
-All 153 are caught. Two candidates turned out not to be bugs, and the
+All 158 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.
@@ -466,7 +466,7 @@ Thirteen of these are told in full in [`bug-ledger.md`](bug-ledger.md).
 | The DMX512 transmitter ended each slot exactly on the bit boundary, where sigrok's decoder samples, and the Wiegand transmitter stretched the gap between pulses at a word boundary, which split the frame in two | sigrok's decoders; a cycle added after the stop bits, and the Wiegand paths made the same length |
 | The MDIO controller sampled a read bit before a PHY that takes its allowed 300 ns had driven it | a PHY model written from IEEE 802.3 with that delay; the firmware reordered so the sample comes later in the clock |
 | RC-5 and NEC flashed the LED for 30 us at start-up (pins reset high, and the pin was made an output before the thread drove it low), and RC-5 left a gap in the carrier where two bursts meet | sigrok's decoders and the pin trace; the drivers start the thread before setting the pin modes, and the firmware looks one bit ahead |
-| The I2C controller cannot send a repeated START | writing the device tests for the EEPROM, clock and sensor, where sigrok's decoder expected one. Not fixed: documented as a limit |
+| The I2C controller could not send a repeated START | writing the device tests for the EEPROM, clock and sensor, where sigrok's decoder expected one. First documented as a limit; since fixed, with a bit in the host's word that asks for one, and those three tests now read their registers through it |
 | The Ethernet driver made the two pins outputs after it had started the thread, so the first bits of the preamble never reached the pair | the chip-level test, which runs the real driver; on the model, where the test sets the pins itself, every frame had passed. The driver now sets the pins when it is created |
 | The CRC register's first design had one bit for "start from all ones", which is wrong for a CRC narrower than the register; and with a whole word taken each cycle the datapath proof did not finish | the published check values of CRC-16/USB and CRC-15/CAN, and the proof's own run time; the start value is now a 32-bit register and the CRC takes one bit per instruction |
 | A planted bug in the packet buffer (a word played in the cycle after the host writes one) was being caught by one random program in 400. When the bit sampler was added the random stream changed and none caught it | the rule that the random programs must catch every planted bug, which failed the build. The random host now often sets the buffer playing straight after a write, and the eighth program catches it |
@@ -601,12 +601,8 @@ answer it.
   acknowledges frames with 29-bit identifiers, it sends no remote frames,
   and after losing arbitration it is the driver, not the chip, that sends
   the frame again. While a frame arrives the host must take a word every
-  15 bit times. The
-  I2C controller starts a transfer only after a STOP, so it cannot send a
-  repeated START. Of the protocols added on v2.0, I2S, DMX512, MIDI, LIN
-  and Modbus RTU are transmit only. DALI's transmitter and receiver are
-  separate programs: a controller that sends a query and reads the answer
-  in one session is not put together.
+  15 bit times. Of the protocols added on v2.0, I2S, DMX512, MIDI, LIN
+  and Modbus RTU are transmit only.
 - **SWD's, PS/2's and CAN's device models, and WS2812's hidden test,** were
   written for this project. For all four, sigrok's protocol
   decoders also read the recorded pins (`test/sigrok.py`), which is

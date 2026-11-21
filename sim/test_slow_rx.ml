@@ -101,6 +101,20 @@ let%test_unit "DALI receiver: a forward frame and its answer 2.9 ms later" =
     ~expect:[ Ok forward; Ok answer ]
 ;;
 
+let%test_unit "DALI receiver: a frame that begins as the sampler is switched on" =
+  (* The sampler reports the idle bus for its first three half bits. A
+     frame that starts inside them arrives in the same report. *)
+  let frame = bits_of ~width:16 0x0390 in
+  List.iter [ 0; 1; 2; 3; 4; 6 ] ~f:(fun quarter_bits ->
+    let before = waveform [ 0xFF, quarter_bits * dali_half / 2 ] in
+    [%test_result: (int list, string) Result.t list]
+      (dali_rx (Array.append before (dali_frame frame))
+       |> List.filter ~f:(function
+         | Error "no start bit" -> false
+         | _ -> true))
+      ~expect:[ Ok frame ])
+;;
+
 let%expect_test "DALI receiver: a bus held low is not a frame, and the next frame is read" =
   let low n = waveform [ 0xFD, n * dali_half ] in
   let frame = bits_of ~width:8 0x3C in

@@ -602,18 +602,21 @@ class DaliRx:
 
     EOF = 6  # dali_rx_eof: where the program goes when a frame's half bits stop
 
-    def __init__(self, chip, image, clock_hz=10_000_000):
+    def __init__(self, chip, image, clock_hz=10_000_000, thread=0, start=True):
         self.chip = chip
+        self.thread = thread
         self._words = []
-        chip.stop()
-        chip.load(image)
+        if start:
+            chip.stop()
+        chip.load(image, threads=(thread,))
         # A sample, and a tick, is a tenth of a half bit: 1/24000 s.
         n = (clock_hz + 12_000) // 24_000
-        chip.configure(in_base=1, threshold=16, in_msb_first=True, auto=AUTOPUSH,
-                       timeout=24, timeout_vector=self.EOF, clkdiv=n)
-        chip.set_pin_modes({1: pe.INPUT, 2: pe.INPUT})
+        chip.configure(thread=thread, in_base=1, threshold=16, in_msb_first=True,
+                       auto=AUTOPUSH, timeout=24, timeout_vector=self.EOF, clkdiv=n)
         set_sampler(chip, pin=1, blank=0, sample=5, wrap=9, misses=2, prescale=n)
-        chip.run()
+        if start:
+            chip.set_pin_modes({1: pe.INPUT, 2: pe.INPUT})
+            chip.run((thread,))
 
     @staticmethod
     def frame(words):
@@ -628,6 +631,8 @@ class DaliRx:
         for k, word in enumerate(data):
             width = min(16, n - 16 * k)
             halves += [(word >> (width - 1 - i)) & 1 for i in range(width)]
+        while halves and halves[0]:
+            halves.pop(0)  # the bus idle before the frame: a frame begins low
         bits = []
         for k in range(0, len(halves) - 1, 2):
             pair = (halves[k], halves[k + 1])
@@ -647,7 +652,7 @@ class DaliRx:
         received highest. Raises DaliError for a bus that broke DALI's code
         or stayed silent."""
         for _ in range(patience):
-            word = self.chip.try_pop()
+            word = self.chip.try_pop(self.thread)
             if word is None:
                 continue
             self._words.append(word)
@@ -660,6 +665,48 @@ class DaliRx:
                         value = (value << 1) | b
                     return value, len(bits)
         raise DaliError("no frame")
+
+
+class Dali:
+    """A DALI controller: forward frames out on pin 0 (dali_tx.hex, on
+    thread 0) and the bus read back on pin 1 (dali_rx.hex, on thread 1), so
+    a query's answer is read. Pin 2 is taken by the bit sampler. The
+    receiver hears the chip's own frames as well, and each is checked
+    against what was sent: a dead bus, a short or another sender shows
+    there."""
+
+    def __init__(self, chip, tx_image, rx_image, clock_hz=10_000_000):
+        self.chip = chip
+        chip.stop()
+        chip.load(tx_image, threads=(0,))
+        # A tick of the transmitter is 1/8 of a half bit: 1/19200 s.
+        chip.configure(thread=0, sideset_base=0, sideset_count=1, threshold=16,
+                       out_msb_first=True, clkdiv=(clock_hz + 9600) // 19200)
+        self.rx = DaliRx(chip, rx_image, clock_hz=clock_hz, thread=1, start=False)
+        chip.run((0, 1))  # the transmitter raises the bus before the pin drives it
+        chip.set_pin_modes({0: pe.PUSH_PULL, 1: pe.INPUT, 2: pe.INPUT})
+
+    def send(self, address, command, patience=200000):
+        """Send a forward frame and check that the bus carried it."""
+        frame = (address << 8) | command
+        self.chip.push(frame)
+        if self.rx.read(patience) != (frame, 16):
+            raise DaliError("the bus did not carry the frame")
+
+    def query(self, address, command, patience=200000, wait=2000):
+        """Send a forward frame and return the answer, a byte, or None if
+        nothing answers within [wait] looks at the receiver (an answer
+        begins at most 9.2 ms after the frame and lasts 9.2 ms)."""
+        self.send(address, command, patience)
+        try:
+            value, bits = self.rx.read(wait)
+        except DaliError as e:
+            if str(e) == "no frame":
+                return None
+            raise
+        if bits != 8:
+            raise DaliError("an answer of %d bits" % bits)
+        return value
 
 
 class Rc5Error(Exception):

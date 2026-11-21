@@ -316,7 +316,14 @@ next:   pull                side 0 ; next byte; SCK stays low until it arrives
      bit 8     the ACK slot: 1 when writing (release SDA so the target can
                ACK); when reading, 0 = ACK (send more), 1 = NACK (last byte)
      bit 9     1 = send STOP after this byte, ending the transaction
+     bit 10    1 = a repeated START after this byte (with bit 9 clear): the
+               next word is an address again, and no STOP comes between
    The first byte after idle (the address, with R/W in bit 0) gets a START.
+
+   A repeated START releases SDA while SCL is low (it is low only if the
+   host put an ACK in a read's slot), releases SCL and waits for it to be
+   high, since a target may be stretching, and then goes the way of the
+   first START: SCL has been high for at least 4 ticks when SDA falls.
    RX FIFO, one word per byte as seen on the bus: bits 7:0 the byte,
    bit-reversed; bit 8 the ACK slot, 0 = ACK, 1 = NACK. 0x200 = the bus was
    stuck (SCL held low longer than TIMEOUT); the firmware then releases both
@@ -344,7 +351,12 @@ bit:    out pins, 1         side 0 [1] ; SDA = next bit while SCL is low
         wait 1 pin 1 timeout side 1 [1]
         set pins, 1         side 1     ; then SDA rises while SCL is high
         jmp idle            side 1
-next:   pull                side 0     ; next byte; SCL held low until it arrives
+next:   out x, 1            side 0     ; X = repeated START flag (word bit 10)
+        jmp !x more         side 0
+        set pins, 1         side 0 [1] ; repeated START: SDA released while SCL is low,
+        wait 1 pin 1 timeout side 1 [1] ; SCL released, and really high,
+        jmp idle            side 1     ; then START, as at the beginning
+more:   pull                side 0     ; next byte; SCL held low until it arrives
         jmp byte            side 0
 stuck:  mov isr, null       side 1     ; timeout vector: SCL never went high
         in null, 9          side 1
@@ -357,11 +369,17 @@ stuck:  mov isr, null       side 1     ; timeout vector: SCL never went high
 ;;
 
 (* Address of [stuck:] in [i2c]; the tests check it still points there. *)
-let i2c_stuck = 18
+let i2c_stuck = 23
 
 (* Host-side words for [i2c]. *)
-let i2c_write_word ~stop byte = reverse_byte byte lor (1 lsl 8) lor (Bool.to_int stop lsl 9)
+let i2c_write_word ?(restart = false) ~stop byte =
+  reverse_byte byte lor (1 lsl 8) lor (Bool.to_int stop lsl 9) lor (Bool.to_int restart lsl 10)
+;;
+
 let i2c_read_word ~last = 0xFF lor (Bool.to_int last lsl 8) lor (Bool.to_int last lsl 9)
+
+(* A read's last byte followed by a repeated START where the STOP would be. *)
+let i2c_read_word_then_restart = 0xFF lor (1 lsl 8) lor (1 lsl 10)
 
 let i2c_config =
   { Isa.Thread_config.default with
@@ -2291,7 +2309,8 @@ let nec_rx_config =
    in a row and the last word's top bits are clear ([dali_rx_frames]).
    When the sampler is switched on it reports the idle bus once, as three
    high half bits: that is no frame, like any other report without a
-   start bit.
+   start bit. A frame that begins inside that report is still read: high
+   half bits before a frame's first low one are the idle bus.
 
    Timing: an edge is taken whenever it comes, and each half bit is
    sampled in its middle counting from the last edge. Two half bits can
@@ -2358,6 +2377,9 @@ let dali_rx_frame (words : int list) =
           let width = min 16 (n - (16 * k)) in
           List.init width ~f:(fun i -> (w lsr (width - 1 - i)) land 1))
       in
+      (* The bus idle before the frame, as when the sampler has just been
+         switched on: a frame begins low. *)
+      let halves = List.drop_while halves ~f:(fun h -> h = 1) in
       let rec bits acc = function
         | 0 :: 1 :: rest -> bits (1 :: acc) rest
         | 1 :: 0 :: rest -> bits (0 :: acc) rest

@@ -27,7 +27,14 @@
 ;   bit 8     the ACK slot: 1 when writing (release SDA so the target can
 ;             ACK); when reading, 0 = ACK (send more), 1 = NACK (last byte)
 ;   bit 9     1 = send STOP after this byte, ending the transaction
+;   bit 10    1 = a repeated START after this byte (with bit 9 clear): the
+;             next word is an address again, and no STOP comes between
 ; The first byte after idle (the address, with R/W in bit 0) gets a START.
+;
+; A repeated START releases SDA while SCL is low (it is low only if the
+; host put an ACK in a read's slot), releases SCL and waits for it to be
+; high, since a target may be stretching, and then goes the way of the
+; first START: SCL has been high for at least 4 ticks when SDA falls.
 ; RX FIFO, one word per byte as seen on the bus: bits 7:0 the byte,
 ; bit-reversed; bit 8 the ACK slot, 0 = ACK, 1 = NACK. 0x200 = the bus was
 ; stuck (SCL held low longer than TIMEOUT); the firmware then releases both
@@ -53,7 +60,12 @@ bit:    out pins, 1         side 0 [1] ; SDA = next bit while SCL is low
         wait 1 pin 1 timeout side 1 [1]
         set pins, 1         side 1     ; then SDA rises while SCL is high
         jmp idle            side 1
-next:   pull                side 0     ; next byte; SCL held low until it arrives
+next:   out x, 1            side 0     ; X = repeated START flag (word bit 10)
+        jmp !x more         side 0
+        set pins, 1         side 0 [1] ; repeated START: SDA released while SCL is low,
+        wait 1 pin 1 timeout side 1 [1] ; SCL released, and really high,
+        jmp idle            side 1     ; then START, as at the beginning
+more:   pull                side 0     ; next byte; SCL held low until it arrives
         jmp byte            side 0
 stuck:  mov isr, null       side 1     ; timeout vector: SCL never went high
         in null, 9          side 1

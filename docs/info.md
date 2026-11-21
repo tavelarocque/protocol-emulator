@@ -115,7 +115,7 @@ to 0x48 go out on P0, bytes received on P1 come back from 0x59 with bit 8 set
 for a good stop bit.
 
 The I2C-to-SPI bridge: `test/bridge.hex` holds the I2C controller at 0 and
-the side-set SPI controller at 25. Thread 0 runs I2C on P0 (SDA) and P1
+the side-set SPI controller at 30. Thread 0 runs I2C on P0 (SDA) and P1
 (SCL), open-drain; thread 1 runs SPI on P2-P5 (SCK, MOSI, MISO, CS_N).
 Writing 7 to CTRL starts both threads with CHAIN set: the host queues an
 I2C read on thread 0 and each byte read comes out over SPI with no further

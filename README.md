@@ -53,7 +53,7 @@ one-page summary for judges. This page is the map.
   the RTL; and the memories those proofs assume equal IHP's own models of
   the SRAM macros.
 - **Judged by tools this project did not write.** Device models by other
-  people where one exists; for 33 tests the recorded pins go to sigrok's
+  people where one exists; for 34 tests the recorded pins go to sigrok's
   protocol decoders.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
@@ -143,7 +143,7 @@ the largest engine, Ethernet transmit, uses 70.
 | UART | TX and RX, full duplex | 15 + 15 | cocotbext-uart |
 | SPI | controller, to 5 Mbit/s | 26 | picosoc's SPI flash |
 | SPI | device | 23 | cocotbext-spi's controller |
-| I2C | controller, with stretching and timeouts | 25 | cocotbext-i2c's EEPROM |
+| I2C | controller, with stretching, timeouts and repeated START | 30 | cocotbext-i2c's EEPROM |
 | I2C | target | 63 | cocotbext-i2c's controller, 400 kHz |
 | JTAG | controller | 11 | cocotbext-jtag and an IEEE 1149.1 device |
 | Arm SWD | host | 11 | a target written from ADIv5; sigrok's SWD decoder |
@@ -153,13 +153,13 @@ the largest engine, Ethernet transmit, uses 70.
 | WS2812 | driver | 16 | a hidden data-sheet timing test; sigrok's WS281x decoder |
 | PS/2 | host, both directions | 11 + 21 | a device written from the protocol's rules; sigrok's PS/2 decoder |
 | CAN | a node: a transmitter that stuffs the bits, makes the CRC and arbitrates, and a receiver that checks the CRC and acknowledges, all on the chip | 59 + 89 | a node written from ISO 11898-1; sigrok's CAN decoder |
-| I2C to SPI | bridge, no host in the data path | 25 + 26 | the I2C and SPI oracles together |
+| I2C to SPI | bridge, no host in the data path | 30 + 26 | the I2C and SPI oracles together |
 | I2S | transmitter, 16-bit stereo | 11 | sigrok's I2S decoder |
 | DMX512 | transmitter | 26 | sigrok's DMX512 decoder |
 | Wiegand | transmitter and receiver | 17 + 16 | sigrok's Wiegand decoder; a reader written from the protocol's rules |
 | NEC infrared | transmitter, 38 kHz carrier included; receiver | 25 + 33 | sigrok's NEC decoder; a remote written from the protocol's rules, 15% fast and slow |
 | MDIO | controller, reads and writes | 7 | a PHY written from IEEE 802.3 clause 22; sigrok's MDIO decoder |
-| DALI | forward frame transmitter; receiver, through the bit sampler, for answers and frames of any length | 17, 9 | sigrok's DALI decoder |
+| DALI | controller: forward frames on one thread, and on the other a receiver, through the bit sampler, that reads the gear's answers | 17, 9 | sigrok's DALI decoder |
 | RC-5 infrared | transmitter, 36 kHz carrier included; receiver, through the bit sampler | 37, 9 | sigrok's RC-5 decoder |
 | PWM, RC servo | generator | 8 | sigrok's PWM decoder; exact to the cycle |
 | NES gamepad | host | 7 | a pad's shift register written from its data sheet; sigrok's gamepad decoder |
@@ -177,7 +177,7 @@ the pins are also recorded and handed to sigrok's protocol decoders, which
 this project did not write ([`test/sigrok.py`](test/sigrok.py)). Every
 protocol from I2S down is judged the same way, by sigrok's decoder for it.
 The USB, 1-Wire and WS2812 recordings go to sigrok as well, beside the
-device models. In all but two of the 33 tests (DS1307 and PWM) one bit is
+device models. In all but two of the 34 tests (DS1307 and PWM) one bit is
 then forced on the recorded wire, and the decoder's verdict must change.
 Ethernet has only the receiver and sender written here from the standard,
 with the CRC-32 from `zlib`.
@@ -203,7 +203,7 @@ a bug.
 | Is every instruction defined? | Yes, all 65,536 words | exhaustive round trips, and the spec's datapath matched on every word |
 | Do the protocols work? | Each judged by an independent oracle | third-party device models and sigrok's decoders in cocotb, on the RTL and the gate netlist |
 | Does the host driver work? | The same file, unchanged | in cocotb, then in MicroPython on an emulated board (rp2040js) wired to the RTL |
-| Would the tests notice a bug? | 153 planted bugs, all caught | kept in the repo; the suite fails if one survives |
+| Would the tests notice a bug? | 158 planted bugs, all caught | kept in the repo; the suite fails if one survives |
 | Did the random tests reach everything? | Coverage is counted | any instruction, stall or timeout never seen fails the build |
 
 Generated files cannot drift: CI regenerates the Verilog, the firmware
