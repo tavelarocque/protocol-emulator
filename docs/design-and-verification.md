@@ -125,7 +125,10 @@ break), 24Cxx EEPROMs, the DS1307 clock and the LM75 sensor on the I2C
 controller, and ten devices on the SPI controller: NOR flash, WS2801 LEDs,
 the MAX7219, the nRF24L01, CC1101, RFM12 and MRF24J40 radios, the ENC28J60
 Ethernet controller, the ADF435x synthesiser and an SD card in SPI mode.
-Each of these twenty-five protocols, and the three that came after
+Four more devices came once the I2C controller could send a repeated
+START, each read the way its data sheet shows: the RTC-8564 clock, the
+TCA6408A port expander, the MXC6225XU accelerometer and a monitor's EDID.
+Each of these protocols, and the three engines that came after
 (Microwire, HDMI-CEC, RC-6), is judged by sigrok's decoder for it,
 which this project did not write. For the last seven the device is a
 script of the bytes the part would answer, not a model of the part: the

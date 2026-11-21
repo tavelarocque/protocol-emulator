@@ -73,7 +73,9 @@ That makes 36 protocols, with both of the competition's stretch goals
 among them. Three more have followed as firmware alone, each judged by a
 sigrok decoder: Microwire with a 93C46 EEPROM, an HDMI-CEC initiator, and
 RC-6 infrared on a burst sender that serves any remote control code.
-That is 39.
+And four more devices run on the I2C controller, read through the
+repeated START it can now send: an RTC-8564 clock, a TCA6408A port
+expander, an MXC6225XU accelerometer and a monitor's EDID. That is 43.
 
 **Then CAN, from a transmitter to a node.** The v1.4 engine sent frames
 the host had made and listened. On v2.1's CRC register the transmitter
@@ -178,7 +180,7 @@ runs a program on the reference model and prints the pins.
    picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
    USB device, sockit_owm's 1-Wire slave. For USB, 1-Wire, WS2812, SWD, PS/2,
    CAN and every protocol added after them but Ethernet, the recorded pins
-   go to sigrok's protocol decoders, 37 tests in all, 35 of them with a
+   go to sigrok's protocol decoders, 41 tests in all, 39 of them with a
    fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
    receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
    sender has its own clock, 100 ppm off, and jitter on every edge.
@@ -186,7 +188,7 @@ runs a program on the reference model and prints the pins.
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
-5. **The gates, not only the RTL.** All 65 chip-level tests pass on the
+5. **The gates, not only the RTL.** All 69 chip-level tests pass on the
    post-layout netlist, with IHP's models of the SRAMs in place of the
    macros. That includes Ethernet at a 40 MHz clock, both ways.
 6. **The software that will run on the board.** The MicroPython driver is

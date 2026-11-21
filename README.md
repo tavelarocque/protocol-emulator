@@ -24,14 +24,14 @@ one-page summary for judges. This page is the map.
   protocol pins (input, push-pull or open-drain each), loaded over an SPI
   host port. LVS and the Tiny Tapeout precheck pass, and timing is met at
   50 MHz at every corner ([`docs/metrics.md`](docs/metrics.md)).
-- **39 protocols as firmware**, two running at a time. UART, SPI and I2C as
+- **43 protocols as firmware**, two running at a time. UART, SPI and I2C as
   required, in both roles for SPI and I2C; both stretch goals, low-speed
   USB as a host and 10 Mbit Ethernet, sending and receiving; JTAG, SWD,
   1-Wire, WS2812, PS/2 and CAN; I2S, DMX512, Wiegand, NEC and RC-5
   infrared, MDIO, DALI, PWM and a NES gamepad; Microwire, HDMI-CEC and
   RC-6 infrared. Twenty-two have firmware of their own. RC-6 is framed by
-  the driver on an infrared burst sender that knows no code, and sixteen
-  more (MIDI, LIN, Modbus RTU and thirteen devices on I2C and SPI) run on
+  the driver on an infrared burst sender that knows no code, and twenty
+  more (MIDI, LIN, Modbus RTU and seventeen devices on I2C and SPI) run on
   the other engines with framing in the host driver.
 - **Hardware that did not need to know the protocols.** Nine engines were
   added to v1.4 with no RTL change. v2.0 changed one thing, the program
@@ -55,7 +55,7 @@ one-page summary for judges. This page is the map.
   the RTL; and the memories those proofs assume equal IHP's own models of
   the SRAM macros.
 - **Judged by tools this project did not write.** Device models by other
-  people where one exists; for 37 tests the recorded pins go to sigrok's
+  people where one exists; for 41 tests the recorded pins go to sigrok's
   protocol decoders.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
@@ -172,6 +172,7 @@ the largest engine, Ethernet transmit, uses 70.
 | LIN | master frames, on the DMX512 transmitter | no new firmware | sigrok's LIN decoder |
 | Modbus RTU | requests, on the UART transmitter | no new firmware | sigrok's Modbus decoder, which checks the CRC |
 | 24Cxx EEPROM, DS1307 clock, LM75 sensor | on the I2C controller | no new firmware | sigrok's decoder for each; cocotbext-i2c's memory |
+| RTC-8564 clock, TCA6408A port expander, MXC6225XU accelerometer, a monitor's EDID | on the I2C controller, each read through a repeated START | no new firmware | sigrok's decoder for each; cocotbext-i2c's memory |
 | SPI NOR flash, WS2801 LEDs | on the SPI controller | no new firmware | sigrok's decoder for each; picosoc's flash |
 | MAX7219 | on the SPI controller | no new firmware | sigrok's MAX7219 decoder |
 | nRF24L01, CC1101, RFM12 and MRF24J40 radios; ENC28J60 Ethernet controller; ADF435x synthesiser; SD card in SPI mode | on the SPI controller | no new firmware | sigrok's decoder for each, reading the commands sent and the bytes a scripted device answers |
@@ -182,7 +183,7 @@ the pins are also recorded and handed to sigrok's protocol decoders, which
 this project did not write ([`test/sigrok.py`](test/sigrok.py)). Every
 protocol from I2S down is judged the same way, by sigrok's decoder for it.
 The USB, 1-Wire and WS2812 recordings go to sigrok as well, beside the
-device models. In all but two of the 37 tests (DS1307 and PWM) one bit is
+device models. In all but two of the 41 tests (DS1307 and PWM) one bit is
 then forced on the recorded wire, and the decoder's verdict must change.
 Ethernet has only the receiver and sender written here from the standard,
 with the CRC-32 from `zlib`.

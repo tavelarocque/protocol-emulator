@@ -3704,6 +3704,142 @@ async def test_lm75_thermometer(dut):
 
 
 @cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_rtc8564_clock(dut):
+    """An RTC-8564 real-time clock on the I2C controller: the seven time
+    registers are set, then read back through a repeated START, as the
+    part's data sheet shows a read. sigrok's RTC-8564 decoder, on its I2C
+    decoder, must read the time out of the bytes both ways."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    memory, transfer, write_bytes, read_bytes = await i2c_session(dut, 0x51, 16)
+    # From register 2: seconds, minutes, hours, day, weekday, month, year, in BCD.
+    await transfer(write_bytes([0x02, 0x56, 0x34, 0x12, 0x21, 0x06, 0x11, 0x26]))
+    await ClockCycles(dut.clk, 200)
+    reports = await transfer(read_bytes(0x02, 7))
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert [rev8(r & 0xFF) for r in reports[3:]] == [0x56, 0x34, 0x12, 0x21, 0x06, 0x11, 0x26]
+    if sigrok.available():
+        decoder = "i2c,rtc8564"
+        fields = lambda found: [t for t in texts(found) if t.startswith(
+            ("Second: ", "Minute: ", "Hour: ", "Day: ", "Weekday: ", "Month: ", "Year: "))]
+        want = ["Second: 56", "Minute: 34", "Hour: 12", "Day: 21", "Weekday: 6", "Month: 11", "Year: 26"]
+        found = trace.decode(decoder, "rtc8564")
+        assert fields(found) == want + want, fields(found)  # written, then read
+        # The data line held low through the minutes as they are read back.
+        a, b = [(a, b) for a, b, text in found if text == "Minute: 34"][1]
+        wrong = fields(trace.forced("sda", a, b, 0).decode(decoder, "rtc8564"))
+        assert wrong != want + want, wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_tca6408a_expander(dut):
+    """A TCA6408A port expander on the I2C controller: its configuration
+    and output registers are written, and its inputs read through a
+    repeated START. sigrok's TCA6408A decoder must name each register and
+    its value."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    memory, transfer, write_bytes, read_bytes = await i2c_session(dut, 0x20, 8)
+    memory.write_mem(0, bytes([0x5A]))  # what the pins read
+    await transfer(write_bytes([0x03, 0x0F]))  # configuration: four inputs, four outputs
+    await ClockCycles(dut.clk, 200)
+    await transfer(write_bytes([0x01, 0xA0]))  # the output port
+    await ClockCycles(dut.clk, 200)
+    reports = await transfer(read_bytes(0x00, 1))  # the input port
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert rev8(reports[3] & 0xFF) == 0x5A, reports
+    assert memory.read_mem(1, 1) == bytes([0xA0]) and memory.read_mem(3, 1) == bytes([0x0F])
+    if sigrok.available():
+        decoder = "i2c,tca6408a"
+        values = lambda found: [t for t in texts(found) if re.search(r": [0-9A-F]{2}$", t)]
+        want = ["Configuration: 0F", "Outputs set: A0", "State of inputs: 5A"]
+        found = trace.decode(decoder, "tca6408a")
+        assert values(found) == want, texts(found)
+        assert not any("Warning" in t for t in texts(found)), texts(found)
+        # The data line held low through the output value: not A0.
+        a, b = next((a, b) for a, b, text in found if text == "Outputs set: A0")
+        wrong = values(trace.forced("sda", a, b, 0).decode(decoder, "tca6408a"))
+        assert wrong != want, wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_mxc6225xu_accelerometer(dut):
+    """An MXC6225XU accelerometer on the I2C controller: its X and Y
+    readings, read through a repeated START from register 0. sigrok's
+    decoder for the part must make the same two numbers of them."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    memory, transfer, _, read_bytes = await i2c_session(dut, 0x15, 8)
+    memory.write_mem(0, bytes([0x2A, 0x60]))  # X = 42, Y = 96
+    reports = await transfer(read_bytes(0x00, 2))
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert [rev8(r & 0xFF) for r in reports[3:]] == [0x2A, 0x60], reports
+    if sigrok.available():
+        decoder = "i2c,mxc6225xu"
+        axes = lambda found: [t for t in texts(found) if t.startswith(("XOUT", "YOUT"))]
+        found = trace.decode(decoder, "mxc6225xu")
+        assert axes(found) == ["XOUT: 42", "YOUT: 96"], texts(found)
+        # The data line held low through the X reading: not 42.
+        a, b = next((a, b) for a, b, text in found if text == "XOUT: 42")
+        wrong = axes(trace.forced("sda", a, b, 0).decode(decoder, "mxc6225xu"))
+        assert "XOUT: 42" not in wrong, wrong
+
+
+def edid_block():
+    """A 128-byte EDID 1.3 block for a made-up 1024x768 monitor, with its
+    checksum."""
+    block = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]
+    letters = [ord(c) - 64 for c in "PEM"]  # the maker's three letters, five bits each
+    maker = (letters[0] << 10) | (letters[1] << 5) | letters[2]
+    block += [maker >> 8, maker & 0xFF, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12]  # product, serial
+    block += [47, 36, 1, 3]  # week 47 of 2026; EDID 1.3
+    block += [0x80, 32, 24, 120, 0x0A]  # digital; 32 x 24 cm; gamma 2.2
+    block += [0xEE, 0x91, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54]  # chromaticity
+    block += [0x00, 0x08, 0x00]  # established timings: 1024x768 at 60 Hz
+    block += [0x01, 0x01] * 8  # no standard timings
+    # 1024x768 at 60 Hz, 65 MHz pixel clock.
+    block += [0x64, 0x19, 0x00, 0x40, 0x41, 0x00, 0x26, 0x30, 0x18, 0x88,
+              0x36, 0x00, 0x40, 0xF0, 0x10, 0x00, 0x00, 0x18]
+    name = b"PROTO-EMU\n   "
+    block += [0, 0, 0, 0xFC, 0] + list(name[:13])
+    block += [0, 0, 0, 0xFD, 0, 50, 75, 30, 80, 8, 0, 0x0A, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20]
+    block += [0, 0, 0, 0x10, 0] + [0] * 13
+    block += [0]  # no extension blocks
+    assert len(block) == 127, len(block)
+    return block + [(-sum(block)) & 0xFF]
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_edid(dut):
+    """A monitor's EDID read over DDC, which is I2C at address 0x50: the
+    pointer set to 0, a repeated START, then all 128 bytes. sigrok's EDID
+    decoder must find the header, the maker's letters and a checksum that
+    adds up."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    memory, transfer, _, read_bytes = await i2c_session(dut, 0x50, 256)
+    block = edid_block()
+    memory.write_mem(0, bytes(block))
+    reports = await transfer(read_bytes(0x00, 128))
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert [rev8(r & 0xFF) for r in reports[3:]] == block, "the block as read"
+    if sigrok.available():
+        decoder = "i2c,edid"
+        found = trace.decode(decoder, "edid")
+        said = texts(found)
+        assert any(t.startswith("Checksum: ") and t.endswith("(OK)") for t in said), said[-12:]
+        assert any("PEM" in t for t in said), [t for t in said if "anufactur" in t or "endor" in t]
+        # The data line held low through the last byte, the checksum.
+        a, b = next((a, b) for a, b, text in found if text.startswith("Checksum: "))
+        wrong = texts(trace.forced("sda", a, b, 0).decode(decoder, "edid"))
+        assert not any(t.startswith("Checksum: ") and t.endswith("(OK)") for t in wrong), wrong[-6:]
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
 async def test_spi_flash_commands(dut):
     """A SPI NOR flash on the SPI controller, driven by the board driver:
     release from power-down, then a read. sigrok's flash decoder, on its

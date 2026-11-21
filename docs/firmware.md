@@ -94,6 +94,10 @@ decoder for the bus:
 | 24Cxx EEPROM | I2C controller | sigrok's 24xx decoder names a page write and a byte write; cocotbext-i2c's memory holds and returns the data |
 | DS1307 real-time clock | I2C controller | sigrok's DS1307 decoder reads the date and time out of the bytes written and read |
 | LM75 temperature sensor | I2C controller | sigrok's LM75 decoder reads the temperature |
+| RTC-8564 real-time clock | I2C controller, read through a repeated START | sigrok's RTC-8564 decoder reads the time out of the bytes written and of the bytes read back |
+| TCA6408A port expander | I2C controller, read through a repeated START | sigrok's TCA6408A decoder names the configuration, the outputs set and the inputs read, and has no warning |
+| MXC6225XU accelerometer | I2C controller, read through a repeated START | sigrok's decoder for the part reads the X and Y values |
+| A monitor's EDID, over DDC | I2C controller: the pointer, a repeated START, 128 bytes | sigrok's EDID decoder finds the header and the maker's letters, and the checksum adds up |
 | SPI NOR flash commands | SPI controller | sigrok's flash decoder names the commands, the address and the data; picosoc's flash model answers |
 | WS2801 LED pixels | SPI controller | sigrok's decoder for SPI LED strips reads the colours |
 | nRF24L01 radio | SPI controller | sigrok's nRF24L01 decoder names each command and reads the register the device answered with |

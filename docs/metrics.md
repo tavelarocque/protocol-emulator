@@ -206,7 +206,7 @@ deck on the whole layout, pass on all three.
 
 After each of the three layouts the netlist is proven equal to the RTL
 (1,538 signals on v2.3: every output, all 1,107 flip-flops and every pin
-of the three memories), and the whole cocotb suite, 65 tests on v2.3,
+of the three memories), and the whole cocotb suite, 69 tests on v2.3,
 passes on the gate-level netlist, the Ethernet tests at a 40 MHz clock.
 Those simulations have no gate delays in them: the speed rests on static
 timing analysis.
