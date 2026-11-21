@@ -991,69 +991,121 @@ module Ps2 = struct
   ;;
 end
 
-(* CAN (ISO 11898 classical CAN, through a transceiver): a transmitter and a
-   listen-only receiver, on the two threads. Firmware alone. The
-   transmitter makes the whole frame from the identifier and the data: bit
-   stuffing, CRC, arbitration, the ACK slot. What the pair is not: a full
-   node. It does not acknowledge other nodes' frames or send error frames,
-   which need the frame decoded as it arrives, on a clock recovered from
-   the bus, in the receiver.
+(* CAN (ISO 11898 classical CAN, through a transceiver): a node, on the two
+   threads and the bit sampler. It sends data frames, receives every other
+   node's and acknowledges them. Firmware alone, 11-bit identifiers.
+
+   What it leaves out: error frames and the error counters behind them (it
+   stays silent about a frame it finds wrong, as a node in the standard's
+   error-passive state does, and simply does not acknowledge it); overload
+   frames; extended identifiers, whose frames it neither receives nor
+   acknowledges; answering remote frames, which is the host's business.
 
    Pins: P0 = RXD (input, through the synchroniser), P1 = TXD (push-pull;
-   0 is dominant). The receiver's bit is 10 ticks, so its CLKDIV = core
-   clock / (10 x bit rate): 8 for 125 kbit/s at 10 MHz. The transmitter's
-   is 20 ticks, at half that CLKDIV, so the core clock is 20 x the bit rate
-   x a whole number. The receiver hands the host what was on the wire, and
-   the host removes the stuffing and checks the frame ([Can.decode] here,
-   Can in the board driver).
+   0 is dominant). P2 and P3 are taken: the sampler listens to P0 and shows
+   what it recovers there, two pins on, so that P0 is still the line itself
+   for the transmitter. A bit is 20 ticks for both threads and 20 samples
+   for the sampler: one CLKDIV for all three, the core clock / (20 x bit
+   rate): 4 for 125 kbit/s at 10 MHz. [Can.sampler] has the sampler's
+   settings: every edge restarts its phase, the bit is taken 13 samples
+   on, runs of equal bits are kept time through, and stuff bits are taken
+   out, so the receiver sees a frame's bits and nothing else.
 
-   The receiver, [can_rx], on thread 0, records every frame on the bus, the
-   transmitter's own included. It waits for a start of frame (RXD falling on
-   an idle bus), then samples each bit about 70% of the way through and
-   pushes the levels 15 to a word, the first in bit 0. Eight recessive bits
-   in a row end the frame: the bits left over are pushed as a last short
-   word (0 if there are none), then 0xFFFF, which no data word can be. The
-   stuffed bits come out as they were on the wire; [Can.decode] removes the
-   stuffing and checks the frame.
-   Resynchronisation: straight after each sample the receiver waits for
-   RXD to be low, for up to TIMEOUT = 4 ticks. After a dominant sample that
-   passes at once, and the next sample is 10 ticks after the last. After a
-   recessive one it is a watch for the falling edge that ends the bit: an
-   edge puts the next sample 7 ticks after itself; with none, the timeout
-   vector, [can_rx_same], samples again 10 ticks after the last. Which of
-   the two it was is read back from the bit just recorded (the receiver's
-   OUT takes the newest bit of a copy of the ISR, so its SHIFT has OUT most
-   significant first). Every path takes the same time whether or not a
-   word is pushed. Stuff bits guarantee a falling edge every 10 bits at
-   least, and the watch reaches 2 ticks either side of where the edge is
-   due, so the sender's clock may differ by 2%; CAN allows 1.58%.
+   The receiver, [can_rx], on thread 0. A pulse lasts one sample, which is
+   one tick of this thread, so each `wait 1 pin 3` meets the next bit. The
+   CRC register follows IN: every bit of the frame goes through it, and
+   after the last bit of the CRC it holds 0 if the frame is good.
+
+   It waits for a dominant bit, the start of a frame, and takes the 14 bits
+   ID, RTR, IDE, r0. In r0, which is dominant in every frame, it looks at
+   TXD: low means thread 1 is sending this very frame (it cannot still be
+   low after losing arbitration, which is over by then), and a node does
+   not receive or acknowledge its own frame. Then the DLC, as many bytes as
+   it says (none in a remote frame; eight for 8 and above), and the 15 bits
+   of the CRC. If the CRC register holds 0, it drives TXD low for the ACK
+   slot: from 7 ticks after the pulse of the CRC delimiter, which is the
+   end of that bit or a tick past it, for 20 ticks.
+   After its own frame, after an extended one, and when it starts, it
+   waits for the line to stay recessive for ten bit times before it takes
+   a dominant bit for a start of frame. (After a frame with a wrong CRC it
+   does not wait: the next frame may come eleven bit times after that
+   one's last dominant bit, which can be five bits before its end. If the
+   next dominant bit is another node's ACK or an error flag instead, what
+   follows it reads as an extended frame or one more bad one.) That is a wait on RXD itself with
+   TIMEOUT = 200 ticks, and [Can.rx_idle] is its vector: the recovered
+   bits would not do, since with the stuff bits gone a frame's data can
+   be recessive for any number of them.
+
+   RX words for a frame: the 14 bits ID, RTR, IDE, r0; then DLC, data and
+   CRC, 15 bits to a word, the last word short, and an empty word after it
+   when they fill their words exactly; then 0xFFFF if the frame was good
+   and acknowledged, 0xFFFE if not. Every other word is below 0x8000, so
+   the two marks cannot be taken for data ([Can.rx_frames]).
 
    The transmitter, [can_tx], on thread 1, is described below. *)
 let can_rx =
   {|
-idle:   wait 1 pin 0            ; the bus recessive...
-        wait 0 pin 0            ; ...then a start of frame
-        set y, 7 [5]
-smp:    in pins, 1              ; record RXD
-        wait 0 pin 0 timeout    ; recessive: watch for a falling edge
-        mov osr, isr            ; dominant, or it fell: which did we record?
-        out x, 1
-        jmp !x dom              ; recessive, so that was an edge: 7 ticks on
-chk:    jmp !isrf nf
-        push                    ; a full word, in the same 3 ticks
-        jmp smp
-nf:     jmp smp [1]
-dom:    set y, 7                ; dominant: 10 ticks after the last sample
-        jmp chk
-same:   jmp y-- chk             ; timeout vector: still recessive, no edge
-        push                    ; the 8th in a row: the frame is over
-        in y, 16                ; Y is 0xFFFF
-        push
+integ:  wait 1 pin 0            ; the line itself recessive...
+        wait 0 pin 0 timeout    ; ...and for ten bit times: between frames
+        jmp integ               ; it fell first: again
+idle:   wait 1 pin 2            ; timeout vector. (An ACK may still show)
+        wait 0 pin 2            ; a dominant bit: the start of a frame
+        mov crc, null
+        mov isr, null
+        set y, 13
+h:      wait 1 pin 3
+        in pins, 1
+        jmp y-- h               ; ID, RTR, IDE, r0
+        mov osr, pins           ; r0 is on the bus now, dominant: whose?
+        out null, 1
+        out y, 1                ; TXD
+        jmp !y integ            ; thread 1's: not received, not acknowledged
+        mov osr, isr
+        out null, 1             ; r0
+        out x, 1                ; IDE
+        jmp !x std
+        jmp integ               ; an extended frame: not for this receiver
+std:    out x, 1                ; RTR, kept in X
+        push                    ; the first word
+        set y, 3
+d:      wait 1 pin 3
+        in pins, 1
+        jmp y-- d
+        mov y, isr              ; the DLC
+        jmp !x data
+        jmp crc                 ; a remote frame has no data
+data:   mov osr, isr
+        out null, 3
+        out x, 1                ; the DLC's top bit: 8 and above, 8 bytes
+        jmp !x byte
+        set y, 8
+byte:   jmp y-- more
+        jmp crc
+more:   set x, 7
+b:      wait 1 pin 3
+        in pins, 1
+        jmp x-- b
+        jmp byte
+crc:    set y, 14
+c:      wait 1 pin 3
+        in pins, 1
+        jmp y-- c
+        mov x, crc              ; 0: nothing left over, the frame is good
+        wait 1 pin 3            ; the CRC delimiter
+        jmp !x ack
+        push                    ; bad: the bits left, then 0xFFFE
+        jmp y-- bad
+bad:    in y, 16
+        jmp idle                ; the next dominant bit may be a new frame
+ack:    nop [4]                 ; to the end of the delimiter
+        set pins, 0 [15]        ; the ACK slot, one bit long
+        nop [3]
+        set pins, 1
+        push                    ; the bits left, then 0xFFFF
+        in y, 16
         jmp idle
 |}
 ;;
-
-let can_rx_same = 14
 
 (* CAN: the transmitter, on thread 1, with the framing on the chip: it
    stuffs the bits, computes the CRC, arbitrates and reads the ACK slot.
@@ -1204,37 +1256,44 @@ oc:     jmp y-- o               ; 4
 ;;
 
 module Can = struct
-  let rx_origin = 0
-  let rx = Asm.assemble ~origin:rx_origin can_rx
-  let tx_origin = rx_origin + Array.length rx
+  (* The transmitter first: its two pages are the image's first two. The
+     receiver is in a page of its own. *)
+  let tx_origin = 0
   let tx = Asm.assemble ~origin:tx_origin can_tx
-  let image = Asm.link [ rx_origin, rx; tx_origin, tx ]
+  let rx_origin = 2 * Isa.page_size
+  let rx = Asm.assemble ~origin:rx_origin can_rx
+  let image = Asm.link [ tx_origin, tx; rx_origin, rx ]
 
-  (* The transmitter's timeout vector. *)
+  (* The transmitter's timeout vector, and the receiver's. *)
   let tx_lost ?(origin = tx_origin) source = Asm.label ~origin source "lost"
+  let rx_idle ?(origin = rx_origin) source = Asm.label ~origin source "idle"
 
   (* The CRC register's polynomial for CRC-15/CAN: 0x4599 with its 15 bits
      reversed, since the register shifts right. Bit 0 is then the CRC's
      most significant bit, the first sent. *)
   let crc_poly = List.fold (List.range 0 15) ~init:0 ~f:(fun acc k -> acc lor (((0x4599 lsr k) land 1) lsl (14 - k)))
 
-  (* [clkdiv]: core clock / (10 x bit rate). *)
+  (* [clkdiv]: core clock / (20 x bit rate), for both threads and the
+     sampler. *)
   let rx_config ~clkdiv =
     { Isa.Thread_config.default with
       start = rx_origin
-    ; in_base = 0
+    ; in_base = 2
+    ; in_msb_first = true
     ; threshold = 15
-    ; out_msb_first = true
-    ; timeout = 4
-    ; timeout_vector = rx_origin + can_rx_same
+    ; autopush = true
+    ; set_base = 1
+    ; set_count = 1
     ; clkdiv
+    ; crc_poly
+    ; crc_init = 0
+    ; crc_in = true
+    ; timeout = 200
+    ; timeout_vector = rx_idle can_rx
     }
   ;;
 
-  (* [clkdiv] is the receiver's, and must be even: the transmitter's bit is
-     20 ticks, so it runs at half of it. *)
   let tx_config ~clkdiv =
-    assert (clkdiv % 2 = 0);
     { Isa.Thread_config.default with
       start = tx_origin
     ; out_base = 1
@@ -1246,9 +1305,26 @@ module Can = struct
     ; autopull = true
     ; timeout = 0
     ; timeout_vector = tx_lost can_tx
-    ; clkdiv = clkdiv / 2
+    ; clkdiv
     ; crc_poly
     ; crc_init = 0
+    }
+  ;;
+
+  (* The sampler: RXD on pin 0, 20 samples of [clkdiv] cycles to the bit,
+     the bit taken 13 samples after an edge, never losing the carrier,
+     stuff bits after five equal bits taken out, shown on pins 2 and 3. *)
+  let sampler ~clkdiv =
+    { Isa.Sampler_config.off with
+      enable = true
+    ; pin = 0
+    ; misses = 7
+    ; blank = 0
+    ; sample = 13
+    ; wrap = 19
+    ; prescale = clkdiv
+    ; shift = 2
+    ; stuff = 5
     }
   ;;
 
@@ -1271,27 +1347,32 @@ module Can = struct
 
   let msb_first ~width v = List.init width ~f:(fun k -> (v lsr (width - 1 - k)) land 1)
 
-  (* A data frame with an 11-bit identifier, as bits on the wire (1 is
-     recessive) from the start-of-frame bit to the ACK delimiter: a stuff
-     bit after every five equal bits up to the end of the CRC, then the CRC
-     delimiter, the ACK slot (sent recessive) and the ACK delimiter. *)
-  let frame_bits ~id ~data =
-    let n = List.length data in
-    assert (id >= 0 && id < 0x800 && n <= 8);
-    let body =
-      [ 0 ]
-      @ msb_first ~width:11 id
-      @ [ 0; 0; 0 ]
-      @ msb_first ~width:4 n
-      @ List.concat_map data ~f:(msb_first ~width:8)
-    in
-    let body = body @ msb_first ~width:15 (crc15 body) in
+  (* A frame as bits on the wire (1 is recessive), from [body], which is
+     its bits from the start-of-frame bit to the end of the data: the CRC
+     after them, a stuff bit after every five equal bits up to the end of
+     the CRC, then the CRC delimiter, the ACK slot (sent recessive) and the
+     ACK delimiter. [crc] is a CRC to send in place of the right one. *)
+  let wire_bits ?crc body =
+    let body = body @ msb_first ~width:15 (Option.value crc ~default:(crc15 body)) in
     let stuffed, _, _ =
       List.fold body ~init:([], -1, 0) ~f:(fun (acc, last, run) b ->
         let run = if b = last then run + 1 else 1 in
         if run = 5 then (1 - b) :: b :: acc, 1 - b, 1 else b :: acc, b, run)
     in
     List.rev stuffed @ [ 1; 1; 1 ]
+  ;;
+
+  (* A data frame with an 11-bit identifier, or with [rtr] the remote frame
+     that asks for it ([dlc] is then what it carries where the length
+     goes). *)
+  let frame_bits ?(rtr = false) ?dlc ~id ~data () =
+    let n = List.length data in
+    assert (id >= 0 && id < 0x800 && n <= 8);
+    wire_bits
+      (([ 0 ] @ msb_first ~width:11 id)
+       @ [ Bool.to_int rtr; 0; 0 ]
+       @ msb_first ~width:4 (Option.value dlc ~default:n)
+       @ List.concat_map data ~f:(msb_first ~width:8))
   ;;
 
   (* The transmitter's words for a data frame: the bits from the identifier
@@ -1308,69 +1389,46 @@ module Can = struct
       List.foldi chunk ~init:0 ~f:(fun k acc b -> acc lor (b lsl k)))
   ;;
 
-  let frame_end = 0xFFFF
+  (* The receiver's marks after a frame. *)
+  let good = 0xFFFF
+  let bad = 0xFFFE
 
-  (* The bit levels the receiver recorded for one frame, from its words up
-     to (not including) [frame_end]: 15 a word, the last one short and
-     ending in a recessive bit. *)
-  let levels words =
-    match List.rev words with
-    | [] -> []
-    | last :: earlier_rev ->
-      let bits w n = List.init n ~f:(fun k -> (w lsr k) land 1) in
-      List.concat_map (List.rev earlier_rev) ~f:(fun w -> bits w 15)
-      @ bits last (if last = 0 then 0 else Int.floor_log2 last + 1)
-  ;;
-
-  (* The frame in recorded levels: stuffing removed and checked, the fixed
-     bits and CRC checked. [acked] is the ACK slot. *)
-  let decode levels =
-    (* Walk the stream once, taking [need] unstuffed bits at a time. *)
-    let stream = ref levels
-    and last = ref (-1)
-    and run = ref 0
-    and ok = ref true in
-    let take need =
-      let out = ref [] in
-      let need = ref need in
-      while !need > 0 && !ok do
-        match !stream with
-        | [] -> ok := false
-        | b :: rest ->
-          stream := rest;
-          if !run = 5
-          then (
-            if b = !last then ok := false;
-            last := b;
-            run := 1)
-          else (
-            run := if b = !last then !run + 1 else 1;
-            last := b;
-            out := b :: !out;
-            decr need)
-      done;
-      List.rev !out
-    in
+  (* The frames in the receiver's RX words: for each, its identifier, its
+     data and whether it is a remote frame, or [None] for one the receiver
+     marked bad (or whose words do not fit a frame, which a good one's
+     always do). Words after the last mark are a frame still arriving. *)
+  let rx_frames words =
     let value bits = List.fold bits ~init:0 ~f:(fun acc b -> (acc lsl 1) lor b) in
-    let head = take 19 in
-    if (not !ok) || List.length head < 19
-    then None
-    else (
-      let id = value (List.sub head ~pos:1 ~len:11)
-      and n = value (List.sub head ~pos:15 ~len:4) in
-      if List.hd_exn head <> 0 || value (List.sub head ~pos:12 ~len:3) <> 0 || n > 8
-      then None
-      else (
-        let payload = take (8 * n) in
-        let crc = take 15 in
-        (* A stuff bit can follow the CRC's last bit. *)
-        if !ok && !run = 5 then (match !stream with
-          | b :: rest when b <> !last -> stream := rest
-          | _ -> ok := false);
-        match !ok, !stream with
-        | true, 1 :: ack :: 1 :: _ when value crc = crc15 (head @ payload) ->
-          Some (id, List.map (List.chunks_of payload ~length:8) ~f:value, ack = 0)
-        | _ -> None))
+    let frame words =
+      match words with
+      | head :: rest when head < 0x4000 ->
+        let id = head lsr 3
+        and rtr = (head lsr 2) land 1 = 1 in
+        (match rest with
+         | first :: _ ->
+           let dlc = first lsr 11 in
+           let n = if rtr then 0 else Int.min dlc 8 in
+           let total = 4 + (8 * n) + 15 in
+           let full = total / 15
+           and short = total % 15 in
+           if List.length rest <> full + 1 || List.exists rest ~f:(fun w -> w >= 0x8000)
+           then None
+           else (
+             let bits =
+               List.concat_mapi rest ~f:(fun k w -> msb_first ~width:(if k < full then 15 else short) w)
+             in
+             let data = List.sub bits ~pos:4 ~len:(8 * n) in
+             Some (id, List.map (List.chunks_of data ~length:8) ~f:value, rtr))
+         | [] -> None)
+      | _ -> None
+    in
+    let rec go acc current = function
+      | [] -> List.rev acc
+      | w :: rest when w = good -> go (frame (List.rev current) :: acc) [] rest
+      | w :: rest when w = bad -> go (None :: acc) [] rest
+      | w :: rest -> go acc (w :: current) rest
+    in
+    go [] [] words
   ;;
 end
 
@@ -2511,6 +2569,9 @@ let eth_rx_sampler =
   ; blank = 5
   ; sample = 1
   ; wrap = 11
+  ; prescale = 0
+  ; shift = 0
+  ; stuff = 0
   }
 ;;
 

@@ -394,6 +394,7 @@ CRC_INIT = 0x63
 BUF_CTRL, BUF_PTR, BUF_END, BUF_DATA = 0x68, 0x69, 0x6A, 0x6B
 BUF_WORDS = 1024
 SMP_CTRL, SMP_TIME, SMP_SYNC, SMP_STATUS = 0x6C, 0x6D, 0x6E, 0x6F
+SMP_PRE = 0x67
 
 
 def set_crc(chip, poly, init, thread=0):
@@ -497,7 +498,8 @@ class EthernetTx:
         return self.LINK <= self.chip.status()["pc"] <= self.LINK + 4
 
 
-def set_sampler(chip, pin, blank, sample, wrap, sync=None, misses=0, invert=False):
+def set_sampler(chip, pin, blank, sample, wrap, sync=None, misses=0, invert=False,
+                prescale=0, shift=0, stuff=0):
     """The bit sampler: clock recovery on [pin]. The threads then see the
     recovered bit on that pin and a one-cycle pulse for each bit on the
     next. [blank], [sample] and [wrap] count samples, two to a clock cycle:
@@ -505,8 +507,16 @@ def set_sampler(chip, pin, blank, sample, wrap, sync=None, misses=0, invert=Fals
     one, the bit is the level [sample] samples after it, and [wrap] samples
     with no edge are a bit time gone by, which is the end after [misses]
     of them in a row (7: never). With [sync], bits are passed on only once
-    those 8 bits, first bit lowest, have gone by."""
+    those 8 bits, first bit lowest, have gone by.
+
+    For a slower line, [prescale] n (up to 1023) makes a sample n whole
+    clock cycles, so a bit can last 32 n of them; the pulse then lasts n
+    cycles too. With [shift] the bit and its pulse show [shift] pins on
+    from [pin], and [pin] itself still shows the line. With [stuff] n the
+    opposite bit after n equal bits in a row is a stuff bit and is taken
+    out."""
     chip.write(SMP_CTRL, 0)
+    chip.write(SMP_PRE, prescale | (shift << 10) | (stuff << 13))
     chip.write(SMP_TIME, blank | (sample << 5) | (wrap << 10))
     chip.write(SMP_SYNC, sync or 0)
     chip.write(SMP_CTRL, 1 | (pin << 1) | (int(invert) << 4) | (int(sync is not None) << 5)

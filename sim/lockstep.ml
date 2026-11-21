@@ -49,6 +49,9 @@ type sampler_state =
   ; carrier : bool
   ; synced : bool
   ; history : int
+  ; pre : int
+  ; run : int
+  ; slevel : bool
   ; data : bool
   ; strobe : bool
   }
@@ -146,7 +149,7 @@ end
 let random_sampler rs : Isa.Sampler_config.t =
   let rand n = Random.State.int rs n in
   let small () = if rand 8 = 0 then rand 32 else rand 10 in
-  { enable = rand 8 > 0
+  { Isa.Sampler_config.enable = rand 8 > 0
   ; pin = rand 8
   ; invert = rand 2 = 0
   ; sync_enable = rand 2 = 0
@@ -164,6 +167,28 @@ let random_sampler rs : Isa.Sampler_config.t =
        | 1 -> 0xFF
        | 2 -> rand 4 lsl 6
        | _ -> rand 256)
+  ; prescale = 0
+  ; shift = 0
+  ; stuff = 0
+  }
+  |> fun (c : Isa.Sampler_config.t) ->
+  (* The prescaler and the shift, from a stream of their own so that the
+     rest of a run is what it was before they existed: off in most runs,
+     and a prescaler mostly small, so that samples still come often. *)
+  let own = Random.State.make [| c.pin; c.blank; c.sample; c.wrap; c.sync; c.misses |] in
+  let rand n = Random.State.int own n in
+  { c with
+    prescale =
+      (match rand 6 with
+       | 0 | 1 | 2 -> 0
+       | 3 | 4 -> 1 + rand 4
+       | _ -> if rand 4 = 0 then rand 1024 else 1 + rand 12)
+  ; shift = (if rand 3 = 0 then rand 8 else 0)
+  ; stuff =
+      (match rand 6 with
+       | 0 | 1 | 2 -> 0
+       | 3 | 4 -> 1 + rand 3
+       | _ -> rand 8)
   }
 ;;
 
@@ -397,13 +422,17 @@ let basic_bins (model : Isa.t) ~words ~chain ~inputs =
     let smp = model.sampler in
     if executing && smp.config.enable
     then (
-      let data_pin = smp.config.pin in
+      let data_pin = (smp.config.pin + smp.config.shift) % Isa.num_pins in
       let pulse_pin = (data_pin + 1) % Isa.num_pins in
+      let looked what =
+        add what;
+        if smp.config.shift <> 0 then add "(sampler: looked at on pins shifted from its input)"
+      in
       match (Isa.Instruction.decode word).op with
       | Wait { pin; _ } when pin = pulse_pin ->
-        add (if smp.strobe then "(sampler: a WAIT sees its pulse)" else "(sampler: a WAIT sees no pulse)")
-      | Wait { pin; _ } when pin = data_pin -> add "(sampler: a WAIT looks at its bit)"
-      | In { src = Pins; _ } when th.config.in_base = data_pin -> add "(sampler: an IN takes its bit)"
+        looked (if smp.strobe then "(sampler: a WAIT sees its pulse)" else "(sampler: a WAIT sees no pulse)")
+      | Wait { pin; _ } when pin = data_pin -> looked "(sampler: a WAIT looks at its bit)"
+      | In { src = Pins; _ } when th.config.in_base = data_pin -> looked "(sampler: an IN takes its bit)"
       | _ -> ())
   done;
   let t0 = Isa.thread model 0
@@ -647,6 +676,9 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
        set i.smp.sample c.sample;
        set i.smp.wrap c.wrap;
        set i.smp.sync c.sync;
+       set i.smp.prescale c.prescale;
+       set i.smp.shift c.shift;
+       set i.smp.stuff c.stuff;
        (* The top level's falling-edge flip-flop: the sampler's own pin. *)
        set i.smp.fall ((pins_mid lsr c.pin) land 1));
       let pcs_before = List.init Rtl.num_threads ~f:(fun n -> (Isa.thread model n).pc) in
@@ -857,6 +889,9 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
         ; carrier = get q.carrier = 1
         ; synced = get q.synced = 1
         ; history = get q.history
+        ; pre = get q.pre
+        ; run = get q.run
+        ; slevel = get q.slevel = 1
         ; data = get q.data = 1
         ; strobe = get o.smp.strobe = 1
         }
@@ -870,6 +905,9 @@ let run ?coverage ?mutation ~rs (s : Scenario.t) =
         ; carrier = q.carrier
         ; synced = q.synced
         ; history = q.history
+        ; pre = q.pre
+        ; run = q.run
+        ; slevel = q.slevel
         ; data = q.data
         ; strobe = q.strobe
         }

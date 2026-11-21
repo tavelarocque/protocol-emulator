@@ -105,8 +105,32 @@ let sampler_sample (c : _ P.Sampler_in.t) (s : _ P.Sampler_state.t) level =
       ~default:s.missed
   in
   let carrier = accepted |: (s.carrier &: ~:lost) in
-  let is_bit = carrier &: (phase ==: c.sample) in
+  let is_taken = carrier &: (phase ==: c.sample) in
   let value = mux2 c.invert ~:level level in
+  (* "The sampler counts the run of equal recovered bits. A bit that follows
+     a run of exactly n and is the opposite of them is a stuff bit: it is
+     not passed on, does not enter the history, and counts as the first bit
+     of the next run." A bit that is the same as the run adds to it, up to
+     n + 1; with no carrier there is no run. *)
+  let limit = uresize c.stuff 4 in
+  let differs = value ^: s.slevel in
+  let stuffing = reduce ~f:( |: ) (bits_lsb c.stuff) in
+  let stuff_bit = is_taken &: stuffing &: differs &: (s.run ==: limit) in
+  let run =
+    priority_select_with_default
+      [ { valid = ~:carrier; value = zero 4 }
+      ; { valid = ~:is_taken; value = s.run }
+      ; { valid = differs; value = of_int ~width:4 1 }
+      ; { valid = s.run >: limit; value = s.run }
+      ]
+      ~default:(s.run +:. 1)
+  in
+  let slevel =
+    priority_select_with_default
+      [ { valid = ~:carrier; value = gnd }; { valid = is_taken; value } ]
+      ~default:s.slevel
+  in
+  let is_bit = is_taken &: ~:stuff_bit in
   let history = mux2 is_bit (concat_lsb [ select s.history 7 1; value ]) s.history in
   let passed = is_bit &: mux2 c.sync_enable s.synced vdd in
   ( { P.Sampler_state.last = level
@@ -115,6 +139,9 @@ let sampler_sample (c : _ P.Sampler_in.t) (s : _ P.Sampler_state.t) level =
     ; carrier
     ; synced = mux2 carrier (s.synced |: (is_bit &: (history ==: c.sync))) gnd
     ; history = mux2 carrier history (zero 8)
+    ; pre = s.pre
+    ; run
+    ; slevel
     ; data = mux2 passed value s.data
     }
   , passed )
@@ -187,14 +214,42 @@ let create ?(planted_chain_bug = false) (i : _ P.I.t) : _ P.O.t =
     let early = bit (log_shift srl sync2 i.smp.pin) 0 in
     let between, first_passed = sampler_sample i.smp now early in
     let after, second_passed = sampler_sample i.smp between smp_mid in
-    P.Sampler_state.iter2 next after ~f:(fun d v -> d <== (v &: repeat on (width v)));
-    now, reg spec (on &: (first_passed |: second_passed)) -- "smp_strobe"
+    (* "Or with [prescale] the earlier one alone, in one cycle of every
+       [prescale]": the cycle in which the count of cycles is 0. The count
+       goes up by one a cycle and back to 0 when one more would reach
+       [prescale]; an eleventh bit keeps that sum from wrapping. *)
+    let divided = reduce ~f:( |: ) (bits_lsb i.smp.prescale) in
+    let turn = now.pre ==:. 0 in
+    let one_more = uresize now.pre 11 +:. 1 in
+    let counted = mux2 (one_more <: uresize i.smp.prescale 11) (select one_more 9 0) (zero 10) in
+    let chosen =
+      P.Sampler_state.map3 now between after ~f:(fun held one both ->
+        priority_select_with_default
+          [ { valid = ~:divided; value = both }; { valid = turn; value = one } ]
+          ~default:held)
+    in
+    let chosen = { chosen with pre = counted &: repeat divided 10 } in
+    (* "The pulse for a bit then lasts until the next sample." *)
+    let pulse = wire 1 in
+    let pulse_now = reg spec pulse -- "smp_strobe" in
+    pulse
+    <== (on
+         &: priority_select_with_default
+              [ { valid = ~:divided; value = first_passed |: second_passed }
+              ; { valid = turn; value = first_passed }
+              ]
+              ~default:pulse_now);
+    P.Sampler_state.iter2 next chosen ~f:(fun d v -> d <== (v &: repeat on (width v)));
+    now, pulse_now
   in
   (* "With the bit sampler enabled, two pins show the threads what it has
      recovered instead of their own levels": the bit on its pin, the pulse on
-     the pin after it, counting round from 7 to 0. *)
+     the pin after it, counting round from 7 to 0. With [shift], both are
+     that many pins further round. *)
   let lines =
-    let shows_bit = binary_to_onehot i.smp.pin &: repeat i.smp.enable P.num_pins in
+    let shows_bit =
+      log_shift rotl (binary_to_onehot i.smp.pin) i.smp.shift &: repeat i.smp.enable P.num_pins
+    in
     let shows_pulse = rotl shows_bit 1 in
     (shows_bit &: repeat smp.data P.num_pins)
     |: (shows_pulse &: repeat smp_strobe P.num_pins)

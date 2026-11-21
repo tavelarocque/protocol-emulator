@@ -190,6 +190,7 @@ let%test_unit "configuration registers read back what was written" =
       ; smp_ctrl, 0x1FF
       ; smp_time, 0x7FFF
       ; smp_sync, 0xFF
+      ; smp_pre, 0xFFFF
       ]
     @ per_thread
     @ List.map per_thread ~f:(fun (a, m) -> Top.Addr.for_thread 1 a, m)

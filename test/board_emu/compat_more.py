@@ -179,6 +179,7 @@ _show("ethernet tx", _chip)
 _chip = _Recorder()
 set_sampler(_chip, pin=4, blank=0, sample=9, wrap=19, sync=0x7E, misses=7, invert=True)
 set_sampler(_chip, pin=7, blank=3, sample=1, wrap=6)
+set_sampler(_chip, pin=0, blank=0, sample=13, wrap=19, misses=7, prescale=4, shift=2, stuff=5)
 _show("sampler", _chip)
 
 _chip = _Recorder()

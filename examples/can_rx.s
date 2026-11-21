@@ -2,60 +2,114 @@
 ; Assemble or run it with pe_sim (bin/pe_sim.ml). Names in [brackets]
 ; are definitions in model/firmware.ml.
 ;
-; CAN (ISO 11898 classical CAN, through a transceiver): a transmitter and a
-; listen-only receiver, on the two threads. Firmware alone. The
-; transmitter makes the whole frame from the identifier and the data: bit
-; stuffing, CRC, arbitration, the ACK slot. What the pair is not: a full
-; node. It does not acknowledge other nodes' frames or send error frames,
-; which need the frame decoded as it arrives, on a clock recovered from
-; the bus, in the receiver.
+; CAN (ISO 11898 classical CAN, through a transceiver): a node, on the two
+; threads and the bit sampler. It sends data frames, receives every other
+; node's and acknowledges them. Firmware alone, 11-bit identifiers.
+;
+; What it leaves out: error frames and the error counters behind them (it
+; stays silent about a frame it finds wrong, as a node in the standard's
+; error-passive state does, and simply does not acknowledge it); overload
+; frames; extended identifiers, whose frames it neither receives nor
+; acknowledges; answering remote frames, which is the host's business.
 ;
 ; Pins: P0 = RXD (input, through the synchroniser), P1 = TXD (push-pull;
-; 0 is dominant). The receiver's bit is 10 ticks, so its CLKDIV = core
-; clock / (10 x bit rate): 8 for 125 kbit/s at 10 MHz. The transmitter's
-; is 20 ticks, at half that CLKDIV, so the core clock is 20 x the bit rate
-; x a whole number. The receiver hands the host what was on the wire, and
-; the host removes the stuffing and checks the frame ([Can.decode] here,
-; Can in the board driver).
+; 0 is dominant). P2 and P3 are taken: the sampler listens to P0 and shows
+; what it recovers there, two pins on, so that P0 is still the line itself
+; for the transmitter. A bit is 20 ticks for both threads and 20 samples
+; for the sampler: one CLKDIV for all three, the core clock / (20 x bit
+; rate): 4 for 125 kbit/s at 10 MHz. [Can.sampler] has the sampler's
+; settings: every edge restarts its phase, the bit is taken 13 samples
+; on, runs of equal bits are kept time through, and stuff bits are taken
+; out, so the receiver sees a frame's bits and nothing else.
 ;
-; The receiver, [can_rx], on thread 0, records every frame on the bus, the
-; transmitter's own included. It waits for a start of frame (RXD falling on
-; an idle bus), then samples each bit about 70% of the way through and
-; pushes the levels 15 to a word, the first in bit 0. Eight recessive bits
-; in a row end the frame: the bits left over are pushed as a last short
-; word (0 if there are none), then 0xFFFF, which no data word can be. The
-; stuffed bits come out as they were on the wire; [Can.decode] removes the
-; stuffing and checks the frame.
-; Resynchronisation: straight after each sample the receiver waits for
-; RXD to be low, for up to TIMEOUT = 4 ticks. After a dominant sample that
-; passes at once, and the next sample is 10 ticks after the last. After a
-; recessive one it is a watch for the falling edge that ends the bit: an
-; edge puts the next sample 7 ticks after itself; with none, the timeout
-; vector, [can_rx_same], samples again 10 ticks after the last. Which of
-; the two it was is read back from the bit just recorded (the receiver's
-; OUT takes the newest bit of a copy of the ISR, so its SHIFT has OUT most
-; significant first). Every path takes the same time whether or not a
-; word is pushed. Stuff bits guarantee a falling edge every 10 bits at
-; least, and the watch reaches 2 ticks either side of where the edge is
-; due, so the sender's clock may differ by 2%; CAN allows 1.58%.
+; The receiver, [can_rx], on thread 0. A pulse lasts one sample, which is
+; one tick of this thread, so each `wait 1 pin 3` meets the next bit. The
+; CRC register follows IN: every bit of the frame goes through it, and
+; after the last bit of the CRC it holds 0 if the frame is good.
+;
+; It waits for a dominant bit, the start of a frame, and takes the 14 bits
+; ID, RTR, IDE, r0. In r0, which is dominant in every frame, it looks at
+; TXD: low means thread 1 is sending this very frame (it cannot still be
+; low after losing arbitration, which is over by then), and a node does
+; not receive or acknowledge its own frame. Then the DLC, as many bytes as
+; it says (none in a remote frame; eight for 8 and above), and the 15 bits
+; of the CRC. If the CRC register holds 0, it drives TXD low for the ACK
+; slot: from 7 ticks after the pulse of the CRC delimiter, which is the
+; end of that bit or a tick past it, for 20 ticks.
+; After its own frame, after an extended one, and when it starts, it
+; waits for the line to stay recessive for ten bit times before it takes
+; a dominant bit for a start of frame. (After a frame with a wrong CRC it
+; does not wait: the next frame may come eleven bit times after that
+; one's last dominant bit, which can be five bits before its end. If the
+; next dominant bit is another node's ACK or an error flag instead, what
+; follows it reads as an extended frame or one more bad one.) That is a wait on RXD itself with
+; TIMEOUT = 200 ticks, and [Can.rx_idle] is its vector: the recovered
+; bits would not do, since with the stuff bits gone a frame's data can
+; be recessive for any number of them.
+;
+; RX words for a frame: the 14 bits ID, RTR, IDE, r0; then DLC, data and
+; CRC, 15 bits to a word, the last word short, and an empty word after it
+; when they fill their words exactly; then 0xFFFF if the frame was good
+; and acknowledged, 0xFFFE if not. Every other word is below 0x8000, so
+; the two marks cannot be taken for data ([Can.rx_frames]).
 ;
 ; The transmitter, [can_tx], on thread 1, is described below.
-idle:   wait 1 pin 0            ; the bus recessive...
-        wait 0 pin 0            ; ...then a start of frame
-        set y, 7 [5]
-smp:    in pins, 1              ; record RXD
-        wait 0 pin 0 timeout    ; recessive: watch for a falling edge
-        mov osr, isr            ; dominant, or it fell: which did we record?
-        out x, 1
-        jmp !x dom              ; recessive, so that was an edge: 7 ticks on
-chk:    jmp !isrf nf
-        push                    ; a full word, in the same 3 ticks
-        jmp smp
-nf:     jmp smp [1]
-dom:    set y, 7                ; dominant: 10 ticks after the last sample
-        jmp chk
-same:   jmp y-- chk             ; timeout vector: still recessive, no edge
-        push                    ; the 8th in a row: the frame is over
-        in y, 16                ; Y is 0xFFFF
-        push
+integ:  wait 1 pin 0            ; the line itself recessive...
+        wait 0 pin 0 timeout    ; ...and for ten bit times: between frames
+        jmp integ               ; it fell first: again
+idle:   wait 1 pin 2            ; timeout vector. (An ACK may still show)
+        wait 0 pin 2            ; a dominant bit: the start of a frame
+        mov crc, null
+        mov isr, null
+        set y, 13
+h:      wait 1 pin 3
+        in pins, 1
+        jmp y-- h               ; ID, RTR, IDE, r0
+        mov osr, pins           ; r0 is on the bus now, dominant: whose?
+        out null, 1
+        out y, 1                ; TXD
+        jmp !y integ            ; thread 1's: not received, not acknowledged
+        mov osr, isr
+        out null, 1             ; r0
+        out x, 1                ; IDE
+        jmp !x std
+        jmp integ               ; an extended frame: not for this receiver
+std:    out x, 1                ; RTR, kept in X
+        push                    ; the first word
+        set y, 3
+d:      wait 1 pin 3
+        in pins, 1
+        jmp y-- d
+        mov y, isr              ; the DLC
+        jmp !x data
+        jmp crc                 ; a remote frame has no data
+data:   mov osr, isr
+        out null, 3
+        out x, 1                ; the DLC's top bit: 8 and above, 8 bytes
+        jmp !x byte
+        set y, 8
+byte:   jmp y-- more
+        jmp crc
+more:   set x, 7
+b:      wait 1 pin 3
+        in pins, 1
+        jmp x-- b
+        jmp byte
+crc:    set y, 14
+c:      wait 1 pin 3
+        in pins, 1
+        jmp y-- c
+        mov x, crc              ; 0: nothing left over, the frame is good
+        wait 1 pin 3            ; the CRC delimiter
+        jmp !x ack
+        push                    ; bad: the bits left, then 0xFFFE
+        jmp y-- bad
+bad:    in y, 16
+        jmp idle                ; the next dominant bit may be a new frame
+ack:    nop [4]                 ; to the end of the delimiter
+        set pins, 0 [15]        ; the ACK slot, one bit long
+        nop [3]
+        set pins, 1
+        push                    ; the bits left, then 0xFFFF
+        in y, 16
         jmp idle

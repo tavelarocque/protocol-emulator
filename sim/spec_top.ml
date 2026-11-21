@@ -126,7 +126,10 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
      by". *)
   and smp_ctrl = config ~name:"cfg_smp_ctrl" ~width:9 0x6C
   and smp_time = config ~name:"cfg_smp_time" ~width:15 0x6D
-  and smp_sync = config ~name:"cfg_smp_sync" ~width:8 0x6E in
+  and smp_sync = config ~name:"cfg_smp_sync" ~width:8 0x6E
+  (* SMP_PRE: "[9:0] = its prescaler; [12:10] = how many pins on from its
+     own the threads see the recovered bit; [15:13] = stuff bits". *)
+  and smp_pre = config ~name:"cfg_smp_pre" ~width:16 0x67 in
   (* The sampler's pin as the falling clock edge finds it: the one register
      here that does not change on rising edges. *)
   let smp_fall =
@@ -219,6 +222,9 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
           ; sample = select smp_time 9 5
           ; wrap = select smp_time 14 10
           ; sync = smp_sync
+          ; prescale = select smp_pre 9 0
+          ; shift = select smp_pre 12 10
+          ; stuff = select smp_pre 15 13
           ; fall = smp_fall
           }
       ; t0 = thread_in 0
@@ -245,6 +251,7 @@ let create ?plant (i : _ T.I.t) : _ T.O.t =
     ; 0x6C, smp_ctrl
     ; 0x6D, smp_time
     ; 0x6E, smp_sync
+    ; 0x67, smp_pre
     ; (* SMP_STATUS: "bit 0 = carrier, bit 1 = sync word seen" *)
       0x6F, concat_lsb [ core.smp.state.carrier; core.smp.state.synced ]
     ]

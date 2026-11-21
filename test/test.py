@@ -1853,30 +1853,42 @@ async def _ps2_identify_ok(dut):
     return got == [0xFA, 0xAB, 0x83]
 
 
-# --- CAN: the chip's transmitter and listen-only receiver, and a node ------
+# --- CAN: the chip as a node, and another node -----------------------------
 #
 # dev_mode 9: RXD (P0) is the wired-AND of the chip's TXD (P1) and can_dev,
 # the node's drive. The node is written from ISO 11898-1's rules: it hard-
 # synchronises on a start of frame, resynchronises on later falling edges,
 # samples at 70%, removes stuff bits as they come, checks the CRC, drives
 # the ACK slot of a good frame, and can send a frame of its own. Its clock
-# is 1% slow. The driver's encoder is checked against the bits the OCaml
-# suite prints for the same frame (sim/test_can.ml).
+# is 1% slow. It is the only other thing on the bus, so an acknowledgement
+# of one of its frames is the chip's. Its frames' bits are checked against
+# the ones the OCaml suite prints for the same frame (sim/test_can.ml).
 
 CAN_BIT = 160  # core clocks: 62.5 kbit/s at 10 MHz
 CAN_NODE_BIT = 162
 CAN_VECTOR = "01010101010100000110000010000111110111001000010110001111"
 
 
-def can_frame_bits(ident, data):
+def can_crc15(bits):
+    crc = 0
+    for b in bits:
+        top = (crc >> 14) & 1
+        crc = (crc << 1) & 0x7FFF
+        if top ^ b:
+            crc ^= 0x4599
+    return crc
+
+
+def can_frame_bits(ident, data, crc_error=0):
     """A data frame on the wire (1 = recessive), from its start-of-frame
     bit to its ACK delimiter: what the node sends. Written here, apart
-    from the chip's stuffing and CRC, which are firmware."""
+    from the chip's stuffing and CRC, which are firmware. [crc_error] is
+    XORed into the CRC."""
     body = [0] + [(ident >> (10 - k)) & 1 for k in range(11)] + [0, 0, 0]
     body += [(len(data) >> (3 - k)) & 1 for k in range(4)]
     for byte in data:
         body += [(byte >> (7 - k)) & 1 for k in range(8)]
-    crc = pe.Can._crc15(body)
+    crc = can_crc15(body) ^ crc_error
     body += [(crc >> (14 - k)) & 1 for k in range(15)]
     out, last, run = [], -1, 0
     for b in body:
@@ -1891,7 +1903,7 @@ def can_frame_bits(ident, data):
 
 class CanNode:
     def __init__(self):
-        self.got, self.to_send, self.sent = [], [], 0
+        self.got, self.to_send, self.sent, self.acked = [], [], 0, 0
         self.phase, self.prev, self.idle = -1, 1, 0
         self.drive = 1
 
@@ -1917,7 +1929,7 @@ class CanNode:
                     self.state = "bad"
                 elif len(self.bits) == 34 + 8 * n:
                     body, crc = self.bits[:19 + 8 * n], self.bits[19 + 8 * n:]
-                    ok = int("".join(map(str, crc)), 2) == pe.Can._crc15(body)
+                    ok = int("".join(map(str, crc)), 2) == can_crc15(body)
                     self.state = "delim" if ok else "bad"
                     if ok and not self.sending:
                         ident = int("".join(map(str, body[1:12])), 2)
@@ -1943,9 +1955,16 @@ class CanNode:
                 self._start(self.to_send[0])
             return
         if fell and self.drive:
-            self.phase = 0  # resynchronise
+            # Resynchronise on an edge it did not cause: late in a bit, the
+            # next bit is starting; early in one, this one has just begun.
+            if self.phase > CAN_NODE_BIT // 2:
+                self.phase = CAN_NODE_BIT - 1
+            elif self.phase <= CAN_NODE_BIT // 4:
+                self.phase = 0
         self.phase += 1
         if self.phase == CAN_NODE_BIT * 7 // 10:
+            if len(self.sending) == 2 and not bus:
+                self.acked += 1  # the ACK slot of a frame it is sending
             self._sample(bus)
         if self.phase >= CAN_NODE_BIT:
             self.phase = 0
@@ -1971,36 +1990,46 @@ async def can_node(dut, node):
         dut.can_dev.value = node.drive
 
 
-def _can_session(chip, node):
+def _can_session(chip, node, stop_trace):
     can = pe.Can(chip, firmware("can"), bitrate=62_500)
     acked = can.send(0x123, [1, 2, 3])
     node.to_send.append(can_frame_bits(0x321, [0xAA, 0x55, 0x00, 0xFF]))
-    heard = []
-    while len(heard) < 2:
+    got = []
+    while len(got) < 1:
         f = can.receive()
         if f is not None:
-            heard.append(f)
-    return acked, heard
+            got.append(f)
+    while node.sent < 1 or node.phase >= 0:
+        chip.status()
+    stop_trace()
+    # A frame with a wrong CRC, then a good one: only the second comes out.
+    node.to_send.append(can_frame_bits(0x0F0, [0xDE, 0xAD], crc_error=0x0100))
+    node.to_send.append(can_frame_bits(0x0F1, [0xBE, 0xEF, 0x00, 0xFF, 0x00, 0xFF, 0x55, 0xAA]))
+    while len(got) < 2:
+        f = can.receive()
+        if f is not None:
+            got.append(f)
+    return acked, got
 
 
-@cocotb.test(timeout_time=300, timeout_unit="ms")
+@cocotb.test(timeout_time=400, timeout_unit="ms")
 async def test_can(dut):
-    """The driver sends a frame that a node receives and acknowledges, then
-    hears the node's own frame; and with no node, its frame goes
-    unacknowledged."""
+    """The chip as a CAN node. The driver sends a frame that the other
+    node receives and acknowledges. The other node sends one: the chip
+    acknowledges it and hands it over. A frame with a wrong CRC it neither
+    acknowledges nor hands over. With no other node, its own frame goes
+    unacknowledged, and it does not receive it itself."""
     assert "".join(map(str, can_frame_bits(0x555, [0x00, 0xFF]))) == CAN_VECTOR
     await reset(dut)
     node = CanNode()
     task = cocotb.start_soon(can_node(dut, node))
     trace = sigrok.Trace(dut, {"rxd": lambda: dut.can_bus.value})
     chip = pe.Chip(sim_port(dut))
-    acked, heard = await bridge(lambda: _can_session(chip, node))()
+    acked, got = await bridge(lambda: _can_session(chip, node, trace.stop))()
     task.cancel()
-    trace.stop()
     if sigrok.available():
         # sigrok's CAN decoder on the bus: the chip's frame, acknowledged by
-        # the node, then the node's, which nobody acknowledges (the chip
-        # only listens).
+        # the node, then the node's, acknowledged by the chip.
         def frames(t):
             found = t.decode("can:can_rx=rxd:nominal_bitrate=62500", "can=fields:warnings")
             return found, [text for _, _, text in found]
@@ -2009,7 +2038,7 @@ async def test_can(dut):
         assert sigrok.can_frames(seen) == [
             (0x123, [1, 2, 3], sigrok.can_crc15(0x123, [1, 2, 3]), "ACK"),
             (0x321, [0xAA, 0x55, 0x00, 0xFF],
-             sigrok.can_crc15(0x321, [0xAA, 0x55, 0x00, 0xFF]), "NACK"),
+             sigrok.can_crc15(0x321, [0xAA, 0x55, 0x00, 0xFF]), "ACK"),
         ], seen
         # One bit of the first data byte forced recessive: the decoder must
         # no longer report the frame as sent.
@@ -2020,7 +2049,10 @@ async def test_can(dut):
             wrong = None
         assert wrong is None or wrong[0][:3] != (0x123, [1, 2, 3], sigrok.can_crc15(0x123, [1, 2, 3]))
     assert acked and node.got == [(0x123, [1, 2, 3])], (acked, node.got)
-    assert heard == [(0x123, [1, 2, 3], True), (0x321, [0xAA, 0x55, 0x00, 0xFF], False)], heard
+    assert got == [(0x321, [0xAA, 0x55, 0x00, 0xFF], False),
+                   (0x0F1, [0xBE, 0xEF, 0x00, 0xFF, 0x00, 0xFF, 0x55, 0xAA], False)], got
+    # Three frames from the node; the chip acknowledged the two good ones.
+    assert (node.sent, node.acked) == (3, 2), (node.sent, node.acked)
 
     await reset(dut)
     dut.dev_mode.value = 9
@@ -2031,12 +2063,11 @@ async def test_can(dut):
     def alone():
         can = pe.Can(chip, firmware("can"), bitrate=62_500)
         acked = can.send(0x7FF, [])
-        f = None
-        while f is None:
-            f = can.receive()
-        return acked, f
+        for _ in range(20):
+            chip.status()
+        return acked, can.receive()
 
-    assert await alone() == (False, (0x7FF, [], False))
+    assert await alone() == (False, None)
 
 
 def _can_words_sixteen_bits(tx_words):
@@ -2063,6 +2094,48 @@ async def _can_send_ok(dut):
     return acked and node.got == [(0x100, [0x00, 0xFF, 0x00])]
 
 
+async def _can_receive_ok(dut):
+    node = CanNode()
+    task = cocotb.start_soon(can_node(dut, node))
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        can = pe.Can(chip, firmware("can"), bitrate=62_500)
+        # The receiver joins the bus after ten recessive bit times, as a CAN
+        # node must: the other node's eleven are counted from here.
+        node.idle = 0
+        node.to_send.append(can_frame_bits(0x2C3, [0x81, 0x7E, 0x00]))
+        for _ in range(400):
+            f = can.receive()
+            if f is not None:
+                return f
+        return None
+
+    try:
+        got = await session()
+    except pe.CanError:
+        got = None
+    task.cancel()
+    return got == (0x2C3, [0x81, 0x7E, 0x00], False)
+
+
+def _can_frame_words_of_sixteen(frame):
+    """The receiver's words read as 16 bits each: the last word's bits land
+    in the wrong places."""
+    def wrong(cls, words):
+        right = frame.__func__(cls, words)
+        if right is None:
+            return None
+        ident, data, remote = right
+        bits = [(w >> (15 - j)) & 1 for w in words[1:] for j in range(16)]
+        data = [sum(b << (7 - j) for j, b in enumerate(bits[4 + 8 * k:12 + 8 * k]))
+                for k in range(len(data))]
+        return ident, data, remote
+
+    return classmethod(wrong)
+
+
 DRIVER_BUGS = [
     ("pin modes packed one bit per pin", pe.Chip, "set_pin_modes",
      lambda _: _pin_modes_one_bit_per_pin, _flash_read_ok),
@@ -2080,6 +2153,8 @@ DRIVER_BUGS = [
      lambda _: staticmethod(_ps2_even_parity), _ps2_identify_ok),
     ("CAN frame's bits packed 16 to a word", pe.Can, "tx_words",
      _can_words_sixteen_bits, _can_send_ok),
+    ("CAN received words read 16 bits each", pe.Can, "frame",
+     _can_frame_words_of_sixteen, _can_receive_ok),
 ]
 
 

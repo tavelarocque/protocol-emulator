@@ -170,5 +170,7 @@ _out.append([list(_one.read_rom()), _one.ds18b20_temperature(), OneWire(_OneWire
 _out.append(onewire_crc8(bytes([0x02, 0x1C, 0xB8, 0x01, 0, 0, 0])))
 # CAN: the transmitter's words for a frame, and a recorded frame decoded.
 _out.append([Can.tx_words(0x555, [0x00, 0xFF]), Can.tx_words(0x7FF, []), Can.tx_words(0, list(range(8)))])
-_out.append(Can.decode([int(c) for c in "01010101010100000110000010000111110111001000010110001101"]))
+# 0x555 [00 ff]: the header, then DLC, data and CRC, 15 bits to a word.
+_out.append([Can.frame([0x2AA8, 0x1007, 0x7C85, 0x11]), Can.frame([0x2A << 3 | 4, 0x1800, 0x0003]),
+             Can.frame([0x7FF << 3, 0x0000])])
 print(repr(_out))

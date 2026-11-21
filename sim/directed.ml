@@ -592,6 +592,79 @@ lp:     wait 1 pin 3
     ]
 ;;
 
+(* The sampler as a slow line with one level to the bit and stuff bits needs
+   it, CAN for one: a line on pin 0, a sample every 3 cycles, 8 samples to
+   the bit, so a bit is 24 cycles. Every edge restarts the phase, the bit is
+   taken 3 samples on, and runs of equal bits are kept time through. One
+   edge comes a cycle late, between two samples.
+
+   No more than five equal bits in a row, so the bit after five is a stuff
+   bit and is taken out: after five 0s, then after the four 1s that follow
+   that stuff bit (it counts as the first of them), and not after seven 1s,
+   where the sixth is the same again and so nothing is stuffing until the
+   next 0.
+
+   What is left shows on pins 2 and 3, two on from the input: thread 0
+   waits for the pulse on 3, which lasts the 3 cycles of a sample, lets it
+   go, and takes the bit from 2, 16 to a word. Thread 1 keeps reading
+   pin 0, which must still be the line itself. *)
+let sampler_prescaled =
+  let bits =
+    [ 1; 1; 1 ]
+    @ [ 0; 0; 0; 0; 0 ] @ [ 1 ] (* stuff *)
+    @ [ 1; 1; 1; 1 ] @ [ 0 ] (* stuff *)
+    @ [ 0; 1; 0 ]
+    @ [ 1; 1; 1; 1; 1; 1; 1 ] (* too long to be stuffing *)
+    @ [ 0; 1; 0; 0; 1; 1; 0; 1; 0; 1; 1; 1 ]
+  in
+  let levels = Array.of_list (List.concat_map bits ~f:(fun b -> List.init 24 ~f:(fun _ -> b = 1))) in
+  (* the edge into the fourth bit, late *)
+  levels.(24 * 3) <- levels.((24 * 3) - 1);
+  let at k = if k < Array.length levels && not levels.(k) then 0 else 1 in
+  let wave = Array.init (Array.length levels + 40) ~f:(fun c -> at c, at c) in
+  make
+    ~name:"sampler: a slow line through the prescaler, stuff bits taken out, shown on shifted pins"
+    ~target:
+      [ "Sampler_prescale_one_long"
+      ; "Sampler_prescaled_takes_both"
+      ; "Sampler_shift_ignored"
+      ; "Sampler_pulse_not_held"
+      ; "Sampler_stuff_one_late"
+      ; "Sampler_stuff_drops_any"
+      ; "Sampler_stuff_bit_not_counted"
+      ]
+    ~modes:all_input
+    ~sampler:
+      { Isa.Sampler_config.off with
+        enable = true
+      ; pin = 0
+      ; misses = 7
+      ; blank = 0
+      ; sample = 3
+      ; wrap = 7
+      ; prescale = 3
+      ; shift = 2
+      ; stuff = 5
+      }
+    ~pins:(Wave wave)
+    ~cycles:(Array.length wave)
+    [ ( 0
+      , {|
+lp:     wait 1 pin 3
+        in pins, 1
+        wait 0 pin 3
+        jmp lp
+|}
+      , { cfg with in_base = 2; threshold = 16; autopush = true } )
+    ; ( 20
+      , {|
+lp:     in pins, 1 [6]
+        jmp lp
+|}
+      , { cfg with in_base = 0; threshold = 16; autopush = true } )
+    ]
+;;
+
 let all =
   [ pin_fight
   ; chain_backpressure
@@ -611,6 +684,7 @@ let all =
   ; buffer_records
   ; buffer_write_then_play
   ; sampler_receives
+  ; sampler_prescaled
   ]
 ;;
 

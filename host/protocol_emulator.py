@@ -54,6 +54,8 @@ CLKDIV = 0x4D
 SHIFT = 0x4F
 CRC_POLY = 0x61  # a thread's CRC polynomial: the low half, then the high half
 CRC_INIT = 0x63  # and what the register starts from, the same way
+SMP_PRE = 0x67  # the bit sampler: prescaler, pin shift, stuff bits
+SMP_CTRL, SMP_TIME, SMP_SYNC = 0x6C, 0x6D, 0x6E
 BANK = 0x10  # thread 1's registers are thread 0's plus this
 FIFO_DEPTH = 4
 PROGRAM_WORDS = 256  # in each thread's memory
@@ -833,54 +835,62 @@ class CanError(Exception):
 
 
 class Can:
-    """CAN (classical, 11-bit identifiers) through a transceiver such as an
-    SN65HVD230 (can.hex: the receiver on thread 0, the transmitter on thread
-    1): RXD on P0, TXD on P1. It sends data frames and hears every frame on
-    the bus, its own included. It is not a full node: it does not
-    acknowledge other nodes' frames, so the bus needs at least one node that
-    does, and it sends no error frames.
+    """A CAN node (classical, 11-bit identifiers) through a transceiver
+    such as an SN65HVD230 (can.hex): RXD on P0, TXD on P1; P2 and P3 are
+    taken too, by the bit sampler. It sends data frames, and receives and
+    acknowledges every other node's.
 
-    To send, the host gives the identifier and the data, and the chip makes
-    the frame: bit stuffing, the CRC, arbitration and the ACK slot. The
-    receiver hands over the bits as they were on the wire, and taking the
-    stuffing out and checking the CRC of a frame heard is here. The host
-    has to keep up: a word each way per 15 bit times while a frame is on
-    the bus, so use the PIO port (PioPort) above a few kbit/s."""
+    The chip does the frames: bit stuffing, the CRC, arbitration and the
+    ACK slot to send; clock recovery, taking the stuff bits out, checking
+    the CRC and acknowledging to receive. This code packs and unpacks
+    words. What the node leaves out: it sends no error frames (a frame it
+    finds wrong it simply does not acknowledge), it does not receive or
+    acknowledge frames with 29-bit identifiers, and a remote frame is
+    handed to the caller to answer.
 
-    RX_WORDS, RX_SAME, TX_LOST = 19, 14, 55
-    FRAME_END = 0xFFFF
+    While a frame arrives the host has to take a word per 15 bit times; if
+    it does not, the receiver stops, the frame goes unacknowledged, and
+    its sender sends it again. Use the PIO port (PioPort) above a few
+    kbit/s."""
+
+    TX_LOST, RX_START, RX_IDLE = 36, 128, 131
+    GOOD, BAD = 0xFFFF, 0xFFFE  # the receiver's marks after a frame
     CRC15 = 0x4CD1  # 0x4599 with its 15 bits reversed: the register shifts right
     ACKED, NOT_ACKED = 0, 1  # the transmitter's result; anything else: stopped
 
     def __init__(self, chip, image, clock_hz=10_000_000, bitrate=125_000):
         clkdiv = clock_hz // (20 * bitrate)
-        if clkdiv < 1 or clkdiv * 20 * bitrate != clock_hz:
+        if clkdiv < 1 or clkdiv > 1023 or clkdiv * 20 * bitrate != clock_hz:
             raise ValueError("the core clock must be 20 x bitrate x a whole number")
         self.chip = chip
         self._words, self._frames = [], []
         chip.stop()
+        chip.write(SMP_CTRL, 0)
         chip.load(image)
-        # The receiver's bit is 10 ticks and the transmitter's 20.
-        chip.configure(thread=0, start=0, in_base=0, threshold=15, timeout=4,
-                       timeout_vector=self.RX_SAME, clkdiv=2 * clkdiv, out_msb_first=True)
-        chip.configure(thread=1, start=self.RX_WORDS, out_base=1, out_count=1,
+        # A bit is 20 ticks for both threads and 20 samples for the sampler.
+        # The receiver: the recovered bit on P2, most significant first, 15
+        # to a word; its CRC follows IN; ten bit times of idle bus by a
+        # timed wait.
+        chip.configure(thread=0, start=self.RX_START, in_base=2, threshold=15,
+                       set_base=1, set_count=1, timeout=200,
+                       timeout_vector=self.RX_IDLE, clkdiv=clkdiv,
+                       in_msb_first=True, auto=2 | 8)
+        chip.configure(thread=1, start=0, out_base=1, out_count=1,
                        set_base=1, set_count=1, in_base=0, threshold=15, timeout=0,
                        timeout_vector=self.TX_LOST, clkdiv=clkdiv, auto=1)
-        for k, w in enumerate((self.CRC15, 0)):
-            chip.write(CRC_POLY + BANK + k, w)
-            chip.write(CRC_INIT + BANK + k, 0)
+        for bank in (0, BANK):
+            for k, w in enumerate((self.CRC15, 0)):
+                chip.write(CRC_POLY + bank + k, w)
+                chip.write(CRC_INIT + bank + k, 0)
         chip.set_pin_modes({1: PUSH_PULL})
+        # The sampler: RXD on P0, a sample every clkdiv cycles, the bit taken
+        # 13 samples after an edge, 20 samples to a bit, the carrier never
+        # lost; stuff bits after 5 equal bits taken out; shown on P2 and P3.
+        chip.write(SMP_PRE, clkdiv | (2 << 10) | (5 << 13))
+        chip.write(SMP_TIME, 0 | (13 << 5) | (19 << 10))
+        chip.write(SMP_SYNC, 0)
+        chip.write(SMP_CTRL, 1 | (0 << 1) | (7 << 6))
         chip.run(threads=(0, 1))
-
-    @staticmethod
-    def _crc15(bits):
-        crc = 0
-        for b in bits:
-            top = (crc >> 14) & 1
-            crc = (crc << 1) & 0x7FFF
-            if top ^ b:
-                crc ^= 0x4599
-        return crc
 
     @staticmethod
     def tx_words(ident, data):
@@ -903,54 +913,29 @@ class Can:
         return words
 
     @classmethod
-    def decode(cls, levels):
-        """(identifier, data, acknowledged) from a frame's recorded levels,
-        or None if its stuffing, fixed bits or CRC are wrong."""
-        pos, last, run = 0, -1, 0
-
-        def take(n):
-            nonlocal pos, last, run
-            out = []
-            while len(out) < n:
-                if pos >= len(levels):
-                    return None
-                b = levels[pos]
-                pos += 1
-                if run == 5:
-                    if b == last:
-                        return None
-                    last, run = b, 1
-                else:
-                    run = run + 1 if b == last else 1
-                    last = b
-                    out.append(b)
-            return out
-
-        def value(bits):
+    def frame(cls, words):
+        """(identifier, data, remote) from the receiver's words for one
+        frame, without its mark: 14 bits of identifier, RTR, IDE and r0,
+        then DLC, data and CRC, 15 bits to a word, the last word short."""
+        if len(words) < 2 or words[0] >= 0x4000:
+            return None
+        remote = bool((words[0] >> 2) & 1)
+        n = 0 if remote else min(words[1] >> 11, 8)
+        total = 4 + 8 * n + 15
+        full, short = total // 15, total % 15
+        if len(words) != 2 + full:
+            return None
+        bits = []
+        for k, w in enumerate(words[1:]):
+            width = 15 if k < full else short
+            bits += [(w >> (width - 1 - j)) & 1 for j in range(width)]
+        data = []
+        for k in range(n):
             v = 0
-            for b in bits:
+            for b in bits[4 + 8 * k:12 + 8 * k]:
                 v = (v << 1) | b
-            return v
-
-        head = take(19)
-        if head is None or head[0] or value(head[12:15]):
-            return None
-        n = value(head[15:19])
-        if n > 8:
-            return None
-        payload = take(8 * n)
-        crc = take(15) if payload is not None else None
-        if crc is None or value(crc) != cls._crc15(head + payload):
-            return None
-        if run == 5:  # a stuff bit can follow the CRC
-            if pos >= len(levels) or levels[pos] == last:
-                return None
-            pos += 1
-        tail = levels[pos:pos + 3]
-        if len(tail) < 3 or tail[0] != 1 or tail[2] != 1:
-            return None
-        return (value(head[1:12]),
-                [value(payload[8 * k:8 * k + 8]) for k in range(n)], tail[1] == 0)
+            data.append(v)
+        return (words[0] >> 3, data, remote)
 
     def _pump(self):
         """Moves what the receiver has pushed into frames."""
@@ -958,19 +943,12 @@ class Can:
             w = self.chip.try_pop(thread=0)
             if w is None:
                 return
-            if w != self.FRAME_END:
+            if w == self.GOOD:
+                self._frames.append(self.frame(self._words))
+            if w in (self.GOOD, self.BAD):
+                self._words = []
+            else:
                 self._words.append(w)
-                continue
-            levels = []
-            for k, word in enumerate(self._words):
-                n = 15
-                if k == len(self._words) - 1:
-                    n = 0
-                    while word >> n:
-                        n += 1
-                levels += [(word >> j) & 1 for j in range(n)]
-            self._words = []
-            self._frames.append(self.decode(levels))
 
     def send(self, ident, data, attempts=8):
         """Sends a data frame, again each time it loses arbitration. True
@@ -993,15 +971,17 @@ class Can:
         raise CanError("arbitration lost %d times" % attempts)
 
     def receive(self):
-        """The oldest frame heard and not yet returned, as (identifier,
-        data, acknowledged), or None if there is none. The chip's own frames
-        are among them. A frame that does not decode raises CanError."""
+        """The oldest frame received and not yet returned, as (identifier,
+        data, remote), or None if there is none. They are other nodes'
+        frames, each with a right CRC and acknowledged by the chip; its own
+        are not among them, and a frame it found wrong is dropped. Words
+        that are not a frame (the host fell behind) raise CanError."""
         self._pump()
         if not self._frames:
             return None
         frame = self._frames.pop(0)
         if frame is None:
-            raise CanError("a frame with a stuffing, form or CRC error")
+            raise CanError("the receiver's words are not a frame")
         return frame
 
 

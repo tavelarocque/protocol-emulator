@@ -65,7 +65,10 @@ let%expect_test "coverage of the differential test" =
     ; "(sampler: bit held back before the sync word)"; "(sampler: sync word seen)"
     ; "(sampler: both samples of a cycle are bits)"; "(sampler: a WAIT sees its pulse)"
     ; "(sampler: a WAIT sees no pulse)"; "(sampler: a WAIT looks at its bit)"
-    ; "(sampler: an IN takes its bit)"
+    ; "(sampler: an IN takes its bit)"; "(sampler: prescaled: a sample)"
+    ; "(sampler: prescaled: a cycle between samples)"
+    ; "(sampler: looked at on pins shifted from its input)"
+    ; "(sampler: stuff bit taken out)"; "(sampler: a run longer than the stuffing allows)"
     ]
   in
   List.iter required ~f:(fun key ->
@@ -81,96 +84,101 @@ let%expect_test "coverage of the differential test" =
   List.iter Lockstep.all_cross_bins ~f:(fun bin ->
     printf "%-50s %6d\n" bin (Hashtbl.find coverage.cross bin |> Option.value ~default:0));
   [%expect {|
-    (between divider ticks)                   58070    9.7%
-    (both threads drive pins in one cycle)    10772    1.8%
-    (both threads enabled)                   104742   17.4%
-    (buffer played a word)                     1720    0.3%
-    (buffer recorded a word)                    279    0.0%
-    (buffer: at its end)                       5020    0.8%
-    (buffer: no play in the cycle after a write)    199    0.0%
-    (buffer: play waits, TX full)             44448    7.4%
-    (buffer: the chain owns that FIFO)        13057    2.2%
-    (chain blocked: thread 1 TX full)          4954    0.8%
-    (chain moved a word)                        368    0.1%
-    (delay cycle)                             39283    6.5%
-    (held: memory written last cycle)           132    0.0%
-    (program write to a running thread: ignored)   1097    0.2%
-    (program write to a stopped thread)        2629    0.4%
-    (sampler: a WAIT looks at its bit)         5149    0.9%
-    (sampler: a WAIT sees its pulse)             92    0.0%
-    (sampler: a WAIT sees no pulse)            5088    0.8%
-    (sampler: an IN takes its bit)              226    0.0%
-    (sampler: bit held back before the sync word)   3943    0.7%
-    (sampler: bit passed on)                   5698    0.9%
-    (sampler: bit time without an edge: carried on)   8799    1.5%
-    (sampler: bit time without an edge: carrier lost)   1876    0.3%
-    (sampler: both samples of a cycle are bits)     67    0.0%
-    (sampler: edge accepted)                  17465    2.9%
-    (sampler: edge accepted: carrier found)    2214    0.4%
-    (sampler: edge ignored)                   47806    8.0%
-    (sampler: sync word seen)                   334    0.1%
-    (side-set driving pins)                   73190   12.2%
-    (thread disabled)                         15854    2.6%
-    in null                                    1038    0.2%
-    in pins                                    1122    0.2%
-    in x                                       1125    0.2%
-    in y                                       1095    0.2%
-    in: filled the ISR and pushed it (autopush)    939    0.2%
-    in: waiting, RX full (autopush)            4342    0.7%
-    jmp !isrf                                  1107    0.2%
-    jmp !osre                                   594    0.1%
-    jmp !x                                      828    0.1%
-    jmp !y                                     1033    0.2%
-    jmp (always)                               1832    0.3%
-    jmp x!=y                                    899    0.1%
-    jmp x--                                     656    0.1%
-    jmp y--                                    1091    0.2%
-    mov (reserved -> nop)                      1226    0.2%
-    mov from crc                                520    0.1%
-    mov to crc                                  754    0.1%
-    mov to isr                                  487    0.1%
-    mov to null                                 545    0.1%
-    mov to osr                                  424    0.1%
-    mov to pins                                 562    0.1%
-    mov to x                                    446    0.1%
-    mov to y                                    585    0.1%
-    nop                                        4976    0.8%
-    out null                                    940    0.2%
-    out pins                                    898    0.1%
-    out x                                      1023    0.2%
-    out y                                      1016    0.2%
-    out: emptied the OSR and refilled it (autopull)    824    0.1%
-    out: fetched a word (autopull)              230    0.0%
-    out: waiting for a word (autopull)         8804    1.5%
-    pull                                       2584    0.4%
-    pull: stalled, TX empty                   18583    3.1%
-    push                                       2490    0.4%
-    push: stalled, RX full                     6817    1.1%
-    set page                                   1120    0.2%
-    set pins                                   1173    0.2%
-    set x                                      1353    0.2%
-    set y                                      1417    0.2%
-    wait: condition met                        3719    0.6%
-    wait: stalled                             33842    5.6%
-    wait: stalled, spending timeout budget     9887    1.6%
-    wait: timed out                            1715    0.3%
+    (between divider ticks)                   58110    9.3%
+    (both threads drive pins in one cycle)    10924    1.8%
+    (both threads enabled)                   104850   16.9%
+    (buffer played a word)                     1745    0.3%
+    (buffer recorded a word)                    276    0.0%
+    (buffer: at its end)                       5259    0.8%
+    (buffer: no play in the cycle after a write)    195    0.0%
+    (buffer: play waits, TX full)             44567    7.2%
+    (buffer: the chain owns that FIFO)        12906    2.1%
+    (chain blocked: thread 1 TX full)          4781    0.8%
+    (chain moved a word)                        360    0.1%
+    (delay cycle)                             39015    6.3%
+    (held: memory written last cycle)           134    0.0%
+    (program write to a running thread: ignored)   1100    0.2%
+    (program write to a stopped thread)        2617    0.4%
+    (sampler: a WAIT looks at its bit)         6211    1.0%
+    (sampler: a WAIT sees its pulse)             77    0.0%
+    (sampler: a WAIT sees no pulse)            5454    0.9%
+    (sampler: a run longer than the stuffing allows)    266    0.0%
+    (sampler: an IN takes its bit)              233    0.0%
+    (sampler: bit held back before the sync word)   1871    0.3%
+    (sampler: bit passed on)                   3214    0.5%
+    (sampler: bit time without an edge: carried on)   5015    0.8%
+    (sampler: bit time without an edge: carrier lost)   1017    0.2%
+    (sampler: both samples of a cycle are bits)     27    0.0%
+    (sampler: edge accepted)                  10262    1.7%
+    (sampler: edge accepted: carrier found)    1360    0.2%
+    (sampler: edge ignored)                   30197    4.9%
+    (sampler: looked at on pins shifted from its input)   3567    0.6%
+    (sampler: prescaled: a cycle between samples)  29194    4.7%
+    (sampler: prescaled: a sample)            20541    3.3%
+    (sampler: stuff bit taken out)              325    0.1%
+    (sampler: sync word seen)                   184    0.0%
+    (side-set driving pins)                   73245   11.8%
+    (thread disabled)                         15746    2.5%
+    in null                                    1033    0.2%
+    in pins                                    1107    0.2%
+    in x                                       1124    0.2%
+    in y                                       1082    0.2%
+    in: filled the ISR and pushed it (autopush)    929    0.1%
+    in: waiting, RX full (autopush)            4735    0.8%
+    jmp !isrf                                  1067    0.2%
+    jmp !osre                                   592    0.1%
+    jmp !x                                      820    0.1%
+    jmp !y                                     1050    0.2%
+    jmp (always)                               1759    0.3%
+    jmp x!=y                                    883    0.1%
+    jmp x--                                     709    0.1%
+    jmp y--                                    1105    0.2%
+    mov (reserved -> nop)                      1230    0.2%
+    mov from crc                                506    0.1%
+    mov to crc                                  755    0.1%
+    mov to isr                                  504    0.1%
+    mov to null                                 559    0.1%
+    mov to osr                                  429    0.1%
+    mov to pins                                 575    0.1%
+    mov to x                                    440    0.1%
+    mov to y                                    577    0.1%
+    nop                                        4935    0.8%
+    out null                                    943    0.2%
+    out pins                                    864    0.1%
+    out x                                      1013    0.2%
+    out y                                       956    0.2%
+    out: emptied the OSR and refilled it (autopull)    851    0.1%
+    out: fetched a word (autopull)              225    0.0%
+    out: waiting for a word (autopull)         8696    1.4%
+    pull                                       2548    0.4%
+    pull: stalled, TX empty                   18723    3.0%
+    push                                       2469    0.4%
+    push: stalled, RX full                     6153    1.0%
+    set page                                   1089    0.2%
+    set pins                                   1124    0.2%
+    set x                                      1312    0.2%
+    set y                                      1416    0.2%
+    wait: condition met                        3681    0.6%
+    wait: stalled                             34533    5.6%
+    wait: stalled, spending timeout budget     9971    1.6%
+    wait: timed out                            1923    0.3%
 
-    pins: both threads write the same pin                5292
-    chain: move into thread 1 TX holding 0                185
-    chain: move into thread 1 TX holding 1                 61
+    pins: both threads write the same pin                5248
+    chain: move into thread 1 TX holding 0                179
+    chain: move into thread 1 TX holding 1                 58
     chain: move into thread 1 TX holding 2                 45
-    chain: move into thread 1 TX holding 3                 77
-    chain: move in a cycle thread 1 pulls                   6
-    chain: move in a cycle thread 0 pushes                  6
-    chain: thread 0 PUSH stalled behind a full chain     1445
-    divider: timed wait expires on a divided thread       461
-    divider: delay counted on a divided thread          10612
-    divider: side-set on a divided thread               15259
-    enable: disabled during a delay                       207
+    chain: move into thread 1 TX holding 3                 78
+    chain: move in a cycle thread 1 pulls                   3
+    chain: move in a cycle thread 0 pushes                  4
+    chain: thread 0 PUSH stalled behind a full chain     1040
+    divider: timed wait expires on a divided thread       450
+    divider: delay counted on a divided thread          10447
+    divider: side-set on a divided thread               15374
+    enable: disabled during a delay                       198
     enable: disabled during a timed wait                   43
-    enable: disabled between divider ticks                213
-    side-set: driven during a stall                     38160
-    fifo: both threads stalled on FIFOs                  1032
+    enable: disabled between divider ticks                211
+    side-set: driven during a stall                     38071
+    fifo: both threads stalled on FIFOs                  1029
     |}]
 ;;
 
@@ -210,13 +218,20 @@ let%expect_test "every planted bug in the core is caught" =
     Crc_ignores_direction        caught by program #1
     Crc_read_keeps_running       caught by program #7
     Play_ignores_full            caught by program #1
-    Play_past_end                caught by program #24
-    Record_keeps_host_pop        caught by program #46
+    Play_past_end                caught by program #23
+    Record_keeps_host_pop        caught by program #23
     Play_after_write             caught by program #8
     Sampler_samples_swapped      caught by program #1
     Sampler_blank_one_short      caught by program #1
     Sampler_passes_before_sync   caught by program #2
-    Sampler_keeps_carrier        caught by program #1
-    Sampler_pulse_on_wrong_pin   caught by program #1
+    Sampler_keeps_carrier        caught by program #2
+    Sampler_pulse_on_wrong_pin   caught by program #4
+    Sampler_prescale_one_long    caught by program #1
+    Sampler_prescaled_takes_both caught by program #1
+    Sampler_shift_ignored        caught by program #1
+    Sampler_pulse_not_held       caught by program #2
+    Sampler_stuff_one_late       caught by program #1
+    Sampler_stuff_drops_any      caught by program #1
+    Sampler_stuff_bit_not_counted caught by program #1
     |}]
 ;;

@@ -409,6 +409,9 @@ let%test_unit "sampler: NRZ data, with runs of equal bits, from a sender 2% off"
     ; blank = 0
     ; sample = 9
     ; wrap = 19
+    ; prescale = 0
+    ; shift = 0
+    ; stuff = 0
     }
   in
   List.iter [ -2.; 0.; 2. ] ~f:(fun percent ->

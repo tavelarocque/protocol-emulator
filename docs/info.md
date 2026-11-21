@@ -62,6 +62,7 @@ it set on MISO.
 | 0x69 | BUF_PTR (global): the buffer's pointer, 0 to 1023. A write sets it; it reads back as it stands |
 | 0x6A | BUF_END (global): playing and recording stop when the pointer gets here |
 | 0x6B | BUF_DATA (global): a write stores at the pointer, a read returns the word there, and each moves the pointer on; only while BUF_CTRL is 0 |
+| 0x67 | SMP_PRE (global): three more settings of the bit sampler, all 0 after reset. [9:0] its prescaler: 0 for two samples a clock cycle, otherwise one sample every that many cycles, and the pulse lasts as long; [12:10] how many pins on from its own the threads see the recovered bit, with the pulse on the pin after that; [15:13] stuff bits: the opposite bit after a run of that many equal bits is taken out (0: off) |
 | 0x6C | SMP_CTRL (global): the bit sampler. Bit 0 on; [3:1] its pin (the threads then see the recovered bit on that pin and a pulse for each bit on the next); bit 4 invert; bit 5 pass bits on only after SMP_SYNC has been seen; [8:6] bit times without an edge before the carrier is lost (7: never) |
 | 0x6D | SMP_TIME (global), in samples, two to a clock cycle: [4:0] the phase from which an edge is accepted, [9:5] the phase at which a bit is taken, [14:10] the phase at which a bit time has gone by |
 | 0x6E | SMP_SYNC (global): the sync word, 8 bits, first bit lowest |
@@ -156,24 +157,43 @@ its odd parity in bit 8, a 1 in bit 9), and one RX word back, 0 if the
 device acknowledged, 1 if not, 3 if it never clocked. The board driver's
 `Ps2` has `read()` and `write()`.
 
-CAN (classical, 11-bit identifiers): `test/can.hex` (110 words), RXD on P0
-and TXD on P1 through a 3.3 V transceiver. The core clock must be 20 x the
-bit rate x a whole number. Thread 0, the receiver, has a bit of 10 ticks:
-its CLKDIV is the core clock / (10 x bit rate), 8 for 125 kbit/s at
-10 MHz. Thread 1, the transmitter, has a bit of 20 ticks, so half that
-CLKDIV; it also needs THRESHOLD 15, autopull, SET_CFG and OUT_CFG on P1,
-TIMEOUT 0, TIMEOUT_VECTOR 55, CRC_POLY 0x4CD1 and CRC_INIT 0. It takes the
-number of bits less one, then the bits from the identifier to the end of
-the data, 15 to a word, and makes the frame itself: start bit, bit
-stuffing, CRC, arbitration. It reports 0 if a node acknowledged the frame,
-1 if none did, 2 if it lost arbitration and the frame should be sent
-again. Send one frame at a time. Thread 0 records every frame on the bus,
-15 bit levels to a word, 0xFFFF after each frame; taking the stuffing out
-of those and checking their CRC is in the board driver's `Can` (`send`,
-`receive`). It is not a full node: it does not acknowledge other nodes'
-frames or send error frames, so the bus needs at least one node that
-acknowledges. While a frame is on the bus the host must move a word each
-way every 15 bit times.
+CAN (classical, 11-bit identifiers): `test/can.hex` (187 words), RXD on P0
+and TXD on P1 through a 3.3 V transceiver; P2 and P3 are taken by the bit
+sampler. The chip is a node: it sends data frames and receives and
+acknowledges other nodes'. The core clock must be 20 x the bit rate x a
+whole number n, and n is CLKDIV for both threads and the sampler's
+prescaler: 4 for 125 kbit/s at 10 MHz.
+
+The sampler listens to P0 and shows the recovered bits on P2 with a pulse
+for each on P3: SMP_PRE = n | 2 << 10 | 5 << 13 (prescaler n, two pins on,
+stuff bits after 5 equal bits taken out), SMP_TIME 0x4DA0 (every edge
+accepted, the bit taken 13 samples after one, 20 samples to a bit),
+SMP_CTRL 0x1C1 (on, pin 0, the carrier never lost).
+
+Thread 1, the transmitter, starts at 0: THRESHOLD 15, autopull, SET_CFG
+and OUT_CFG on P1, TIMEOUT 0, TIMEOUT_VECTOR 36, CRC_POLY 0x4CD1,
+CRC_INIT 0. It takes the number of bits less one, then the bits from the
+identifier to the end of the data, 15 to a word, and makes the frame
+itself: start bit, bit stuffing, CRC, arbitration. It reports 0 if a node
+acknowledged the frame, 1 if none did, 2 if it lost arbitration and the
+frame should be sent again. Send one frame at a time.
+
+Thread 0, the receiver, starts at 128: IN_BASE 2, THRESHOLD 15, IN most
+significant bit first, autopush, the CRC register following IN, SET_CFG
+on P1, TIMEOUT 200, TIMEOUT_VECTOR 131, CRC_POLY 0x4CD1, CRC_INIT 0. For
+each frame from another node it pushes the 14 bits identifier, RTR, IDE
+and r0; then DLC, data and CRC in words of 15 bits, the last one short;
+then 0xFFFF if the CRC was right, in which case it has acknowledged the
+frame, or 0xFFFE if not. The board driver's `Can` does all of this
+(`send`, `receive`).
+
+It sends no error frames: a frame it finds wrong it does not acknowledge.
+It does not receive or acknowledge frames with 29-bit identifiers. When it
+is started it waits for the bus to be recessive for ten bit times before
+it takes a frame, so a frame already under way, or one that starts sooner
+than that, is not received. While
+a frame arrives the host must take a word every 15 bit times; if it does
+not, the receiver stops and the frame goes unacknowledged.
 
 Low-speed USB host: `test/usb_host.hex` holds the USB engine (49 words, at
 5) and the echo program (at 0), which relays to it through CHAIN so the two

@@ -1,4 +1,4 @@
-# Protocol emulator ISA, v2.2
+# Protocol emulator ISA, v2.3
 
 This document describes the instruction set in prose. The normative version
 is the executable model in `model/isa.ml`: where the two disagree, the model
@@ -221,6 +221,33 @@ already has: `wait 1 pin` on the pulse, `in pins, 1` for the bit, and
 accepted less than `blank` + 1 samples apart, so with `blank` 5 the pulses
 are at least three cycles apart and a three-instruction loop always keeps
 up.
+
+Three more settings fit it to slower lines and to codes with stuff bits.
+All three are 0 after reset, which is everything above.
+
+- **A prescaler.** With `prescale` n, from 1 to 1023, a sample is n whole
+  clock cycles: the sampler looks at its pin once every n cycles, at the
+  rising edge only. The three timing numbers still count samples, so a bit
+  can last up to 32 n cycles: CAN at 125 kbit/s on a 10 MHz clock is 20
+  samples of 4 cycles. The pulse for a bit then lasts until the next
+  sample, n cycles, so a thread whose clock divider is also n sees each
+  pulse in exactly one of its ticks, and its delays count samples.
+- **A shift.** With `shift` k the recovered bit shows k pins on from the
+  sampler's own pin and the pulse on the pin after that (counting round
+  from 7 to 0). The input pin then still shows the line itself, for a
+  thread that has to read it as it is: a CAN transmitter, which must see
+  what the bus is doing now and not what the last bit was.
+- **Stuff bits.** Some codes never send more than n equal bits in a row:
+  after n of them the sender puts in one bit of the opposite level, which
+  carries nothing. With `stuff` n, from 1 to 7, the sampler counts the run
+  of equal recovered bits, and a bit that follows a run of exactly n and
+  is their opposite is taken out: it is not passed on, does not enter the
+  history, and counts as the first bit of the next run. A bit that follows
+  a run of n and is the same again was not stuffing (an idle line, an
+  end-of-frame mark, an error flag): it is passed on like any other, and
+  so is every bit after it up to and including the next one that differs,
+  which starts a run of one. So a frame that begins after an idle line
+  begins with a bit that is passed on.
 
 How much jitter it stands is set by the sample spacing and nothing else.
 Each edge resets the phase, so what matters is the distance between two
@@ -528,6 +555,19 @@ rates.
   8 samples a bit, and does only the timing. Its numbers are registers, in
   samples, so the same block recovers other Manchester and NRZ codes up to
   a quarter of the clock rate.
+
+- **v2.3.** Three settings on the bit sampler, in one new register and all
+  off after reset: a prescaler, a shift of the pins its bits show on, and
+  the removal of stuff bits. No instruction changed. They came from
+  writing a CAN node that acknowledges. Its receiver has to decode a frame
+  as it arrives, on a clock recovered from the bus. v2.2's sampler
+  recovers one, but only for bits of 16 clocks or less, where the host
+  port cannot carry a frame's words: hence the prescaler. A transmitter
+  needs the line as it is while the receiver needs the bits: hence the
+  shift. And following stuff bits in firmware takes a run counter, a field
+  counter, the last level and a scratch register at once, which is two
+  more than a thread has: hence their removal, in the block that already
+  does the line coding.
 
 ## Open questions for review
 

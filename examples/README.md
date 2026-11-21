@@ -21,7 +21,7 @@ them, so they cannot drift.
 | [`usb.s`](usb.s) | Low-speed USB: send, and receive with clock recovery | 49 |
 | [`onewire.s`](onewire.s) | 1-Wire bus engine | 25 |
 | [`ps2_rx.s`](ps2_rx.s), [`ps2_tx.s`](ps2_tx.s) | PS/2 host: receiver and transmitter, one on each thread | 11 + 21 |
-| [`can_rx.s`](can_rx.s), [`can_tx.s`](can_tx.s) | CAN: listen-only receiver, and a transmitter that stuffs the bits and makes the CRC, one on each thread | 19 + 89 |
+| [`can_rx.s`](can_rx.s), [`can_tx.s`](can_tx.s) | CAN node: a receiver that checks the CRC and acknowledges, behind the bit sampler, and a transmitter that stuffs the bits and makes the CRC, one on each thread | 59 + 89 |
 | [`i2s_tx.s`](i2s_tx.s) | I2S transmitter, 16-bit stereo | 11 |
 | [`dmx_tx.s`](dmx_tx.s) | DMX512 transmitter | 26 |
 | [`wiegand_tx.s`](wiegand_tx.s) | Wiegand transmitter | 17 |

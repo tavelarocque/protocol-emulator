@@ -80,31 +80,38 @@ let%expect_test "the directed suite catches every planted bug" =
     if List.is_empty catchers then raise_s [%message "mutant survived" name];
     printf "%-28s caught by %d of %d\n" name (List.length catchers) (List.length Directed.all));
   [%expect {|
-    Xdec_never_decrements        caught by 2 of 18
-    Wait_timeout_ignores_budget  caught by 3 of 18
-    Delay_field_ignored          caught by 4 of 18
-    Set_pins_count_off_by_one    caught by 4 of 18
-    Push_not_right_justified     caught by 3 of 18
-    Pin_priority_inverted        caught by 1 of 18
-    Fetch_port_crossed           caught by 18 of 18
-    Chain_ignores_full           caught by 3 of 18
-    Push_ignores_in_direction    caught by 1 of 18
-    Sync_bypass_inverted         caught by 2 of 18
-    Jump_ignores_page            caught by 1 of 18
-    Write_lands_while_running    caught by 1 of 18
-    No_hold_after_write          caught by 1 of 18
-    Autopull_ignores_empty       caught by 1 of 18
-    Autopush_ignores_full        caught by 1 of 18
-    Crc_ignores_direction        caught by 1 of 18
-    Crc_read_keeps_running       caught by 1 of 18
-    Play_ignores_full            caught by 2 of 18
-    Play_past_end                caught by 2 of 18
-    Record_keeps_host_pop        caught by 1 of 18
-    Play_after_write             caught by 1 of 18
-    Sampler_samples_swapped      caught by 1 of 18
-    Sampler_blank_one_short      caught by 1 of 18
-    Sampler_passes_before_sync   caught by 1 of 18
-    Sampler_keeps_carrier        caught by 1 of 18
-    Sampler_pulse_on_wrong_pin   caught by 1 of 18
+    Xdec_never_decrements        caught by 2 of 19
+    Wait_timeout_ignores_budget  caught by 3 of 19
+    Delay_field_ignored          caught by 5 of 19
+    Set_pins_count_off_by_one    caught by 4 of 19
+    Push_not_right_justified     caught by 3 of 19
+    Pin_priority_inverted        caught by 1 of 19
+    Fetch_port_crossed           caught by 19 of 19
+    Chain_ignores_full           caught by 3 of 19
+    Push_ignores_in_direction    caught by 1 of 19
+    Sync_bypass_inverted         caught by 3 of 19
+    Jump_ignores_page            caught by 1 of 19
+    Write_lands_while_running    caught by 1 of 19
+    No_hold_after_write          caught by 1 of 19
+    Autopull_ignores_empty       caught by 1 of 19
+    Autopush_ignores_full        caught by 2 of 19
+    Crc_ignores_direction        caught by 1 of 19
+    Crc_read_keeps_running       caught by 1 of 19
+    Play_ignores_full            caught by 2 of 19
+    Play_past_end                caught by 2 of 19
+    Record_keeps_host_pop        caught by 1 of 19
+    Play_after_write             caught by 1 of 19
+    Sampler_samples_swapped      caught by 1 of 19
+    Sampler_blank_one_short      caught by 1 of 19
+    Sampler_passes_before_sync   caught by 1 of 19
+    Sampler_keeps_carrier        caught by 1 of 19
+    Sampler_pulse_on_wrong_pin   caught by 2 of 19
+    Sampler_prescale_one_long    caught by 1 of 19
+    Sampler_prescaled_takes_both caught by 1 of 19
+    Sampler_shift_ignored        caught by 1 of 19
+    Sampler_pulse_not_held       caught by 1 of 19
+    Sampler_stuff_one_late       caught by 1 of 19
+    Sampler_stuff_drops_any      caught by 1 of 19
+    Sampler_stuff_bit_not_counted caught by 2 of 19
     |}]
 ;;

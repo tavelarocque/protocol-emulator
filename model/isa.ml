@@ -457,7 +457,30 @@ end
    on only after that register has held [sync]: for Ethernet 0xD5, the last
    byte before the frame. Each bit passed on shows on two pins as the
    threads see them, whatever those pins' modes: the bit itself on [pin],
-   held until the next one, and a pulse one cycle long on the pin after it. *)
+   held until the next one, and a pulse one cycle long on the pin after it.
+
+   Three more settings, all 0 for all of the above.
+
+   [prescale] n, 1 to 1023, makes a sample n whole cycles: the sampler then
+   looks at its pin once every n cycles, at the rising edge only, so a bit
+   can be up to 32 n cycles long. The pulse for a bit then lasts until the
+   next sample, n cycles, so that a thread whose clock divider is n sees
+   each pulse in exactly one of its ticks.
+
+   With [shift] the two pins the threads see are [shift] pins further on
+   (pin + shift, and the one after it, counting round from 7 to 0), which
+   leaves the input itself as it is for a thread that needs the line and
+   not the bits.
+
+   [stuff] n, 1 to 7, takes stuff bits out, for codes that never send more
+   than n equal bits in a row and put the opposite bit in after n of them.
+   The sampler counts the run of equal recovered bits. A bit that follows a
+   run of exactly n and is the opposite of them is a stuff bit: it is not
+   passed on, does not enter the history, and counts as the first bit of
+   the next run. A bit that follows a run of n and is the same again is not
+   stuffing at all (an idle line, an end-of-frame mark): it is passed on
+   like any bit, and so is every bit after it up to and including the next
+   one that differs, which starts a run of one. *)
 module Sampler_config = struct
   type t =
     { enable : bool
@@ -469,6 +492,9 @@ module Sampler_config = struct
     ; sample : int (* 0..31 *)
     ; wrap : int (* 0..31 *)
     ; sync : int (* 8 bits, first bit lowest *)
+    ; prescale : int (* 0: two samples a cycle; 1..1023: one sample every that many cycles *)
+    ; shift : int (* 0..7: the threads see the bit on pin + shift, the pulse on the next *)
+    ; stuff : int (* 0: off; 1..7: the longest run of equal bits before a stuff bit *)
     }
   [@@deriving sexp_of]
 
@@ -482,6 +508,9 @@ module Sampler_config = struct
     ; sample = 0
     ; wrap = 0
     ; sync = 0
+    ; prescale = 0
+    ; shift = 0
+    ; stuff = 0
     }
   ;;
 end
@@ -498,6 +527,9 @@ module Sampler = struct
     ; mutable carrier : bool
     ; mutable synced : bool (* the sync word has been seen since the carrier came *)
     ; mutable history : int (* the last 8 recovered bits *)
+    ; mutable pre : int (* cycles since the last sample, with [prescale] *)
+    ; mutable run : int (* equal recovered bits in a row, counted to [stuff] + 1 *)
+    ; mutable slevel : bool (* and what they are *)
     ; mutable data : bool (* what the threads see on [pin] *)
     ; mutable strobe : bool (* and on the pin after it *)
     ; events : (string, int) Hashtbl.t
@@ -514,6 +546,9 @@ module Sampler = struct
     ; carrier = false
     ; synced = false
     ; history = 0
+    ; pre = 0
+    ; run = 0
+    ; slevel = false
     ; data = false
     ; strobe = false
     ; events = Hashtbl.create (module String)
@@ -529,6 +564,9 @@ module Sampler = struct
     t.carrier <- false;
     t.synced <- false;
     t.history <- 0;
+    t.pre <- 0;
+    t.run <- 0;
+    t.slevel <- false;
     t.data <- false;
     t.strobe <- false
   ;;
@@ -562,10 +600,27 @@ module Sampler = struct
     then (
       t.synced <- false;
       t.history <- 0;
+      t.run <- 0;
+      t.slevel <- false;
       false)
-    else if t.phase = c.sample
-    then (
+    else if t.phase <> c.sample
+    then false
+    else (
       let bit = Bool.( <> ) level c.invert in
+      (* The run of equal bits, and whether this one is a stuff bit. *)
+      let same = Bool.equal bit t.slevel in
+      let stuffed = c.stuff <> 0 && t.run = c.stuff && not same in
+      if c.stuff <> 0 && t.run = c.stuff && same then note "a run longer than the stuffing allows";
+      if same
+      then (if t.run <= c.stuff then t.run <- t.run + 1)
+      else (
+        t.slevel <- bit;
+        t.run <- 1);
+      if stuffed
+      then (
+        note "stuff bit taken out";
+        false)
+      else (
       let pass = t.synced || not c.sync_enable in
       t.history <- (Bool.to_int bit lsl 7) lor (t.history lsr 1);
       if t.history = c.sync && not t.synced
@@ -574,19 +629,31 @@ module Sampler = struct
         t.synced <- true);
       note (if pass then "bit passed on" else "bit held back before the sync word");
       if pass then t.data <- bit;
-      pass)
-    else false
+      pass))
   ;;
 
-  (* One clock cycle: the two samples in the order they were taken. *)
+  (* One clock cycle: the two samples in the order they were taken, or
+     with [prescale] the earlier one alone, in one cycle of every
+     [prescale]; the pulse then stays as that sample left it until the
+     next. *)
   let cycle t ~early ~late =
-    if not t.config.enable
+    let c = t.config in
+    if not c.enable
     then reset t
-    else (
+    else if c.prescale = 0
+    then (
+      t.pre <- 0;
       let a = sample t early in
       let b = sample t late in
       if a && b then Hashtbl.incr t.events "both samples of a cycle are bits";
       t.strobe <- a || b)
+    else (
+      if t.pre = 0
+      then (
+        Hashtbl.incr t.events "prescaled: a sample";
+        t.strobe <- sample t early)
+      else Hashtbl.incr t.events "prescaled: a cycle between samples";
+      t.pre <- (if t.pre + 1 >= c.prescale then 0 else t.pre + 1))
   ;;
 end
 
@@ -951,7 +1018,7 @@ let seen_lines t ~inputs =
   then lines
   else (
     let put lines pin level = lines land lnot (1 lsl pin) lor (Bool.to_int level lsl pin) in
-    let pin = s.config.pin in
+    let pin = (s.config.pin + s.config.shift) % num_pins in
     put (put lines pin s.data) ((pin + 1) % num_pins) s.strobe)
 ;;
 
@@ -1085,6 +1152,9 @@ let set_sampler t (c : Sampler_config.t) =
      ; sample = c.sample land mask 5
      ; wrap = c.wrap land mask 5
      ; sync = c.sync land mask 8
+     ; prescale = c.prescale land mask 10
+     ; shift = c.shift land mask 3
+     ; stuff = c.stuff land mask 3
      }
 ;;
 

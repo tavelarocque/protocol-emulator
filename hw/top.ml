@@ -52,6 +52,13 @@
      0x6B       BUF_DATA (global): a write stores at the pointer and a read
                 returns the word there, and each moves the pointer on.
                 Only while BUF_CTRL leaves the buffer to the host
+     0x67       SMP_PRE (global): three more settings of the bit sampler,
+                all 0 after reset. [9:0] = its prescaler: 0 for two samples
+                a clock cycle, otherwise one sample every that many cycles;
+                [12:10] = how many pins on from its own the threads see
+                the recovered bit (the pulse on the pin after that);
+                [15:13] = stuff bits: the opposite bit after a run of that
+                many equal bits is taken out (0: off)
      0x6C       SMP_CTRL (global): the bit sampler. Bit 0 = on; [3:1] =
                 its pin (the threads then see the recovered bit there and
                 a pulse for each bit on the next pin); bit 4 = invert;
@@ -124,6 +131,7 @@ module Addr = struct
   let buf_ptr = 0x69
   let buf_end = 0x6A
   let buf_data = 0x6B
+  let smp_pre = 0x67
   let smp_ctrl = 0x6C
   let smp_time = 0x6D
   let smp_sync = 0x6E
@@ -213,6 +221,7 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
   let smp_ctrl = config "cfg_smp_ctrl" 9 in
   let smp_time = config "cfg_smp_time" 15 in
   let smp_sync = config "cfg_smp_sync" 8 in
+  let smp_pre = config "cfg_smp_pre" 16 in
   (* --- The one flip-flop on the falling clock edge: the bit sampler's pin,
      half a cycle after the synchroniser's first stage took it and half a
      cycle before it does again. The core takes it from here on a rising
@@ -334,6 +343,9 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
           ; sample = select smp_time.value 9 5
           ; wrap = select smp_time.value 14 10
           ; sync = smp_sync.value
+          ; prescale = select smp_pre.value 9 0
+          ; shift = select smp_pre.value 12 10
+          ; stuff = select smp_pre.value 15 13
           ; fall = smp_fall
           }
       ; t0 = bank_in 0
@@ -356,6 +368,7 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
   table.(Addr.smp_ctrl) <- uresize smp_ctrl.value 16;
   table.(Addr.smp_time) <- uresize smp_time.value 16;
   table.(Addr.smp_sync) <- uresize smp_sync.value 16;
+  table.(Addr.smp_pre) <- uresize smp_pre.value 16;
   table.(Addr.smp_status) <- uresize (core.smp.state.synced @: core.smp.state.carrier) 16;
   List.iteri banks ~f:(fun n (writes, _, _) ->
     let a = Addr.for_thread n in
@@ -400,6 +413,7 @@ let create ?mutation ?memory (i : _ I.t) : _ O.t =
      ; when_ (write_to Addr.smp_ctrl) [ smp_ctrl <-- select data_now 8 0 ]
      ; when_ (write_to Addr.smp_time) [ smp_time <-- select data_now 14 0 ]
      ; when_ (write_to Addr.smp_sync) [ smp_sync <-- select data_now 7 0 ]
+     ; when_ (write_to Addr.smp_pre) [ smp_pre <-- data_now ]
      ]
      @ List.concat_map banks ~f:(fun (writes, _, _) ->
        List.map writes ~f:(fun (_, _, w) -> w)));

@@ -111,6 +111,15 @@ module Sampler_in = struct
     ; sample : 'a [@bits 5] (* the phase at which a bit is taken *)
     ; wrap : 'a [@bits 5] (* the phase at which a bit time has gone by with no edge *)
     ; sync : 'a [@bits 8]
+    ; prescale : 'a [@bits 10]
+      (* 0: two samples a cycle. Otherwise one sample, the rising edge's,
+         every that many cycles. *)
+    ; shift : 'a [@bits 3]
+      (* the threads see the bit on pin + shift and the pulse on the pin
+         after that, counting round *)
+    ; stuff : 'a [@bits 3]
+      (* 0: off. Otherwise the longest run of equal bits the code sends: the
+         opposite bit after such a run is a stuff bit and is taken out *)
     ; fall : 'a (* [pin] at the falling edge in the middle of the cycle *)
     }
   [@@deriving hardcaml]
@@ -125,6 +134,9 @@ module Sampler_state = struct
     ; carrier : 'a
     ; synced : 'a
     ; history : 'a [@bits 8] (* the last 8 recovered bits, first lowest *)
+    ; pre : 'a [@bits 10] (* cycles since the last sample, with [prescale] *)
+    ; run : 'a [@bits 4] (* equal recovered bits in a row, counted to [stuff] + 1 *)
+    ; slevel : 'a (* and what they are *)
     ; data : 'a
     }
   [@@deriving hardcaml]
@@ -232,6 +244,13 @@ module Mutation = struct
     | Sampler_passes_before_sync (* it passes bits on before the sync word has been seen *)
     | Sampler_keeps_carrier (* a bit time with no edge too many does not lose the carrier *)
     | Sampler_pulse_on_wrong_pin (* its pulse shows on the pin before the data pin, not after *)
+    | Sampler_prescale_one_long (* with a prescaler of n it samples every n + 1 cycles *)
+    | Sampler_prescaled_takes_both (* with a prescaler it still takes both samples of the cycle *)
+    | Sampler_shift_ignored (* the threads see the recovered bit on the input pin whatever [shift] says *)
+    | Sampler_pulse_not_held (* with a prescaler its pulse still lasts one cycle, not one sample *)
+    | Sampler_stuff_one_late (* a stuff bit is looked for after one equal bit too many *)
+    | Sampler_stuff_drops_any (* the bit after a full run is taken out even if it is the same again *)
+    | Sampler_stuff_bit_not_counted (* a new run starts from 0, not 1: the stuff bit is not counted in it *)
   [@@deriving sexp_of, enumerate, equal]
 end
 
@@ -756,8 +775,25 @@ let sampler_sample ?mutation (c : Signal.t Sampler_in.t) (s : Signal.t Sampler_s
   let phase = mux2 (accept |: carry_on) (zero 5) (mux2 at_wrap s.phase (s.phase +:. 1)) in
   let missed = mux2 accept (zero 3) (mux2 (carry_on &: ~:forever) (s.missed +:. 1) s.missed) in
   let carrier = accept |: mux2 at_wrap carry_on s.carrier in
-  let take = carrier &: (phase ==: c.sample) in
+  let taken = carrier &: (phase ==: c.sample) in
   let bit = level ^: c.invert in
+  (* The run of equal bits, and whether this bit is a stuff bit: the
+     opposite of a run of exactly [stuff]. Its level is the last bit's. *)
+  let same = ~:(bit ^: s.slevel) in
+  let limit = uresize c.stuff 4 in
+  let full =
+    if is Sampler_stuff_one_late then s.run ==: limit +:. 1 else s.run ==: limit
+  in
+  let stuffed =
+    taken &: (c.stuff <>:. 0) &: full &: if is Sampler_stuff_drops_any then vdd else ~:same
+  in
+  let run =
+    mux2
+      same
+      (mux2 (s.run <=: limit) (s.run +:. 1) s.run)
+      (of_int ~width:4 (if is Sampler_stuff_bit_not_counted then 0 else 1))
+  in
+  let take = taken &: ~:stuffed in
   let pass =
     (* The planted bug keeps the input in the circuit, so that the
        equivalence checker can still pair it with the spec's. *)
@@ -774,6 +810,9 @@ let sampler_sample ?mutation (c : Signal.t Sampler_in.t) (s : Signal.t Sampler_s
     ; carrier
     ; synced = carrier &: (s.synced |: (take &: (shifted ==: c.sync)))
     ; history = mux2 carrier (mux2 take shifted s.history) (zero 8)
+    ; pre = s.pre
+    ; run = mux2 carrier (mux2 taken run s.run) (zero 4)
+    ; slevel = carrier &: mux2 taken bit s.slevel
     ; data = mux2 pass bit s.data
     }
   , pass )
@@ -815,9 +854,34 @@ let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
     let first, second = if is Sampler_samples_swapped then smp_mid, early else early, smp_mid in
     let after_first, pass_first = sampler_sample ?mutation i.smp q first in
     let after_second, pass_second = sampler_sample ?mutation i.smp after_first second in
-    Sampler_state.iter2 d after_second ~f:(fun d next ->
-      d <== mux2 i.smp.enable next (zero (width next)));
-    q, reg spec (i.smp.enable &: (pass_first |: pass_second)) -- "smp_strobe"
+    (* With a prescaler: the first sample alone, in the cycle the count of
+       cycles is at 0, and nothing in the cycles between. *)
+    let prescaled = i.smp.prescale <>:. 0 in
+    let due = q.pre ==:. 0 in
+    let pre_next =
+      let up = q.pre +:. 1 in
+      let last =
+        if is Sampler_prescale_one_long then q.pre >=: i.smp.prescale else up >=: i.smp.prescale
+      in
+      mux2 prescaled (mux2 last (zero 10) up) (zero 10)
+    in
+    let after_one, pass_one =
+      if is Sampler_prescaled_takes_both then after_second, pass_first |: pass_second else after_first, pass_first
+    in
+    let next =
+      Sampler_state.map3 q after_one after_second ~f:(fun held one both ->
+        mux2 prescaled (mux2 due one held) both)
+    in
+    let next = { next with pre = pre_next } in
+    Sampler_state.iter2 d next ~f:(fun d next -> d <== mux2 i.smp.enable next (zero (width next)));
+    (* The pulse: a cycle long, or with a prescaler as long as a sample,
+       left as it is in the cycles between two. *)
+    let strobe = wire 1 in
+    let strobe_q = reg spec strobe -- "smp_strobe" in
+    let between = if is Sampler_pulse_not_held then gnd else strobe_q in
+    strobe
+    <== (i.smp.enable &: mux2 prescaled (mux2 due pass_one between) (pass_first |: pass_second));
+    q, strobe_q
   in
   (* --- Pin levels seen by both threads this cycle. With the sampler on,
      its two pins show what it has recovered. --- *)
@@ -828,10 +892,15 @@ let create ?mutation ?datapath ?(memory = Memory.Model) (i : _ I.t) : _ O.t =
          let out = bit pin_out p in
          let line = mux (mode p) [ ext; out; out &: ext; ext ] in
          let pulse_pin = if is Sampler_pulse_on_wrong_pin then (p + 1) % num_pins else (p + num_pins - 1) % num_pins in
+         (* The pin the bit shows on: three bits, so the sum counts round. *)
+         (* The planted bug keeps [shift] in the circuit, so that the
+            equivalence checker can still pair it with the spec's. *)
+         let shift = if is Sampler_shift_ignored then i.smp.shift &: ~:(i.smp.shift) else i.smp.shift in
+         let shown = i.smp.pin +: shift in
          mux2
-           (i.smp.enable &: (i.smp.pin ==:. p))
+           (i.smp.enable &: (shown ==:. p))
            smp_state.data
-           (mux2 (i.smp.enable &: (i.smp.pin ==:. pulse_pin)) smp_strobe line)))
+           (mux2 (i.smp.enable &: (shown ==:. pulse_pin)) smp_strobe line)))
   in
   (* --- Each thread's registers, named t0_pc, t1_pc, ... so the
      equivalence checker can pair them up between two builds. The thread's
