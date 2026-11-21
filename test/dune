@@ -306,3 +306,43 @@
   (with-stdout-to
    ir_tx.hex
    (run %{dep:../bin/firmware_hex.exe} ir_tx))))
+
+(rule
+ (targets stepper.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   stepper.hex
+   (run %{dep:../bin/firmware_hex.exe} stepper))))
+
+(rule
+ (targets dht.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dht.hex
+   (run %{dep:../bin/firmware_hex.exe} dht))))
+
+(rule
+ (targets bitstream.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   bitstream.hex
+   (run %{dep:../bin/firmware_hex.exe} bitstream))))
+
+(rule
+ (targets tdm_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   tdm_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} tdm_tx))))
+
+(rule
+ (targets tlc5620.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   tlc5620.hex
+   (run %{dep:../bin/firmware_hex.exe} tlc5620))))

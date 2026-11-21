@@ -76,6 +76,13 @@ RC-6 infrared on a burst sender that serves any remote control code.
 And four more devices run on the I2C controller, read through the
 repeated START it can now send: an RTC-8564 clock, a TCA6408A port
 expander, an MXC6225XU accelerometer and a monitor's EDID. That is 43.
+Seven more, again as firmware alone and each judged by a sigrok decoder,
+make 50: step and direction for stepper motor drivers; a reader for
+AM2302 / DHT22 sensors, which tells a 0 from a 1 by how long the line
+stays high and tells the host when a sensor stops answering; TDM audio;
+the TLC5620 DAC's four-wire interface; and Qi packets, EM4100 tags and
+Morse, all three framed by the driver on a three-instruction program that
+puts out levels at a fixed rate.
 
 **Then CAN, from a transmitter to a node.** The v1.4 engine sent frames
 the host had made and listened. On v2.1's CRC register the transmitter
@@ -152,6 +159,11 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 | Microwire | controller; a 93C46 EEPROM on it | 10 |
 | HDMI-CEC | initiator, with each block's acknowledgement | 38 |
 | RC-6 infrared | transmitter with its 36 kHz carrier, on a burst sender | 7 |
+| Step and direction | moves and ramps for stepper motor drivers | 10 |
+| AM2302 / DHT22, DHT11 | sensor reader | 27 |
+| TDM audio | transmitter, any number of slots | 18 |
+| TLC5620 DAC | its four-wire interface | 12 |
+| Qi, EM4100, Morse | on a sender of levels at a fixed rate, framed by the driver | 3 |
 | NES gamepad | host | 7 |
 | MIDI, Modbus RTU | on the UART transmitter | no new firmware |
 | LIN | master frames, on the DMX512 transmitter | no new firmware |
@@ -180,15 +192,15 @@ runs a program on the reference model and prints the pins.
    picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
    USB device, sockit_owm's 1-Wire slave. For USB, 1-Wire, WS2812, SWD, PS/2,
    CAN and every protocol added after them but Ethernet, the recorded pins
-   go to sigrok's protocol decoders, 41 tests in all, 39 of them with a
+   go to sigrok's protocol decoders, 48 tests in all, 46 of them with a
    fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
    receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
    sender has its own clock, 100 ppm off, and jitter on every edge.
-4. **Tests that are themselves tested.** 176 bugs are planted in the RTL,
+4. **Tests that are themselves tested.** 207 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
-5. **The gates, not only the RTL.** All 69 chip-level tests pass on the
+5. **The gates, not only the RTL.** All 76 chip-level tests pass on the
    post-layout netlist, with IHP's models of the SRAMs in place of the
    macros. That includes Ethernet at a 40 MHz clock, both ways.
 6. **The software that will run on the board.** The MicroPython driver is
@@ -285,7 +297,7 @@ the report sets out the rules.
 | Architecture and instruction set | [`isa.md`](isa.md), [`info.md`](info.md), README |
 | Assembler or toolchain, example programs | `model/asm.ml`, `bin/pe_sim.ml`, [`examples/`](../examples) |
 | Verification write-up | [`design-and-verification.md`](design-and-verification.md) |
-| Host and program loading | SPI port, [`info.md`](info.md); `host/protocol_emulator.py`, `host/more_protocols.py` |
+| Host and program loading | SPI port, [`info.md`](info.md); `host/protocol_emulator.py`, `host/more_protocols.py`, `host/extra_protocols.py` |
 | How AI tools were used | above, and section 6 of the report |
 
 ## Reproduce

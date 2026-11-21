@@ -2729,6 +2729,381 @@ let rc6_runs ~toggle ~address ~command =
 
 let rc6_words ~toggle ~address ~command = ir_tx_words (rc6_runs ~toggle ~address ~command)
 
+(* Step and direction, for stepper motor drivers (A4988, DRV8825 and the
+   like): a direction level and one pulse for each step, at an exact
+   period.
+
+   Pins: P0 = STEP (side-set), P1 = DIR, both push-pull. Config:
+   [stepper_config]: sideset_base 0, sideset_count 1; out_base 1, out_count
+   1; out most significant bit first; CLKDIV sets the tick: 10 for 1 us at
+   10 MHz.
+
+   Host protocol, for each move at one speed:
+     TX : the direction in bit 15 and the number of steps, less one, in
+          bits 14:0; then the period of a step in ticks, less four.
+     RX : one word, 0, when the move's last step has been made.
+   STEP is high for two ticks of every period, and DIR is set three ticks
+   before a move's first step. A ramp is several moves, each at its own
+   speed; a move's first step comes six ticks after the last period of the
+   move before has run out, while the next two words are fetched. *)
+let stepper =
+  {|
+        .side_set 1
+next:   pull                side 0     ; a move: direction, and steps less one
+        out pins, 1         side 0     ; DIR
+        out y, 15           side 0
+        pull                side 0     ; the period, less four
+step:   mov x, osr          side 1     ; STEP rises
+        nop                 side 1     ; and is high for two ticks
+low:    jmp x-- low         side 0     ; low for the rest of the period
+        jmp y-- step        side 0
+        push                side 0     ; the move is made
+        jmp next            side 0
+|}
+;;
+
+let stepper_config ~clkdiv =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 1
+  ; out_base = 1
+  ; out_count = 1
+  ; out_msb_first = true
+  ; threshold = 16
+  ; clkdiv
+  }
+;;
+
+(* The TX words for a move of [steps] (1 to 32768) at [period] ticks a
+   step, forwards (DIR high) or not. *)
+let stepper_words ~forwards ~steps ~period =
+  [ (Bool.to_int forwards lsl 15) lor (steps - 1); period - 4 ]
+;;
+
+(* AM2302 / DHT22 and DHT11 humidity and temperature sensors: one wire,
+   the sensor answering a start pulse with 40 bits whose length is their
+   value.
+
+   Pins: P0 = the data line, open-drain, with the sensor's pull-up. Config:
+   [dht_config]: threshold 16, autopush, in most significant bit first;
+   timeout 60 and timeout_vector [dht_fail]; CLKDIV makes a tick 5 us: 50
+   at 10 MHz.
+
+   Host protocol:
+     TX : one word to take a reading: how long to hold the line low to
+          start, in units of 40 us, less one: 32 (1.3 ms) for an AM2302,
+          500 (20 ms) for a DHT11.
+     RX : four words: the humidity, the temperature, the checksum (8 bits),
+          and 0 if the sensor sent all 40 bits or 1 if it stopped
+          answering, with 0 for every bit after the one it stopped in.
+
+   On the wire the sensor answers a released line with 80 us low and 80 us
+   high, then sends each bit as 50 us low and a high of 26 us for a 0 or
+   70 us for a 1. The line is read 40 to 45 us after it rises: a 0 is over
+   by then and a 1 is not. Any level that lasts 300 us ends the reading. *)
+let dht =
+  {|
+idle:   pull                    ; a reading: how long the start is
+        mov x, osr
+        set pins, 0             ; the start: the line held low,
+low:    jmp x-- low [7]         ; 40 us at a time
+        set pins, 1             ; and let go
+        set y, 4                ; five bytes
+        set x, 7                ; of eight bits
+        wait 0 pin 0 timeout    ; the sensor's answer: low,
+        wait 1 pin 0 timeout    ; and high
+bit:    wait 0 pin 0 timeout    ; a bit begins: low,
+        wait 1 pin 0 timeout    ; then high
+        nop [6]
+        in pins, 1              ; 40 to 45 us into the high
+        jmp x-- bit
+        set x, 7
+        jmp y-- bit
+        push                    ; the checksum: the last 8 bits
+        in null, 16             ; all 40 read
+        jmp idle
+fail:   in null, 1              ; the sensor stopped: 0 for each bit not read,
+        jmp x-- fail
+        set x, 7
+        jmp y-- fail
+        push
+        set x, 1
+        in x, 16                ; and a 1 to say so
+        jmp idle
+|}
+;;
+
+let dht_fail = 19
+
+let dht_config ~clkdiv =
+  { Isa.Thread_config.default with
+    threshold = 16
+  ; autopush = true
+  ; in_msb_first = true
+  ; timeout = 60
+  ; timeout_vector = dht_fail
+  ; clkdiv
+  }
+;;
+
+(* The TX word for a start pulse of [start_us]. *)
+let dht_word ~start_us = (start_us / 40) - 1
+
+(* A reading from the four RX words: relative humidity and temperature in
+   tenths, as an AM2302 sends them (the temperature's top bit is its
+   sign). *)
+let dht_reading = function
+  | [ humidity; temperature; checksum; 0 ] ->
+    let sum = (humidity lsr 8) + (humidity land 0xFF) + (temperature lsr 8) + (temperature land 0xFF) in
+    if sum land 0xFF <> checksum
+    then Error "checksum"
+    else Ok (humidity, if temperature land 0x8000 <> 0 then -(temperature land 0x7FFF) else temperature)
+  | [ _; _; _; _ ] -> Error "the sensor stopped answering"
+  | _ -> Error "not four words"
+;;
+
+(* A stream of levels at an exact rate: each bit of each TX word is the
+   level of one pin for one cell. The codes that are a line switched at a
+   fixed rate are all made with it; which cells make a frame is the host's
+   business. Qi packets ([qi_cells]), EM4100 tags ([em4100_cells]) and
+   Morse code ([morse_cells]) are sent with it.
+
+   Pins: P0 = the line, push-pull, low until the first word. Config:
+   [bitstream_config]: threshold 16, autopull, out most significant bit
+   first; a cell is two ticks, so CLKDIV is the clock over twice the cell
+   rate.
+
+   Host protocol: TX words, 16 cells each, the first cell in bit 15. A word
+   is fetched as the last cell of the one before leaves, with no gap, as
+   long as it is in the FIFO by then; if it is not, the line holds its
+   level until a word comes. So a frame ends on the level the line should
+   rest at, and the host has 16 cells to supply each word. *)
+let bitstream =
+  {|
+        set pins, 0             ; the line starts low
+cell:   out pins, 1             ; a cell; the last of a word fetches the next
+        jmp cell
+|}
+;;
+
+let bitstream_config ~clkdiv =
+  { Isa.Thread_config.default with threshold = 16; autopull = true; out_msb_first = true; clkdiv }
+;;
+
+(* Cells as TX words, the last word filled out with [idle]. *)
+let bitstream_words ?(idle = 0) cells =
+  List.chunks_of cells ~length:16
+  |> List.map ~f:(fun chunk ->
+    let chunk = chunk @ List.init (16 - List.length chunk) ~f:(fun _ -> idle) in
+    List.fold chunk ~init:0 ~f:(fun acc c -> (acc lsl 1) lor c))
+;;
+
+(* A Qi packet as the power receiver sends it to the charger (by load
+   modulation; this is the modulating signal), two cells to a bit, 2 kbit/s:
+   the line changes at the start of every bit, and in the middle of a 1 as
+   well. A preamble of [preamble] ones (11 to 25), then each byte as a
+   start bit 0, eight data bits least significant first, an odd parity bit
+   and a stop bit 1: the header, the message, and a checksum that is the
+   exclusive or of them all. The line is low before the packet. After the
+   stop bit it changes once more, which is what lets a demodulator time
+   that bit, rests there for two bit times, and is low again by the end. *)
+let qi_cells ?(preamble = 11) ~header message =
+  let bytes = header :: message in
+  let checksum = List.fold bytes ~init:0 ~f:( lxor ) in
+  let byte b =
+    let data = List.init 8 ~f:(fun i -> (b lsr i) land 1) in
+    (0 :: data) @ [ 1 lxor List.fold data ~init:0 ~f:( lxor ); 1 ]
+  in
+  let bits = List.init preamble ~f:(fun _ -> 1) @ List.concat_map (bytes @ [ checksum ]) ~f:byte in
+  let level = ref 0 in
+  let cells =
+    List.concat_map bits ~f:(fun b ->
+      let first = 1 - !level in
+      let second = if b = 1 then 1 - first else first in
+      level := second;
+      [ first; second ])
+  in
+  cells @ List.init 4 ~f:(fun _ -> 1 - !level) @ List.init 8 ~f:(fun _ -> 0)
+;;
+
+(* How long a Qi message is, from its header: the standard's table. *)
+let qi_message_length header =
+  if header < 0x20
+  then 1
+  else if header < 0x80
+  then 2 + ((header - 32) / 16)
+  else if header < 0xE0
+  then 8 + ((header - 128) / 8)
+  else 20 + ((header - 224) / 4)
+;;
+
+(* An EM4100 tag's 64 bits as a reader sees them, Manchester coded, two
+   cells to a bit (a bit is 64 periods of the 125 kHz field: 512 us): nine
+   ones; the 8-bit version and 32-bit number as ten groups of four bits,
+   each followed by its even parity; four column parities; and a stop bit
+   0. A 1 is high then low. A tag repeats them for as long as it is in the
+   field: [repeats] times here, and the line is low again after the
+   last. *)
+let em4100_bits ~version ~id =
+  let nibbles =
+    List.init 2 ~f:(fun i -> (version lsr (4 * (1 - i))) land 0xF)
+    @ List.init 8 ~f:(fun i -> (id lsr (4 * (7 - i))) land 0xF)
+  in
+  let row n = List.init 4 ~f:(fun i -> (n lsr (3 - i)) land 1) in
+  let parity bits = List.fold bits ~init:0 ~f:( lxor ) in
+  List.init 9 ~f:(fun _ -> 1)
+  @ List.concat_map nibbles ~f:(fun n -> row n @ [ parity (row n) ])
+  @ List.init 4 ~f:(fun column -> parity (List.map nibbles ~f:(fun n -> (n lsr (3 - column)) land 1)))
+  @ [ 0 ]
+;;
+
+let em4100_cells ?(repeats = 1) ~version ~id () =
+  List.concat (List.init repeats ~f:(fun _ -> em4100_bits ~version ~id))
+  |> List.concat_map ~f:(fun b -> if b = 1 then [ 1; 0 ] else [ 0; 1 ])
+  |> fun cells -> cells @ [ 0 ]
+;;
+
+let morse_code =
+  [ 'a', ".-"; 'b', "-..."; 'c', "-.-."; 'd', "-.."; 'e', "."; 'f', "..-."; 'g', "--."; 'h', "...."
+  ; 'i', ".."; 'j', ".---"; 'k', "-.-"; 'l', ".-.."; 'm', "--"; 'n', "-."; 'o', "---"; 'p', ".--."
+  ; 'q', "--.-"; 'r', ".-."; 's', "..."; 't', "-"; 'u', "..-"; 'v', "...-"; 'w', ".--"; 'x', "-..-"
+  ; 'y', "-.--"; 'z', "--.."; '0', "-----"; '1', ".----"; '2', "..---"; '3', "...--"; '4', "....-"
+  ; '5', "....."; '6', "-...."; '7', "--..."; '8', "---.."; '9', "----."
+  ]
+;;
+
+(* Morse code, one cell to a dot: a dash is three dots long, the gap inside
+   a letter one, between letters three and between words seven. Seven
+   cells of silence end the text. *)
+let morse_cells text =
+  String.split (String.lowercase text) ~on:' '
+  |> List.filter ~f:(fun w -> not (String.is_empty w))
+  |> List.map ~f:(fun word ->
+    String.to_list word
+    |> List.map ~f:(fun c ->
+      List.Assoc.find_exn morse_code c ~equal:Char.equal
+      |> String.to_list
+      |> List.map ~f:(fun mark -> if Char.equal mark '-' then [ 1; 1; 1 ] else [ 1 ])
+      |> List.intersperse ~sep:[ 0 ]
+      |> List.concat)
+    |> List.intersperse ~sep:[ 0; 0; 0 ]
+    |> List.concat)
+  |> List.intersperse ~sep:(List.init 7 ~f:(fun _ -> 0))
+  |> List.concat
+  |> fun cells -> cells @ List.init 7 ~f:(fun _ -> 0)
+;;
+
+(* TDM audio (the DSP or PCM format of audio codecs): one data line
+   carrying a frame of several 16-bit samples, one slot after another, with
+   a pulse on the frame sync line to mark where the frame begins.
+
+   Pins: P0 = BCLK and P1 = FSYNC (side-set), P2 = DATA, all push-pull.
+   Config: [tdm_tx_config]: sideset_base 0, sideset_count 2; out_base 2,
+   out_count 1; threshold 16; out most significant bit first.
+
+   Host protocol: the first TX word is the slots in a frame, less one;
+   after it one word per sample, slot 0 of
+   the first frame first.
+
+   On the wire: DATA and FSYNC change as BCLK falls and are read as it
+   rises. FSYNC is high for one bit, the one before a frame's first: the
+   last bit of the frame before (and one clock with nothing in it ahead of
+   the first frame). Samples go most significant bit first.
+
+   Timing: BCLK is 2 ticks low and 2 high, as in [i2s_tx]. The next sample
+   is fetched inside the last bit, so the clock never stretches while the
+   host keeps up; with the TX FIFO empty the thread stalls with BCLK low. *)
+let tdm_tx =
+  {|
+        .side_set 2
+        pull              side 0       ; slots in a frame, less one
+        mov isr, osr      side 0       ; kept in the ISR
+        mov y, isr        side 0
+        jmp sync          side 0
+bit:    out pins, 1       side 0 [1]   ; bits 15..2 of a sample: BCLK low,
+        jmp x-- bit       side 1 [1]   ; and high
+        out pins, 1       side 0 [1]   ; bit 1
+        jmp !y last       side 1       ; the frame's last slot?
+        nop               side 1
+        out pins, 1       side 0       ; bit 0
+        pull              side 0       ; the next slot's sample
+        set x, 13         side 1
+        jmp y-- bit       side 1
+last:   mov y, isr        side 1       ; slots, for the next frame
+sync:   out pins, 1       side 2       ; bit 0 with FSYNC high
+        pull              side 2       ; the next frame's first sample
+        set x, 13         side 3
+        jmp bit           side 3
+|}
+;;
+
+let tdm_tx_config ~clkdiv =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 2
+  ; out_base = 2
+  ; out_count = 1
+  ; threshold = 16
+  ; out_msb_first = true
+  ; clkdiv
+  }
+;;
+
+(* The TX words for [frames], each a list of [slots] samples. *)
+let tdm_words ~slots frames = (slots - 1) :: List.concat frames
+
+(* TLC5620 (a serial quad 8-bit DAC): 11 bits clocked in, a pulse on LOAD
+   to put them in the chosen DAC's latch, and a pulse on LDAC to bring the
+   latched values to all four outputs together.
+
+   Pins: P0 = CLK (side-set), P1 = DATA, P2 = LOAD, P3 = LDAC, all
+   push-pull. Config: [tlc5620_config]: sideset_base 0, sideset_count 1;
+   out_base 1, out_count 1; set_base 2, set_count 2; out most significant
+   bit first; a tick of 100 ns or more (CLKDIV 1 at 10 MHz, 5 at 50 MHz).
+
+   Host protocol: one TX word per write ([tlc5620_word]): the DAC (0 to 3)
+   in bits 15:14, the range bit (1 doubles the output) in bit 13, the value
+   in bits 12:5, and bit 4 set to pulse LDAC after it. With LDAC pulsed
+   only on the last of several writes, their outputs change together.
+
+   On the wire: DATA changes as CLK rises and the DAC takes it as CLK
+   falls; LOAD and LDAC are low for three ticks. *)
+let tlc5620 =
+  {|
+        .side_set 1
+        set pins, 3       side 0       ; LOAD and LDAC high
+next:   pull              side 0       ; a write
+        set x, 10         side 0
+bit:    out pins, 1       side 1       ; DATA, as CLK rises
+        jmp x-- bit       side 0       ; taken as CLK falls
+        set pins, 2       side 0 [2]   ; LOAD low: into the DAC's latch
+        set pins, 3       side 0
+        out x, 1          side 0       ; the outputs too?
+        jmp !x next       side 0
+        set pins, 1       side 0 [2]   ; LDAC low
+        set pins, 3       side 0
+        jmp next          side 0
+|}
+;;
+
+let tlc5620_config ~clkdiv =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 1
+  ; out_base = 1
+  ; out_count = 1
+  ; set_base = 2
+  ; set_count = 2
+  ; threshold = 16
+  ; out_msb_first = true
+  ; clkdiv
+  }
+;;
+
+let tlc5620_word ~dac ~double ~value ~update =
+  (dac lsl 14) lor (Bool.to_int double lsl 13) lor (value lsl 5) lor (Bool.to_int update lsl 4)
+;;
+
 (* PWM, and so RC servo pulses: a pin high for one count and low for
    another, over and over.
 
@@ -3105,6 +3480,11 @@ let all =
   ; "microwire", microwire
   ; "cec", cec
   ; "ir_tx", ir_tx
+  ; "stepper", stepper
+  ; "dht", dht
+  ; "bitstream", bitstream
+  ; "tdm_tx", tdm_tx
+  ; "tlc5620", tlc5620
   ; "pwm", pwm
   ; "nes_pad", nes_pad
   ]

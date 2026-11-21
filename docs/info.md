@@ -92,7 +92,9 @@ infrared in both directions, RC-5 infrared, MDIO, DALI, LIN, PWM and
 servo pulses, the NES gamepad) are in `host/more_protocols.py`: copy it too
 if you use them. They are a second file because MicroPython compiles a
 module whole, and on an RP2040 one file with every driver no longer fits
-in memory.
+in memory. A third, `host/extra_protocols.py`, has the drivers for step
+and direction, AM2302 / DHT22 and DHT11 sensors, TDM audio, the TLC5620
+DAC, Qi packets, EM4100 tags and Morse.
 
 With the demo board's microcontroller as SPI host: load a firmware image (for
 example the 15-instruction UART transmitter in `test/uart_tx.hex`) into

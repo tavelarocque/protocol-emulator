@@ -3,8 +3,9 @@
 //
 // The driver under MicroPython and under CPython must compute the same
 // things: runs compat.py after host/protocol_emulator.py in both and
-// compares, then compat_more.py after host/more_protocols.py, with the
-// first module still loaded as it is on a board. No chip is needed, so
+// compares, then compat_more.py after host/more_protocols.py and
+// compat_extra.py after host/extra_protocols.py, with the modules before
+// still loaded as they are on a board. No chip is needed, so
 // this takes seconds of emulated time.
 //
 //   node run_compat.mjs [--driver FILE] [--cpu-slowdown K]
@@ -60,4 +61,22 @@ if (micropython2 !== cpython2) {
   process.exit(1);
 }
 console.log(`more_protocols.py: they agree too (${cpython2.length} characters of results)`);
+
+// The third module the same way, with the first two still loaded.
+const extra = readFileSync(join(HERE, '..', '..', 'host', 'extra_protocols.py'), 'latin1');
+const compatExtra = readFileSync(join(HERE, 'compat_extra.py'), 'latin1');
+const cpython3 = execFileSync('python3', ['-c', driver + '\n' + second + '\n' + extra + '\n' + compatExtra],
+  { encoding: 'latin1' }).trim().slice(cpython2.length).trim();
+const [o3a, e3a] = board.exec(extra);
+const [o3b, e3b] = board.exec(compatExtra);
+const micropython3 = (o3a + o3b + e3a + e3b).replace(/\r\n/g, '\n').trim();
+if (micropython3 !== cpython3) {
+  let at = 0;
+  while (micropython3[at] === cpython3[at]) at++;
+  console.log(`extra_protocols.py: MicroPython and CPython DIFFER, first at character ${at}`);
+  console.log('MicroPython:', JSON.stringify(micropython3.slice(Math.max(0, at - 200), at + 300)));
+  console.log('CPython:    ', JSON.stringify(cpython3.slice(Math.max(0, at - 200), at + 300)));
+  process.exit(1);
+}
+console.log(`extra_protocols.py: and they agree (${cpython3.length} characters of results)`);
 process.exit(0);

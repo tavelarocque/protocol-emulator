@@ -282,3 +282,43 @@
   (with-stdout-to
    ir_tx.s
    (run %{dep:../bin/firmware_src.exe} ir_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets stepper.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   stepper.s
+   (run %{dep:../bin/firmware_src.exe} stepper %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets dht.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dht.s
+   (run %{dep:../bin/firmware_src.exe} dht %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets bitstream.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   bitstream.s
+   (run %{dep:../bin/firmware_src.exe} bitstream %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets tdm_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   tdm_tx.s
+   (run %{dep:../bin/firmware_src.exe} tdm_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets tlc5620.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   tlc5620.s
+   (run %{dep:../bin/firmware_src.exe} tlc5620 %{dep:../model/firmware.ml}))))

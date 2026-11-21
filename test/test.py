@@ -1047,6 +1047,7 @@ import sys  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "host"))
 import protocol_emulator as pe
 import more_protocols as more
+import extra_protocols as extra
 import sigrok  # noqa: E402
 
 try:
@@ -4463,3 +4464,382 @@ async def test_ws2812(dut):
         a, b = next((a, b) for a, b, text in found if text == "#0040ff")
         wrong = colours(trace.forced("din", a + 26, a + 39, 1).decode("rgb_led_ws281x:din=din", "rgb_led_ws281x"))
         assert wrong[:1] == ["#ff8000"] and "#0040ff" not in wrong, wrong
+
+
+# --- Step and direction, a sensor's pulse lengths, audio frames, a DAC ----------
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_stepper_motor(dut):
+    """Step and direction for a stepper driver: a ramp up to speed and back
+    down, then a move the other way. Every step must be exactly its period
+    after the last, STEP high for two ticks, and DIR settled before the
+    first. sigrok's stepper motor decoder follows the position and the
+    speed from the two wires."""
+    await reset(dut)
+    trace = pin_trace(dut, step=0, dir=1)
+    chip = pe.Chip(sim_port(dut))
+    moves = [(3, 400), (6, 100), (3, 400), (-5, 250)]  # steps, microseconds each
+
+    @bridge
+    def play():
+        motor = extra.Stepper(chip, firmware("stepper"))
+        motor.ramp(moves[:3])
+        motor.move(*moves[3])
+        return motor.position
+
+    position = await play()
+    await ClockCycles(dut.clk, 2_000)
+    trace.stop()
+    assert position == 7, position
+    at = dict(trace.changes)
+    step = trace.level("step")
+    rises = [t for t, v in step if v == 1][1:]  # [0]: before the pin drives
+    falls = [t for t, v in step if v == 0]
+    assert {f - r for r, f in zip(rises, falls[1:])} == {20}, "STEP high for two ticks of 1 us"
+    names = trace.names
+    dirs = [dict(zip(names, at[max(k for k in at if k <= t)]))["dir"] for t in rises]
+    assert dirs == [1] * 12 + [0] * 5, dirs
+    # Each step its period after the last; a move's first comes six ticks
+    # after the last period of the move before has run out.
+    want = []
+    for i, (n, period) in enumerate(moves):
+        want += [period * 10] * (abs(n) - 1)
+        if i < len(moves) - 1:
+            want.append((period + 6) * 10)
+    got = [b - a for a, b in zip(rises, rises[1:])]
+    # The host fetches the report before it sends the last move: that gap
+    # is the host's.
+    assert got[:11] == want[:11] and got[12:] == want[12:], (got, want)
+    assert got[11] >= want[11]
+    dir_falls = [t for t, v in trace.level("dir") if v == 0]
+    # DIR three ticks ahead of the first step, or more: the period comes
+    # in the host's second word.
+    assert rises[12] - dir_falls[-1] >= 30
+    if sigrok.available():
+        found = texts(trace.decode("stepper_motor", start=rises[0] - 100))
+        positions = [t for t in found if t.endswith(" steps")]
+        speeds = [t for t in found if t.endswith(" steps/s")]
+        # The decoder writes the position reached at each step when the
+        # next one comes.
+        up = [f"{k} steps" for k in range(1, 13)]
+        down = [f"{k} steps" for k in range(11, 7, -1)]
+        assert positions == up + down, positions
+        assert speeds[:2] == ["2500 steps/s"] * 2 and speeds[3:8] == ["10000 steps/s"] * 5, speeds
+        assert speeds[-4:] == ["4000 steps/s"] * 4, speeds
+        # DIR held the other way through the ramp: not those positions.
+        wrong = texts(trace.forced("dir", rises[4] - 5, rises[8] - 5, 0)
+                      .decode("stepper_motor", start=rises[0] - 100))
+        assert [t for t in wrong if t.endswith(" steps")] != positions
+
+
+class Am2302:
+    """An AM2302 on pin 0, from its datasheet: after the host has held the
+    line low for 0.8 ms or more and let go, it waits [go] us, answers with
+    80 us low and 80 us high, and sends 40 bits, each 50 us low and then
+    high for 26 us (a 0) or 70 us (a 1); 50 us low ends them. [present]
+    False: it never answers."""
+
+    def __init__(self, dut, humidity, temperature, go=30, present=True):
+        self.dut, self.go, self.present = dut, go, present
+        data = [humidity >> 8, humidity & 0xFF, temperature >> 8, temperature & 0xFF]
+        data.append(sum(data) & 0xFF)
+        self.bits = [(b >> k) & 1 for b in data for k in range(7, -1, -1)]
+        self.low = 0  # whether the sensor holds the line low
+        self.starts = []
+
+    def line(self):
+        chip_low = bool(int(self.dut.uio_oe.value) & 1) and not int(self.dut.uio_out.value) & 1
+        return 0 if chip_low or self.low else 1
+
+    async def _hold(self, low, us):
+        self.low = low
+        for _ in range(us):  # the chip reads its own pin: keep it right
+            drive_pin(self.dut, 0, self.line())
+            await ClockCycles(self.dut.clk, 10)
+
+    async def run(self):
+        dut = self.dut
+        while True:
+            low_for = 0
+            while True:
+                await ClockCycles(dut.clk, 10)
+                now = self.line()
+                drive_pin(dut, 0, now)
+                if now:
+                    if low_for:
+                        break
+                else:
+                    low_for += 1
+            self.starts.append(low_for)
+            if low_for < 800 or not self.present:
+                continue
+            await self._hold(0, self.go)
+            await self._hold(1, 80)
+            await self._hold(0, 80)
+            for b in self.bits:
+                await self._hold(1, 50)
+                await self._hold(0, 70 if b else 26)
+            await self._hold(1, 50)
+            await self._hold(0, 1)
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_dht22_sensor(dut):
+    """The AM2302 / DHT22 reader: a sensor written from the datasheet sends
+    65.2 % and -10.1 degrees, and the host must get exactly those; then the
+    sensor is taken away, and the host must be told so rather than given a
+    reading. sigrok's AM230x decoder reads the same wire: the start pulse
+    must be one it accepts, and it must find the same two values."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    sensor = Am2302(dut, humidity=652, temperature=0x8000 | 101)
+    running = cocotb.start_soon(sensor.run())
+    trace = sigrok.Trace(dut, {"sda": sensor.line})
+    chip = pe.Chip(sim_port(dut))
+    dht = []
+
+    @bridge
+    def read():
+        dht.append(extra.Dht(chip, firmware("dht")))
+        return dht[0].read()
+
+    @bridge
+    def read_again():
+        try:
+            return dht[0].read()
+        except extra.DhtError as e:
+            return str(e)
+
+    got = await read()
+    await ClockCycles(dut.clk, 5_000)
+    sensor.present = False
+    again = await read_again()
+    trace.stop()
+    running.cancel()
+    assert got == (65.2, -10.1), got
+    assert again == "the sensor stopped answering", again
+    assert len(sensor.starts) == 2 and all(1250 <= s <= 1350 for s in sensor.starts), sensor.starts  # us
+    if sigrok.available():
+        found = trace.decode("am230x")
+        results = lambda found: [t for t in texts(found)
+                                 if t.startswith(("Humidity", "Temperature", "Checksum"))]
+        want = ["Humidity: 65.2 %", "Temperature: -10.1 °C", "Checksum: OK"]
+        assert results(found) == want, results(found)
+        # A 1's high cut to 30 us on the wire: a different reading, and the
+        # checksum says so.
+        a, b = next((a, b) for a, b, text in found if text == "Bit: 1")
+        wrong = results(trace.forced("sda", b - 400, b, 0).decode("am230x"))
+        assert wrong != want and "Checksum: not OK" in wrong, wrong
+
+
+@cocotb.test(timeout_time=300, timeout_unit="ms")
+async def test_qi_packets(dut):
+    """Qi: the packets a phone sends its charger, on the level stream
+    sender: a signal strength packet and one of four bytes, which end with
+    the line at different levels. Every time between changes of the line
+    must be a half bit or a whole one, exactly; sigrok's Qi decoder reads
+    the bytes, their parities and the checksums."""
+    await reset(dut)
+    trace = pin_trace(dut, qi=0)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def play():
+        qi = extra.Qi(chip, firmware("bitstream"))
+        qi.send(0x01, [0x80])
+        qi.send(0x28, [0x12, 0x34])
+        qi.flush()
+
+    await play()
+    await ClockCycles(dut.clk, 60_000)
+    trace.stop()
+    edges = [t for t, _ in trace.level("qi")][2:]  # [0], [1]: before the pin drives, and its first low
+    gaps = [b - a for a, b in zip(edges, edges[1:])]
+    # 250 us and 500 us; after each packet a rest of two bit times or more.
+    assert {g for g in gaps if g < 10_000} == {2500, 5000}, sorted(set(gaps))
+    assert len([g for g in gaps if g >= 10_000]) == 2, sorted(set(gaps))
+    if sigrok.available():
+        fields = lambda found: [t for t in texts(found) if len(t) > 2 and "bit" not in t]
+        found = trace.decode("qi")
+        want = ["01", "80", "81", "Signal Strength: 128", "Checksum OK",
+                "28", "12", "34", "0e", "Proprietary", "Checksum OK"]
+        assert [t for t in texts(found) if "err" in t.lower()] == [], texts(found)
+        got = [t for t in texts(found) if t in want or "Checksum" in t or ":" in t]
+        assert got == want, got
+        # The line held low for one bit time of the message byte, across
+        # the change that starts a bit: not that packet.
+        a, b = next((a, b) for a, b, text in found if text == "80")
+        wrong = texts(trace.forced("qi", a + 6250, a + 11_250, 0).decode("qi"))
+        assert "Signal Strength: 128" not in wrong, wrong
+
+
+@cocotb.test(timeout_time=300, timeout_unit="ms")
+async def test_em4100_tag(dut):
+    """An EM4100 tag's 64 bits, twice over, on the level stream sender, at
+    64 periods of a 125 kHz field to a bit. sigrok's EM4100 decoder, like a
+    reader, uses the first pass to find where a bit begins and reads the
+    second: there it must find the header, every row and column parity
+    right, and the tag's number."""
+    await reset(dut)
+    trace = pin_trace(dut, data=0)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def play():
+        tag = extra.Em4100(chip, firmware("bitstream"))
+        tag.send(0x06, 0x001259E3, repeats=2)
+        tag.flush()
+
+    await play()
+    await ClockCycles(dut.clk, 60_000)
+    trace.stop()
+    edges = [t for t, _ in trace.level("data")][2:]
+    gaps = {b - a for a, b in zip(edges, edges[1:])}
+    assert gaps == {2560, 5120}, gaps  # half a bit and a whole one: 256 us, 512 us
+    # From EM4100's rules, worked out here: nine ones, ten rows of four
+    # bits and their parity, four column parities, a 0; a 1 high then low.
+    rows = [[(n >> k) & 1 for k in (3, 2, 1, 0)] for n in (0, 6, 0, 0, 1, 2, 5, 9, 0xE, 3)]
+    bits = ([1] * 9 + [b for r in rows for b in r + [sum(r) % 2]]
+            + [sum(r[k] for r in rows) % 2 for k in range(4)] + [0])
+    want = "".join("10" if b else "01" for b in bits) * 2
+    changes = trace.level("data")
+    level_at = lambda t: [v for at, v in changes if at <= t][-1]
+    got = "".join(str(level_at(edges[0] + 1280 + 2560 * k)) for k in range(256))
+    assert got == want
+    if sigrok.available():
+        found = trace.decode("em4100")
+        tags = lambda found: [t for t in texts(found) if t.startswith("Tag")]
+        assert tags(found) == ["Tag: 06001259E3"], tags(found)
+        start = next(a for a, b, text in found if text.startswith("Tag"))
+        assert [t for a, b, t in found if "ERROR" in t and a >= start] == [], texts(found)
+        fields = [t for a, b, t in found if a >= start and t.startswith(("Version", "Data"))]
+        assert fields == ["Version/customer: 0", "Version/customer: 6"] + [
+            f"Data: {d}" for d in "001259E3"], fields
+        # The line held low for two bit times of the number: no tag.
+        a = next(a for a, b, t in found if a >= start and t == "Data: 5")
+        wrong = trace.forced("data", a, a + 10_240, 0).decode("em4100")
+        assert tags(wrong) == [], tags(wrong)
+
+
+@cocotb.test(timeout_time=300, timeout_unit="ms")
+async def test_morse(dut):
+    """Morse code on the level stream sender, a dot of 0.5 ms: sigrok's
+    Morse decoder must read the letters and the words."""
+    await reset(dut)
+    trace = pin_trace(dut, data=0)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def play():
+        key = extra.Morse(chip, firmware("bitstream"), unit_ms=0.5)
+        key.send("sos pe 73")
+        key.flush()
+
+    await play()
+    await ClockCycles(dut.clk, 120_000)
+    trace.stop()
+    level = trace.level("data")[2:]  # [0], [1]: before the pin drives, and its first low
+    marks = [(b[0] - a[0]) // 5000 for a, b in zip(level, level[1:]) if a[1] == 1]
+    assert all((b[0] - a[0]) % 5000 == 0 for a, b in zip(level, level[1:]))
+    # s o s  p e  7 3
+    assert marks == [1, 1, 1, 3, 3, 3, 1, 1, 1, 1, 3, 3, 1, 1, 3, 3, 1, 1, 1, 1, 1, 1, 3, 3], marks
+    if sigrok.available():
+        decoder = "morse:timeunit=0.0005"
+        found = texts(trace.decode(decoder, "morse=word"))
+        assert found == ["sos", "pe", "73"], found
+        # A dash of the o cut to a dot: not sos.
+        start = level[6][0]  # the o's first dash
+        assert level[6][1] == 1 and level[7][0] - start == 15_000
+        wrong = texts(trace.forced("data", start + 5000, start + 15_000, 0).decode(decoder, "morse=word"))
+        assert wrong and wrong[0] != "sos", wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_tdm_audio(dut):
+    """TDM audio: frames of four 16-bit samples on one data line, with a
+    frame sync pulse one bit ahead of each frame. sigrok's TDM decoder
+    reads the three wires and must give every sample to its slot."""
+    await reset(dut)
+    trace = pin_trace(dut, clock=0, frame=1, data=2)
+    chip = pe.Chip(sim_port(dut))
+    frames = [[0x8001, 0x1234, 0xFFFF, 0x0000], [0xA5A5, 0x5A5A, 0x7FFE, 0xC003]]
+
+    @bridge
+    def play():
+        # A last frame of silence clocks out the one before.
+        extra.TdmTx(chip, firmware("tdm_tx"), slots=4, clkdiv=4).write(frames + [[0] * 4])
+
+    await play()
+    await ClockCycles(dut.clk, 3_000)
+    trace.stop()
+    clock = trace.level("clock")
+    rises = [t for t, v in clock if v == 1][1:]  # [0]: before the pin drives
+    at = dict(trace.changes)
+    seen = [dict(zip(trace.names, at[max(k for k in at if k <= t)])) for t in rises]
+    syncs = [i for i, s in enumerate(seen) if s["frame"]]
+    assert [b - a for a, b in zip(syncs, syncs[1:])] == [64, 64], syncs
+    bits = [s["data"] for s in seen[syncs[0] + 1:]]
+    words = [int("".join(map(str, bits[k:k + 16])), 2) for k in range(0, 128, 16)]
+    assert words == frames[0] + frames[1], [hex(w) for w in words]
+    if sigrok.available():
+        decoder = "tdm_audio:bps=16:channels=4"
+        found = trace.decode(decoder)
+        want = [f"Channel {k + 1}: {s:04x}" for f in frames for k, s in enumerate(f)]
+        assert texts(found)[:8] == want, texts(found)
+        # A bit of the second sample held high on the wire: not that sample.
+        a, b = found[1][0], found[1][1]
+        wrong = texts(trace.forced("data", a, a + (b - a) // 4, 1).decode(decoder))
+        assert wrong[1] != want[1] and wrong[0] == want[0], wrong[:3]
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_tlc5620_dac(dut):
+    """The TLC5620 quad DAC: four writes whose outputs must change
+    together, then one output changed by itself. sigrok's TLC5620 decoder
+    reads CLK, DATA, LOAD and LDAC: it must name each DAC, gain and value,
+    and report the voltages at each LDAC pulse."""
+    await reset(dut)
+    trace = pin_trace(dut, clk=0, data=1, load=2, ldac=3)
+    chip = pe.Chip(sim_port(dut))
+    writes = [(0, 64, False, False), (1, 128, True, False), (2, 255, False, False),
+              (3, 1, True, True), (2, 0, False, True)]
+
+    @bridge
+    def play():
+        dac = extra.Tlc5620(chip, firmware("tlc5620"), clkdiv=2)
+        for d, value, double, update in writes:
+            dac.write(d, value, double=double, update=update)
+
+    await play()
+    await ClockCycles(dut.clk, 500)
+    trace.stop()
+    # LOAD and LDAC low for three ticks, never together, never with CLK high.
+    for name in ("load", "ldac"):
+        level = trace.level(name)
+        lows = [b[0] - a[0] for a, b in zip(level, level[1:]) if a[1] == 0]
+        assert lows == [6] * (5 if name == "load" else 2), (name, lows)
+    if sigrok.available():
+        decoder = "tlc5620:clk=clk:data=data:load=load:ldac=ldac"
+        found = trace.decode(decoder)
+        volts = lambda value, double: "%.2fV" % (3.3 * (value / 256) * (2 if double else 1))
+        want_fields, want_sets = [], []
+        for d, value, double, update in writes:
+            want_fields += [f"DAC select: DAC{'ABCD'[d]}", f"Gain: x{2 if double else 1}",
+                            f"DAC value: {value}"]
+            want_sets.append(f"Setting DAC{'ABCD'[d]} register value to {volts(value, double)}")
+        fields = lambda found: [t for t in texts(found) if t.startswith(("DAC select", "Gain", "DAC value"))]
+        assert fields(found) == want_fields, fields(found)
+        assert [t for t in texts(found) if t.startswith("Setting")] == want_sets, texts(found)
+        updates = [t for t in texts(found) if t.startswith("Updating")]
+        assert updates == [
+            "Updating voltages: DACA=%s DACB=%s DACC=%s DACD=%s"
+            % (volts(64, False), volts(128, True), volts(255, False), volts(1, True)),
+            "Updating voltages: DACA=%s DACB=%s DACC=%s DACD=%s"
+            % (volts(64, False), volts(128, True), volts(0, False), volts(1, True)),
+        ], updates
+        assert [t for t in texts(found) if "too short" in t] == [], texts(found)
+        # DATA held high through the first write: not DAC A at 64.
+        a = next(a for a, b, text in found if text == "DAC select: DACA")
+        wrong = fields(trace.forced("data", a - 50, a + 200, 1).decode(decoder))
+        assert wrong[:3] != want_fields[:3], wrong[:3]

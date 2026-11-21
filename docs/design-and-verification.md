@@ -117,7 +117,12 @@ written with no RTL change:
 | Microwire controller | 10 words | chip select active high and transfers of any number of bits, which is why SPI's engines do not serve; the bit read on a clock is the device's answer to that clock |
 | HDMI-CEC initiator | 38 words | every path through a bit the same number of ticks; the ACK bit read 1.0 ms after its edge; a message that fails ends there, and the blocks still queued for it are taken from the FIFO unsent |
 | Infrared burst sender | 7 words | bursts and silences as whole carrier periods, counted from the host's word; it knows no code, so RC-6 is framed by the driver |
-| Drivers for all of these | 931 lines of MicroPython, a second file | the register map only |
+| Step and direction | 10 words | side-set for STEP, so its two ticks high are part of every period; the period kept in the output shift register, where each step reloads it |
+| AM2302 / DHT22 reader | 27 words | timed waits on every level, so a sensor that stops is a jump to the vector; there the bits not read are filled in as zeros and a flag follows, so the host always gets four words |
+| Level stream sender | 3 words | autopull: the last cell of a word fetches the next in the same tick, so cells never stretch while the host keeps up. It knows no code: Qi, EM4100 and Morse are framed by the driver |
+| TDM audio transmitter | 18 words | the slot count kept in the input shift register, which a transmitter has no other use for; the last-slot test taken inside a bit's high time so that no bit is longer than another |
+| TLC5620 writer | 12 words | side-set for the clock, `set` for LOAD and LDAC together |
+| Drivers for all of these | 931 and 320 lines of MicroPython, a second and a third file | the register map only |
 
 Sixteen further protocols needed no firmware: MIDI and Modbus RTU on the
 UART transmitter, LIN on the DMX512 transmitter (a UART that can send a
@@ -384,7 +389,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 176 in all:
+fails if any survives. There are 207 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -409,6 +414,7 @@ fails if any survives. There are 176 in all:
 | v2.0 engines, one each | 11 | `sim/test_tx_engines.ml` |
 | DALI and RC-5 receivers and their sampler settings (7, 6) | 13 | `sim/test_slow_rx.ml` |
 | Microwire, HDMI-CEC and the infrared burst sender (4, 9, 5) | 18 | `sim/test_microwire.ml`, `sim/test_cec.ml`, `sim/test_ir.ml` |
+| Step and direction, the DHT22 reader, the level stream sender, TDM audio and the TLC5620 writer (6, 9, 3, 6, 7) | 31 | `sim/test_stepper.ml`, `sim/test_dht.ml`, `sim/test_bitstream.ml`, `sim/test_tdm.ml`, `sim/test_tlc5620.ml` |
 | Ethernet firmware, one each way | 2 | `sim/test_ethernet.ml`, `sim/test_ethernet_rx.ml` |
 | gate netlist | 5 | `gl_equiv/check.py`: the RTL-to-netlist proof |
 | memory description, one for each size | 2 | `formal/sram_equiv.py`: the proofs against IHP's models |
@@ -420,7 +426,7 @@ count as a catch. The host-port and register-file bugs are a parameter of
 `hw/top.ml`, off by default, following `hw/pe_core.ml`; the generated
 Verilog is byte-identical with or without the parameter in the source.
 
-All 176 are caught. Two candidates turned out not to be bugs, and the
+All 207 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.

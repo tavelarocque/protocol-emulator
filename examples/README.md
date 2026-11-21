@@ -36,6 +36,11 @@ them, so they cannot drift.
 | [`microwire.s`](microwire.s) | Microwire controller | 10 |
 | [`cec.s`](cec.s) | HDMI-CEC initiator | 38 |
 | [`ir_tx.s`](ir_tx.s) | Infrared burst sender (RC-6 is sent with it) | 7 |
+| [`stepper.s`](stepper.s) | Step and direction, for stepper motor drivers | 10 |
+| [`dht.s`](dht.s) | AM2302 / DHT22 and DHT11 sensor reader | 27 |
+| [`bitstream.s`](bitstream.s) | Levels at a fixed rate (Qi, EM4100 and Morse are sent with it) | 3 |
+| [`tdm_tx.s`](tdm_tx.s) | TDM audio transmitter | 18 |
+| [`tlc5620.s`](tlc5620.s) | TLC5620 DAC writer | 12 |
 | [`pwm.s`](pwm.s) | PWM, RC servo pulses | 8 |
 | [`nes_pad.s`](nes_pad.s) | NES gamepad | 7 |
 | [`echo.s`](echo.s) | TX FIFO to RX FIFO, for bring-up | 5 |
