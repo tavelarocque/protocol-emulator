@@ -104,6 +104,17 @@
   "//": "Metal4 obstruction show up as illegal overlaps (there is no metal there in the GDS).",
   "ERROR_ON_ILLEGAL_OVERLAPS": 0,
 
+  "//": "Design repair once more after global routing. The repair after placement works from estimated",
+  "//": "wires; the routed ones came out up to twice as long at the SRAMs, which sit along the bottom edge",
+  "//": "far from much of the logic. That left 15 SRAM data outputs driving more than the 64 fF the macro",
+  "//": "is characterised for (the worst 102 fF), five SRAM inputs with edges slower than the macro allows",
+  "//": "(the worst 1.5 ns against 0.6 ns at the slow corner), and one net over the cell library's limit.",
+  "//": "Repairing against the routed wires, to three quarters of each limit, leaves room for what detailed",
+  "//": "routing still changes.",
+  "RUN_POST_GRT_DESIGN_REPAIR": 1,
+  "GRT_DESIGN_REPAIR_MAX_CAP_PCT": 25,
+  "GRT_DESIGN_REPAIR_MAX_SLEW_PCT": 25,
+
   "//": "Configuration docs: https://librelane.readthedocs.io/en/latest/reference/configuration.html",
 
   "//": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
