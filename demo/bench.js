@@ -1,64 +1,56 @@
 "use strict";
-/* The bench: a demo board carrying the chip, wired to a device that follows
-   the recorded pins. Drawn with three.js (demo/vendor, MIT), which the page
-   carries inside itself, so nothing is fetched. Lengths are in millimetres.
+/* Figure 1, the bench: a demo board carrying the chip, wired to a device that
+   follows the recorded pins. Drawn with three.js (demo/vendor, MIT), which
+   the page carries inside itself, so nothing is fetched. It is drawn as a
+   technical illustration: flat tones, ink outlines, a camera without
+   perspective, part names on leader lines. Lengths are in millimetres.
 
    The board is a drawing in the style of a Tiny Tapeout demo board, not a
    copy of one, and the devices are drawings too. What moves them is the
    record: deviceState() in the page reads the pins and nothing else. */
 
-async function makeBench(canvas, labelBox) {
+async function makeBench(canvas, labelBox, lineBox, readBox) {
   const T = window.THREE;
   if (!T) throw new Error("three.js is not in the page");
 
   const renderer = new T.WebGLRenderer({ canvas, antialias: true });
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = T.PCFSoftShadowMap;
-  renderer.toneMapping = T.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.35;
+  renderer.toneMapping = T.NeutralToneMapping;
+  renderer.toneMappingExposure = 1;
   renderer.outputColorSpace = T.SRGBColorSpace;
 
   const world = new T.Scene();
-  world.background = new T.Color(0x0a1517);
-  world.fog = new T.Fog(0x0a1517, 520, 1200);
+  world.background = new T.Color(0xf3f4f3);
 
-  /* ------------------------------------------------------- light and room */
+  /* ---------------------------------------------------------------- light */
 
-  // Reflections come from a dark room with a few bright panels in it.
-  {
-    const room = new T.Scene();
-    room.add(new T.Mesh(new T.BoxGeometry(900, 600, 900), new T.MeshBasicMaterial({ color: 0x141c1e, side: T.BackSide })));
-    const panel = (x, y, z, w, h, power, ry) => {
-      const m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ color: new T.Color().setScalar(power), side: T.DoubleSide }));
-      m.position.set(x, y, z); m.lookAt(0, 0, 0); if (ry) m.rotateY(ry); room.add(m);
-    };
-    panel(-260, 260, 200, 260, 160, 9); panel(300, 220, -120, 200, 200, 5); panel(0, 290, 0, 300, 300, 3.5); panel(120, 60, 400, 400, 90, 2);
-    const pm = new T.PMREMGenerator(renderer);
-    world.environment = pm.fromScene(room, 0.03).texture;
-    world.environmentIntensity = 1.0;
-    pm.dispose();
-  }
-  world.add(new T.HemisphereLight(0xd6ecff, 0x1b1611, 0.9));
-  const key = new T.DirectionalLight(0xfff0dc, 3.4);
-  key.position.set(-150, 300, 190); key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0005; key.shadow.normalBias = 0.6; key.shadow.radius = 5;
-  Object.assign(key.shadow.camera, { left: -260, right: 260, top: 220, bottom: -220, near: 50, far: 800 });
+  // One light from the upper left, as a drawing is shaded, and its shadow.
+  world.add(new T.AmbientLight(0xffffff, 1.25));
+  const key = new T.DirectionalLight(0xffffff, 2.1);
+  key.position.set(-170, 300, 150); key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0005; key.shadow.normalBias = 0.6; key.shadow.radius = 4;
+  Object.assign(key.shadow.camera, { left: -280, right: 280, top: 240, bottom: -240, near: 50, far: 800 });
   key.shadow.camera.updateProjectionMatrix();
   world.add(key, key.target);
-  const fill = new T.DirectionalLight(0x8fb4d8, 0.55); fill.position.set(240, 120, -160); world.add(fill);
 
   /* ----------------------------------------------------------- materials */
 
-  const mat = (color, o = {}) => new T.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0, ...o });
+  // Three flat tones and an ink outline: a drawing, which nobody could take
+  // for a photograph of a board that exists.
+  const tones = new T.DataTexture(new Uint8Array([168, 168, 168, 255, 222, 222, 222, 255, 255, 255, 255, 255]), 3, 1, T.RGBAFormat);
+  tones.minFilter = tones.magFilter = T.NearestFilter; tones.needsUpdate = true;
+  const mat = (color, o = {}) => { const { roughness, metalness, ...rest } = o; return new T.MeshToonMaterial({ color, gradientMap: tones, ...rest }); };
+  const ink = new T.LineBasicMaterial({ color: 0x16181a });
   const M = {
     gold: mat(0xdcb65a, { metalness: 1, roughness: 0.26 }),
     steel: mat(0xcfd3d6, { metalness: 1, roughness: 0.3 }),
     brushed: mat(0xb9bec2, { metalness: 1, roughness: 0.48 }),
-    black: mat(0x131517, { roughness: 0.5 }),
-    housing: mat(0x101113, { roughness: 0.42 }),
-    ic: mat(0x17191b, { roughness: 0.38 }),
+    black: mat(0x2b2e31, { roughness: 0.5 }),
+    housing: mat(0x26292c, { roughness: 0.42 }),
+    ic: mat(0x2f3235, { roughness: 0.38 }),
     fr4: mat(0xb39a5c, { roughness: 0.8 }),
-    rubber: mat(0x0c0d0e, { roughness: 0.95 }),
+    rubber: mat(0x222426, { roughness: 0.95 }),
     cap: mat(0xb08a55, { roughness: 0.7 }),
     white: mat(0xf1f1ec, { roughness: 0.5 }),
   };
@@ -70,7 +62,9 @@ async function makeBench(canvas, labelBox) {
     return t;
   }
   function mesh(parent, geo, material, x = 0, y = 0, z = 0) {
-    const m = new T.Mesh(geo, material); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m;
+    const m = new T.Mesh(geo, material); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
+    if (geo.type !== "TubeGeometry" && geo.type !== "SphereGeometry") m.add(new T.LineSegments(new T.EdgesGeometry(geo, 32), ink));
+    return m;
   }
   const boxAt = (parent, w, h, d, material, x, y, z) => mesh(parent, new T.BoxGeometry(w, h, d), material, x, y, z);
   const cylAt = (parent, r, h, material, x, y, z, seg = 32) => mesh(parent, new T.CylinderGeometry(r, r, h, seg), material, x, y, z);
@@ -103,23 +97,24 @@ async function makeBench(canvas, labelBox) {
 
   /* ------------------------------------------------------------ the bench */
 
+  // Squared paper, 10 mm to a square, and the shadows that fall on it.
   {
-    const mat0 = tex(512, 512, (g, w) => {
-      g.fillStyle = "#15292c"; g.fillRect(0, 0, w, w);
-      g.strokeStyle = "rgba(160,205,200,0.10)"; g.lineWidth = 1;
-      for (let i = 0; i <= 10; i++) { const p = i * w / 10; g.beginPath(); g.moveTo(p, 0); g.lineTo(p, w); g.moveTo(0, p); g.lineTo(w, p); g.stroke(); }
-      g.strokeStyle = "rgba(160,205,200,0.22)"; g.lineWidth = 2; g.strokeRect(0, 0, w, w);
+    const grid = tex(512, 512, (g, w) => {
+      g.fillStyle = "#f3f4f3"; g.fillRect(0, 0, w, w);
+      g.strokeStyle = "#dfe3e5"; g.lineWidth = 2;
+      for (let i = 0; i <= 5; i++) { const p = i * w / 5; g.beginPath(); g.moveTo(p, 0); g.lineTo(p, w); g.moveTo(0, p); g.lineTo(w, p); g.stroke(); }
     });
-    mat0.wrapS = mat0.wrapT = T.RepeatWrapping; mat0.repeat.set(24, 24);
-    const ground = new T.Mesh(new T.PlaneGeometry(2400, 2400), mat(0xffffff, { map: mat0, roughness: 0.9 }));
-    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; world.add(ground);
+    grid.wrapS = grid.wrapT = T.RepeatWrapping; grid.repeat.set(48, 48);
+    const paper = new T.Mesh(new T.PlaneGeometry(2400, 2400), new T.MeshBasicMaterial({ map: grid, toneMapped: false }));
+    paper.rotation.x = -Math.PI / 2; world.add(paper);
+    const shade = new T.Mesh(new T.PlaneGeometry(2400, 2400), new T.ShadowMaterial({ opacity: 0.17 }));
+    shade.rotation.x = -Math.PI / 2; shade.position.y = 0.05; shade.receiveShadow = true; world.add(shade);
   }
 
   /* ------------------------------------------------------------ the board */
 
   const BOARD = { w: 124, d: 86, top: 6.6 };          // top surface height above the bench
   const HEADER_X = 53, pinZ = (p) => -21 + p * 6;
-  const WIRE_COLORS = [0xe9e9e4, 0xe2b714, 0x2f9a48, 0x2f66d0, 0x8a4fc7, 0x9a9da0, 0xd9622b, 0xc9302c];
 
   const board = new T.Group(); world.add(board);
   {
@@ -215,14 +210,21 @@ async function makeBench(canvas, labelBox) {
 
   /* ---------------------------------------------------- wires and labels */
 
-  let stage = null, wires = [], labels = [], pinTags = [];
-  const label = (pos, cls) => { const el = document.createElement("div"); el.className = "lab " + (cls || ""); labelBox.appendChild(el); const l = { pos, el }; labels.push(l); return l; };
+  let stage = null, wires = [], labels = [];
+  // A part's name is a callout at the figure's edge, joined to the part by a
+  // leader line; what a device reads goes in the line under the figure.
+  const label = (pos, cls) => {
+    const el = document.createElement("div"), l = { pos, el, cls: cls || "" };
+    if (l.cls === "val") { el.className = "reading"; readBox.appendChild(el); } else { el.className = "callout"; labelBox.appendChild(el); }
+    labels.push(l); return l;
+  };
 
   // A jumper from a protocol pin to a point on a device: the housing on the
   // pin, the wire up and over, a housing at the far end.
   function jumper(pin, to, lift = 26, entry = new T.Vector3(0, 1, 0)) {
-    const from = pinTip(pin), color = WIRE_COLORS[pin], g = stage;
-    const m = mat(color, { roughness: 0.45, emissive: color, emissiveIntensity: 0 });
+    const from = pinTip(pin), g = stage;
+    // the wire is in its channel's colour while its pin is high, and pale while it is low
+    const on = new T.Color(channelColor(pin)), off = on.clone().lerp(new T.Color(0xc9cdd0), 0.78), m = mat(off.getHex());
     boxAt(g, 2.7, 13, 2.7, M.housing, from.x, from.y + 1.5, from.z);
     const a = from.clone().add(new T.Vector3(0, 8, 0)), b = to.clone().addScaledVector(entry, 12);
     const mid = a.clone().lerp(b, 0.5); mid.y = Math.max(a.y, b.y) + lift;
@@ -230,7 +232,7 @@ async function makeBench(canvas, labelBox) {
     const tube = mesh(g, new T.TubeGeometry(curve, 48, 0.72, 10), m); tube.receiveShadow = false;
     const end = boxAt(g, 2.7, 13, 2.7, M.housing, 0, 0, 0);
     end.position.copy(to).addScaledVector(entry, 6.5); end.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), entry);
-    wires.push({ pin, m });
+    wires.push({ pin, m, on, off });
   }
   // a wire that carries power or ground: it is there, and says nothing
   function lead(points, color, r = 0.6) {
@@ -240,7 +242,7 @@ async function makeBench(canvas, labelBox) {
 
   /* -------------------------------------------------------------- devices */
 
-  function terminal(x, z, pin, turn = -0.42) {
+  function terminal(x, z, pin, turn = -0.61) {
     const g = new T.Group(); g.position.set(x, 0, z); g.rotation.y = turn; stage.add(g);
     mesh(g, slab(72, 26, 2.2, 5, 0.6), [M.black, M.black]);
     boxAt(g, 6, 16, 5, M.black, 0, 9, -6).rotation.x = -0.2;
@@ -250,24 +252,23 @@ async function makeBench(canvas, labelBox) {
     const screenTex = new T.CanvasTexture(c); screenTex.colorSpace = T.SRGBColorSpace; screenTex.anisotropy = 8;
     const screen = new T.Mesh(new T.PlaneGeometry(68, 42), new T.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: screenTex, emissiveIntensity: 1.25, roughness: 1 }));
     screen.position.set(0, 0, 3.3); head.add(screen);
-    const glow = new T.PointLight(0x58e69a, 0, 160, 2); glow.position.set(0, 0, 24); head.add(glow);
     boxAt(g, 9, 4.4, 9, M.housing, -30, 2.2, -4);                         // where the line comes in
     g.updateMatrixWorld(true);
     jumper(pin, g.localToWorld(new T.Vector3(-30, 4.4, -4)), 26);
-    label(g.localToWorld(new T.Vector3(0, 64, 0)), "dim").el.textContent = "serial terminal";
+    label(g.localToWorld(new T.Vector3(30, 52, 0)), "dim").el.textContent = "serial terminal";
     let shown = null;
     return (st, s, c2) => {
       const text = "> " + st.text + (c2 < s.cycles - 1 ? "█" : "");
       if (text === shown) return; shown = text;
       const k = c.getContext("2d");
-      k.fillStyle = "#04100c"; k.fillRect(0, 0, 768, 480);
-      k.fillStyle = "#1f6b48"; k.font = "26px ui-monospace, Menlo, Consolas, monospace"; k.textBaseline = "top";
+      k.fillStyle = "#f6f7f3"; k.fillRect(0, 0, 768, 480);
+      k.fillStyle = "#5b6166"; k.font = "26px \"Plex Mono\", ui-monospace, Menlo, Consolas, monospace"; k.textBaseline = "top";
       k.fillText("serial  " + s.device.line, 30, 26);
       k.fillRect(30, 66, 708, 2);
-      k.fillStyle = "#63f0a4"; k.font = "600 92px ui-monospace, Menlo, Consolas, monospace"; k.fillText(text, 30, 110);
-      k.fillStyle = "#1f6b48"; k.font = "24px ui-monospace, Menlo, Consolas, monospace";
+      k.fillStyle = "#16181a"; k.font = "600 92px \"Plex Mono\", ui-monospace, Menlo, Consolas, monospace"; k.fillText(text, 30, 110);
+      k.fillStyle = "#5b6166"; k.font = "24px \"Plex Mono\", ui-monospace, Menlo, Consolas, monospace";
       k.fillText(st.text.length + " byte" + (st.text.length === 1 ? "" : "s") + " received", 30, 420);
-      screenTex.needsUpdate = true; glow.intensity = 260 + st.text.length * 40;
+      screenTex.needsUpdate = true;
     };
   }
 
@@ -301,7 +302,8 @@ async function makeBench(canvas, labelBox) {
     const at = (v) => g.localToWorld(new T.Vector3(...v));
     jumper(d.step, at([-52.36, 12.5, 20.3]), 22); jumper(d.dir, at([-49.82, 12.5, 20.3]), 30);
     [0x1a1a1a, 0x2a9d4a, 0xc9302c, 0x2f66d0].forEach((col, i) => lead([at([-41 + i * 2.5, 13, 7.7]).toArray(), at([-36 + i * 2, 20, 2 - i]).toArray(), at([-22 + i * 2, 12, -22 - i]).toArray(), at([2 + i * 2.6, 7, -25]).toArray()], col, 0.55));
-    label(at([8, 56, 0]), "dim").el.textContent = "stepper motor and driver";
+    label(at([24, 40, 14]), "dim").el.textContent = "stepper motor";
+    label(at([-46, 14, 14]), "dim").el.textContent = "its driver";
     const read = label(at([8, -2, 34]), "val");
     return (st) => { rotor.rotation.z = -st.steps * 1.8 * Math.PI / 180; read.el.textContent = (st.steps >= 0 ? "+" : "") + st.steps + " steps · " + (st.steps * 1.8).toFixed(1) + "°"; };
   }
@@ -324,7 +326,7 @@ async function makeBench(canvas, labelBox) {
     boxAt(stage, 8.4, 4.4, 14, M.housing, plug.x, plug.y - 2.2, plug.z).rotation.y = g.rotation.y;
     jumper(pin, plug.clone().add(new T.Vector3(-2.2, 0, 0)), 26);
     [[0x5a3a1c, -1], [0xc9302c, 0], [0xe07b1a, 1]].forEach(([col, i]) => lead([at([-11.5, 3.6, 1 + i * 1.2]).toArray(), at([-16, 2.2, 4 + i * 1.5]).toArray(), [plug.x + i * 2.3 + 1, plug.y - 1.5, plug.z - 6]], col, 0.7));
-    label(at([0, 44, 0]), "dim").el.textContent = "RC servo";
+    label(at([8, 14, 6]), "dim").el.textContent = "RC servo";
     const read = label(at([0, -2, 16]), "val");
     return (st) => {
       const us = st.us == null ? 1500 : st.us;
@@ -343,13 +345,12 @@ async function makeBench(canvas, labelBox) {
     cylAt(g, 6, 9, dome, 0, 10.6, 0, 48).castShadow = false;
     mesh(g, new T.SphereGeometry(6, 48, 24, 0, Math.PI * 2, 0, Math.PI / 2), dome, 0, 15.1, 0).castShadow = false;
     boxAt(g, 1, 6, 0.4, M.steel, -1.4, 9, 0); boxAt(g, 2.4, 5, 0.4, M.steel, 1.6, 8.6, 0);
-    const light = new T.PointLight(0xffc24d, 0, 260, 1.7); light.position.set(0, 20, 0); g.add(light);
     boxAt(g, 5, 4.6, 2.6, M.housing, -10.5, 6.9, 6.2); boxAt(g, 0.7, 7, 0.7, M.gold, -10.5, 9, 6.2);
     jumper(pin, new T.Vector3(x - 10.5, 12.5, z + 6.2), 24);
-    label(new T.Vector3(x, 34, z), "dim").el.textContent = "signal lamp";
+    label(new T.Vector3(x + 4, 14, z + 4), "dim").el.textContent = "signal lamp";
     const read = label(new T.Vector3(x, -2, z + 22), "val");
     return (st, s, c) => {
-      dome.emissiveIntensity = st.lit ? 2.6 : 0.03; light.intensity = st.lit ? 4200 : 0;
+      dome.emissiveIntensity = st.lit ? 0.9 : 0; dome.color.set(st.lit ? 0xffd23d : 0xe2dcc6);
       read.el.textContent = "received: " + (s.marks.filter((m) => m.until <= c).map((m) => m.text[0]).join("") || "...");
     };
   }
@@ -376,7 +377,7 @@ async function makeBench(canvas, labelBox) {
     jumper(d.sda, at([-13.5, 12.4, 2.56]), 22); jumper(d.scl, at([-13.5, 12.4, 7.64]), 30);
     lead([[22, BOARD.top + 9, 36], [40, 30, 58], at([-24, 26, -6]).toArray(), at([-13.5, 15, -7.6]).toArray()], 0xc9302c, 0.65);
     lead([[24.5, BOARD.top + 9, 36], [46, 24, 64], at([-26, 22, 2]).toArray(), at([-13.5, 15, -2.52]).toArray()], 0x1a1a1a, 0.65);
-    label(at([2, 30, 0]), "dim").el.textContent = "temperature sensor";
+    label(at([4.5, 7.2, 0]), "dim").el.textContent = "temperature sensor";
     const read = label(at([4, -2, 20]), "val");
     return (st) => { read.el.textContent = st.say; };
   }
@@ -418,8 +419,8 @@ async function makeBench(canvas, labelBox) {
     const plugA = boxAt(stage, 11.5, 8, 13, mat(0xdfe6ea, { roughness: 0.3, transparent: true, opacity: 0.85 }), 0, 0, 0); plugA.position.copy(at([4, 12.2, 21]));
     const plugB = boxAt(stage, 11.5, 8, 13, mat(0xdfe6ea, { roughness: 0.3, transparent: true, opacity: 0.85 }), 0, 0, 0); plugB.position.copy(port).add(new T.Vector3(-1, 0, 5.5)); plugB.rotation.y = -0.25;
     jumper(d.plus, at([-11.5, 12.4, -10.5]), 24); jumper(d.minus, at([-11.5, 12.4, -7.96]), 31);
-    label(at([4, 30, 6]), "dim").el.textContent = "RJ45 jack and transformer";
-    label(sw.localToWorld(new T.Vector3(0, 36, 0)), "dim").el.textContent = "network switch";
+    label(at([10, 19, 8]), "dim").el.textContent = "RJ45 jack and transformer";
+    label(sw.localToWorld(new T.Vector3(30, 24, 0)), "dim").el.textContent = "network switch";
     const read = label(at([10, -2, 40]), "val");
     return (st) => {
       read.el.textContent = st.say;
@@ -470,38 +471,52 @@ async function makeBench(canvas, labelBox) {
       mesh(stage, new T.TubeGeometry(new T.CatmullRomCurve3(pts), 240, 0.65, 8), mat(col, { roughness: 0.5 })).receiveShadow = false;
     });
     jumper(d.rxd, at([-10, 12.4, -3.8]), 22); jumper(d.txd, at([-10, 12.4, -1.26]), 29);
-    label(at([2, -3, 16]), "dim").el.textContent = "CAN transceiver";
-    label(far([30, 6, 22]), "dim").el.textContent = "another CAN node";
+    label(at([0.5, 7.2, 0]), "dim").el.textContent = "CAN transceiver";
+    label(far([14, 15.6, 0]), "dim").el.textContent = "another CAN node";
     const read = label(far([0, 36, 0]), "val");
     return (st) => { read.el.textContent = "node: " + st.say; nodeLed.material.emissiveIntensity = st.nodeDrives ? 3.2 : 0; };
   }
 
   /* --------------------------------------------------------------- camera */
 
-  const camera = new T.PerspectiveCamera(30, 2, 10, 3000);
-  let yaw = -0.34, pitch = 0.5, zoom = 1, target = new T.Vector3(), reach = 300, current = null, cursorNow = 0, updaters = [];
+  // An orthographic camera: lengths stay true to scale wherever they are.
+  const camera = new T.OrthographicCamera(-1, 1, 1, -1, 1, 3000);
+  let yaw = -0.61, pitch = 0.6, zoom = 1, target = new T.Vector3(), span = 92, current = null, updaters = [];
 
   function render() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     if (!w || !h) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) { renderer.setPixelRatio(dpr); renderer.setSize(w, h, false); }
-    camera.aspect = w / h;
-    const dist = reach * zoom * Math.max(1, 1.55 / camera.aspect);
-    camera.position.set(target.x + dist * Math.sin(yaw) * Math.cos(pitch), target.y + dist * Math.sin(pitch), target.z + dist * Math.cos(yaw) * Math.cos(pitch));
+    const aspect = w / h, half = span * zoom * Math.max(1, 1.45 / aspect);
+    // the drawing sits left of centre: the callouts have the right-hand edge
+    camera.left = -half * aspect * 0.88; camera.right = half * aspect * 1.12; camera.top = half * 0.88; camera.bottom = -half * 1.12;
+    camera.position.set(target.x + 900 * Math.sin(yaw) * Math.cos(pitch), target.y + 900 * Math.sin(pitch), target.z + 900 * Math.cos(yaw) * Math.cos(pitch));
     camera.lookAt(target); camera.updateProjectionMatrix();
     renderer.render(world, camera);
-    const v = new T.Vector3();
+
+    const v = new T.Vector3(), items = [];
     for (const l of labels) {
+      if (l.cls === "val") continue;
       v.copy(l.pos).project(camera);
-      l.el.style.display = v.z < 1 ? "" : "none";
-      l.el.style.left = ((v.x + 1) / 2 * w).toFixed(1) + "px"; l.el.style.top = ((1 - v.y) / 2 * h).toFixed(1) + "px";
+      items.push({ l, x: (v.x + 1) / 2 * w, y: (1 - v.y) / 2 * h });
     }
+    items.sort((a, b) => a.y - b.y);
+    let edge = -1e9; for (const it of items) { it.ly = Math.max(it.y, edge + 19, 14); edge = it.ly; }
+    edge = h - 12; for (let i = items.length - 1; i >= 0; i--) { items[i].ly = Math.min(items[i].ly, edge); edge = items[i].ly - 19; }
+    let lines = "";
+    for (const it of items) {
+      const el = it.l.el; el.style.top = it.ly.toFixed(1) + "px";
+      const x2 = w - 12 - el.offsetWidth - 6, bend = Math.min(x2 - 8, it.x + Math.abs(it.ly - it.y));
+      lines += '<path d="M' + it.x.toFixed(1) + " " + it.y.toFixed(1) + (bend > it.x ? " L" + bend.toFixed(1) + " " + it.ly.toFixed(1) : "") + " L" + x2.toFixed(1) + " " + it.ly.toFixed(1) + '"/><circle cx="' + it.x.toFixed(1) + '" cy="' + it.y.toFixed(1) + '" r="2.2"/>';
+    }
+    lineBox.setAttribute("viewBox", "0 0 " + w + " " + h);
+    lineBox.innerHTML = lines;
   }
 
   function setScene(s) {
     if (stage) { world.remove(stage); stage.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
-    labelBox.textContent = ""; labels = []; wires = []; updaters = [];
+    labelBox.textContent = ""; readBox.textContent = ""; labels = []; wires = []; updaters = [];
     stage = new T.Group(); world.add(stage); current = s;
     const d = s.device;
     if (d.kind === "terminal") updaters.push(terminal(128, -14, d.pin));
@@ -511,21 +526,20 @@ async function makeBench(canvas, labelBox) {
     if (d.kind === "sensor") updaters.push(sensor(122, -2, d));
     if (d.kind === "network") updaters.push(network(112, 8, d));
     if (d.kind === "canbus") updaters.push(canbus(108, 4, d));
-    if (d.kind === "both") { updaters.push(terminal(118, -78, d.pin, -0.2)); updaters.push(stepper(144, 26, d)); }
-    const pl = label(new T.Vector3(HEADER_X, BOARD.top + 46, pinZ(s.pins[0].pin)), "pins");
-    pinTags = s.pins.map((p) => { const e = document.createElement("span"); e.textContent = "P" + p.pin + " " + p.name; pl.el.appendChild(e); return { pin: p.pin, e }; });
+    if (d.kind === "both") { updaters.push(terminal(118, -78, d.pin)); updaters.push(stepper(144, 26, d)); }
+    for (const p of s.pins) { const l = label(pinTip(p.pin), "pin"); l.el.textContent = "P" + p.pin + " " + p.name; l.el.style.setProperty("--ch", channelColor(p.pin)); l.pin = p.pin; }
+    label(new T.Vector3(16, BOARD.top + 5.4, -4), "").el.textContent = "the chip";
     const wide = d.kind === "both" || d.kind === "network" || d.kind === "canbus";
-    target.set(wide ? 56 : 44, 12, wide ? -18 : 2); reach = wide ? 440 : 345;
+    target.set(wide ? 66 : 56, 12, wide ? -16 : 0); span = wide ? 116 : 86;
     update(0);
   }
 
   function update(c) {
     if (!current) return;
-    cursorNow = c;
     const st = deviceState(current, c);
     for (const u of updaters) u(st, current, c);
-    for (const w of wires) w.m.emissiveIntensity = level(current, w.pin, c) ? 0.5 : 0;
-    for (const t of pinTags) t.e.classList.toggle("high", level(current, t.pin, c) === 1);
+    for (const w of wires) w.m.color.copy(level(current, w.pin, c) ? w.on : w.off);
+    for (const l of labels) if (l.pin != null) l.el.classList.toggle("high", level(current, l.pin, c) === 1);
     render();
   }
 
@@ -534,7 +548,7 @@ async function makeBench(canvas, labelBox) {
   canvas.addEventListener("pointermove", (e) => {
     if (!drag || !e.buttons) return;
     yaw = drag[2] - (e.clientX - drag[0]) * 0.007;
-    pitch = Math.max(0.1, Math.min(1.45, drag[3] + (e.clientY - drag[1]) * 0.005)); render();
+    pitch = Math.max(0.3, Math.min(1.3, drag[3] + (e.clientY - drag[1]) * 0.005)); render();
   });
   canvas.addEventListener("pointerup", () => { drag = null; });
   canvas.addEventListener("wheel", (e) => {

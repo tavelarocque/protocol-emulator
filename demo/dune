@@ -1,6 +1,7 @@
 ; docs/demo.html: this directory's page with recorded runs of the reference
 ; model put in by bin/demo_traces.ml, with the bench (bench.js) and the 3D
-; library it is drawn with (vendor/, three.js r170, MIT), promoted into docs/
+; library it is drawn with (vendor/, three.js r170, MIT) and the type it is
+; set in (vendor/plex.css, IBM Plex, SIL OFL 1.1), promoted into docs/
 ; so it cannot drift from the model and the firmware the tests run.
 
 (rule
@@ -15,4 +16,5 @@
     %{dep:../bin/demo_traces.exe}
     %{dep:page.html}
     %{dep:vendor/three.module.min.js}
-    %{dep:bench.js}))))
+    %{dep:bench.js}
+    %{dep:vendor/plex.css}))))

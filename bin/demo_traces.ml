@@ -11,7 +11,10 @@
    The page is one file: the 3D library (demo/vendor/three.module.min.js,
    MIT) and the bench drawn with it (demo/bench.js) are put in as well.
 
-   Usage: demo_traces.exe page.html three.module.min.js bench.js > demo.html *)
+   The type is IBM Plex (demo/vendor/plex.css, SIL OFL 1.1), carried inside the
+   page as well.
+
+   Usage: demo_traces.exe page.html three.module.min.js bench.js plex.css > demo.html *)
 
 open! Core
 module Isa = Pe_model.Isa
@@ -70,6 +73,7 @@ type trace =
   { changes : (int * int) list (* cycle, and the level of the 8 pins from it on *)
   ; tx : (int * int * int * string) list (* cycle taken, thread, word, meaning *)
   ; rx : (int * int * int) list (* cycle, thread, word *)
+  ; pcs : (int * int) list list (* for each thread: cycle, and its program counter from it on *)
   ; cycles : int
   }
 
@@ -89,8 +93,16 @@ let run ?(inputs = 0xFF) ?device ?(host = fun _ _ _ -> ()) ~threads ~pin_modes ~
   let tx = Queue.create () in
   let rx = Queue.create () in
   let last = ref (-1) in
+  let pcs = Array.map pending ~f:(fun _ -> Queue.create ()) in
+  let last_pc = Array.map pending ~f:(fun _ -> -1) in
   for c = 0 to cycles - 1 do
     host m c pending;
+    Array.iteri pcs ~f:(fun i q ->
+      let pc = (Isa.thread m i).pc in
+      if pc <> last_pc.(i)
+      then (
+        Queue.enqueue q (c, pc);
+        last_pc.(i) <- pc));
     (* A device on the pins says what it drives this cycle, and afterwards
        is shown the lines as they then stand. *)
     let inputs =
@@ -116,7 +128,12 @@ let run ?(inputs = 0xFF) ?device ?(host = fun _ _ _ -> ()) ~threads ~pin_modes ~
     Array.iteri pending ~f:(fun i _ ->
       Option.iter (Isa.pop_rx m ~thread:i) ~f:(fun w -> Queue.enqueue rx (c, i, w)))
   done;
-  { changes = Queue.to_list changes; tx = Queue.to_list tx; rx = Queue.to_list rx; cycles }
+  { changes = Queue.to_list changes
+  ; tx = Queue.to_list tx
+  ; rx = Queue.to_list rx
+  ; pcs = Array.to_list (Array.map pcs ~f:Queue.to_list)
+  ; cycles
+  }
 ;;
 
 (* One pin's level on every cycle. *)
@@ -199,6 +216,27 @@ let listing source =
   |> String.concat ~sep:"\n"
 ;;
 
+(* For each instruction of a program, the line of its listing it is on: a
+   line holds one if something other than a label, a directive or a comment
+   is on it. Checked against the assembler's count. *)
+let instruction_lines ~origin source =
+  let lines = String.split_lines (listing source) in
+  let holds line =
+    let code = String.strip (List.hd_exn (String.split line ~on:';')) in
+    let code =
+      match String.lsplit2 code ~on:':' with
+      | Some (label, rest) when String.for_all label ~f:(fun c -> Char.is_alphanum c || Char.equal c '_') ->
+        String.strip rest
+      | _ -> code
+    in
+    (not (String.is_empty code)) && not (Char.equal code.[0] '.')
+  in
+  let found = List.filter_mapi lines ~f:(fun i line -> if holds line then Some i else None) in
+  if List.length found <> Array.length (Asm.assemble ~origin source)
+  then failwith "demo: a listing's lines do not match its instructions";
+  Array.of_list found
+;;
+
 type mark =
   { pin : int
   ; from : int
@@ -206,10 +244,12 @@ type mark =
   ; text : string
   }
 
-let scene ?(hz = clock_hz) ~id ~title ~what ~claim ~pins ~threads ~trace ~marks ~device () =
+let scene ?(hz = clock_hz) ~id ~title ~capture ~bench ~what ~claim ~pins ~threads ~trace ~marks ~device () =
   O
     [ "id", S id
     ; "clock_hz", I hz
+    ; "capture", S capture
+    ; "bench", S bench
     ; "title", S title
     ; "what", S what
     ; "checked", S claim
@@ -224,6 +264,16 @@ let scene ?(hz = clock_hz) ~id ~title ~what ~claim ~pins ~threads ~trace ~marks 
                ; "source", S (listing t.source)
                ; "words", I (Array.length (Asm.assemble ~origin:t.origin t.source))
                ; "config", config_json t.config
+               ; ( "pc"
+                 , (* where the thread is in its listing, cycle by cycle *)
+                   match List.nth trace.pcs i with
+                   | None -> L []
+                   | Some pcs ->
+                     let lines = instruction_lines ~origin:t.origin t.source in
+                     L
+                       (List.filter_map pcs ~f:(fun (c, pc) ->
+                          let k = pc - t.origin in
+                          if k >= 0 && k < Array.length lines then Some (L [ I c; I lines.(k) ]) else None)) )
                ; ( "tx"
                  , L
                      (List.filter_map trace.tx ~f:(fun (c, th, w, meaning) ->
@@ -300,6 +350,8 @@ let uart_scene () =
   scene
     ~id
     ~title:"UART"
+    ~capture:"TX while the chip sends the three bytes of \"Hi!\""
+    ~bench:"a serial terminal"
     ~what:
       "Fifteen instructions send serial text. The host gives the bit time once, then a byte at a \
        time; the thread makes the start bit, eight data bits and the stop bit by counting clocks."
@@ -376,6 +428,8 @@ let stepper_scene () =
   scene
     ~id
     ~title:"Step and direction"
+    ~capture:"STEP and DIR during four moves: a ramp forwards, then back"
+    ~bench:"a stepper motor and its driver"
     ~what:
       "Ten instructions drive a stepper motor driver such as a DRV8825. Each move is two words: \
        how many steps and which way, then the time for one step. The thread answers when the move \
@@ -436,6 +490,8 @@ let servo_scene () =
   scene
     ~id
     ~title:"RC servo"
+    ~capture:"PWM during nine pulses: three each of 1.0, 1.5 and 2.0 ms"
+    ~bench:"an RC servo"
     ~what:
       "Nine instructions make a pulse train: high for one count, low for another, for as long as \
        the thread runs. A servo reads the width of the pulse as an angle: 1 ms one end, 2 ms the \
@@ -505,6 +561,8 @@ let morse_scene () =
   scene
     ~id
     ~title:"Morse code"
+    ~capture:"KEY while the chip sends SOS"
+    ~bench:"a signal lamp"
     ~what:
       "Three instructions and no knowledge of Morse: the thread puts out whatever cells the host \
        sends, one bit to a cell. The same three send Qi wireless-charging packets and EM4100 \
@@ -608,6 +666,8 @@ let i2c_scene () =
   scene
     ~id
     ~title:"I2C"
+    ~capture:"SDA and SCL during one temperature read"
+    ~bench:"a temperature sensor"
     ~what:
       "Thirty instructions are an I2C controller: START, bytes either way, the acknowledge bit, \
        a repeated START and STOP, on two open-drain wires that a device can also pull low. Here it \
@@ -666,7 +726,7 @@ let can_scene () =
       ()
   in
   if not ok then fail id "the test's check of the run did not pass";
-  let trace = { changes = Queue.to_list seen; tx = []; rx = []; cycles = !cycles } in
+  let trace = { changes = Queue.to_list seen; tx = []; rx = []; pcs = []; cycles = !cycles } in
   let bus = samples trace ~pin:0 and txd = samples trace ~pin:1 in
   (* A frame starts where the bus falls after eleven bits of rest. *)
   let starts =
@@ -743,6 +803,8 @@ let can_scene () =
   scene
     ~id
     ~title:"CAN"
+    ~capture:"The bus (RXD) and the chip's TXD while each node sends one frame"
+    ~bench:"a CAN transceiver and a second node"
     ~what:
       "A CAN node on both threads at 125 kbit/s: one program receives, the other sends. Another \
        node, with a clock 1.25% slow, sends a frame first: the chip acknowledges it and hands over \
@@ -823,6 +885,7 @@ let eth_scene () =
         List.mapi words ~f:(fun i w ->
           0, 0, w, sprintf "packet buffer word %d: bytes %d and %d of the frame" i (2 * i) ((2 * i) + 1))
     ; rx = []
+    ; pcs = []
     ; cycles = Array.length wire
     }
   in
@@ -855,6 +918,8 @@ let eth_scene () =
     ~hz:eth_hz
     ~id
     ~title:"Ethernet"
+    ~capture:"TD+ and TD- at the start of one 70-byte frame"
+    ~bench:"an RJ45 jack and a network switch"
     ~what:
       "A whole Ethernet frame at 10 Mbit/s, where a bit lasts four clocks: too fast for a host to \
        feed a word at a time. So the host writes the frame into the chip's packet buffer and \
@@ -897,6 +962,8 @@ let both_scene () =
   scene
     ~id
     ~title:"Two at once"
+    ~capture:"TX, STEP and DIR while both threads run"
+    ~bench:"a serial terminal and a stepper motor"
     ~what:
       "The chip has two threads, each with its own program memory, FIFOs and clock divider. Here \
        one sends serial text while the other runs a motor. Neither knows the other is there: the \
@@ -964,5 +1031,6 @@ let () =
     (List.fold
        [ "/*DATA*/null", Json.to_string data; "/*THREE*/", as_script (file 2); "/*BENCH*/", file 3 ]
        ~init:template
-       ~f:fill)
+       ~f:fill
+     |> fun page -> fill page ("/*FONTS*/", In_channel.read_all (Sys.get_argv ()).(4)))
 ;;
