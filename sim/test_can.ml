@@ -217,7 +217,8 @@ type outcome =
 (* The chip sends [chip_frames] in order, sending again whenever it loses
    arbitration; the node sends [node_frames] and then [node_bits], frames
    given as their bits on the wire. With [deaf], a range of cycles, the
-   host leaves the receiver's words where they are for that long. *)
+   host leaves the receiver's words where they are for that long. [watch]
+   is shown every cycle: what the chip drives and what the bus carries. *)
 let run
   ?(clkdiv = clkdiv)
   ?(rx = Firmware.can_rx)
@@ -226,6 +227,7 @@ let run
   ?node:(nd = None)
   ?(node_bits = [])
   ?(deaf = 0, 0)
+  ?(watch = fun ~cycle:_ ~chip_tx:_ ~bus:_ -> ())
   ~chip_frames
   ~node_frames
   ()
@@ -300,6 +302,7 @@ let run
       if Option.is_none !first_edge then first_edge := Some c;
       last_edge := Some c);
     prev_tx := chip_tx;
+    watch ~cycle:c ~chip_tx ~bus;
     Option.iter nd ~f:(fun n -> tick n ~bus);
     Isa.step m ~inputs:(0xFE lor Bool.to_int bus);
     incr cycle
@@ -349,9 +352,9 @@ let random_frame rng =
 ;;
 
 (* Everything a run must satisfy, whoever won each arbitration. *)
-let check ?clkdiv ?rx ?tx ?sampler ~bit ~contend ~chip_frames ~node_frames () =
+let check ?watch ?clkdiv ?rx ?tx ?sampler ~bit ~contend ~chip_frames ~node_frames () =
   let nd = node ~bit ~contend in
-  let r = run ?clkdiv ?rx ?tx ?sampler ~node:(Some nd) ~chip_frames ~node_frames () in
+  let r = run ?watch ?clkdiv ?rx ?tx ?sampler ~node:(Some nd) ~chip_frames ~node_frames () in
   let sort = List.sort ~compare:[%compare: int * int list] in
   let got = List.filter_map r.chip_got ~f:Fn.id in
   let ok =

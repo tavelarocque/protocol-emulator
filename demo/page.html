@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Protocol Emulator: firmware on the bench</title>
+<!--
+  docs/demo.html is generated: this page (demo/page.html) with recorded runs
+  of the reference model put in by bin/demo_traces.ml. Edit demo/page.html
+  and run `dune build`.
+
+  One self-contained file, nothing fetched: the 3D library (three.js r170,
+  MIT, demo/vendor) is carried inside it, and demo/bench.js draws the bench.
+-->
+<style>
+:root {
+  --bg: #0a1315; --panel: #0f1c1f; --raise: #142629; --line: #223a3e;
+  --fg: #d9e4e2; --muted: #8aa3a1; --copper: #d38b52; --hi: #f0c14b;
+  --lo: #3b5a5f; --ok: #7cc49b; --t0: #d4775b; --t1: #c96a8f;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 20px max(16px, env(safe-area-inset-right, 0px)) 40px max(16px, env(safe-area-inset-left, 0px)); display: grid; gap: 14px; }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 10px 24px; }
+h1 { font-weight: 600; font-size: clamp(21px, 3vw, 28px); letter-spacing: 0.01em; margin: 0; }
+h1 small { display: block; font: 400 12px var(--mono); color: var(--muted); letter-spacing: 0.03em; margin-top: 3px; }
+.sim { font: 12px var(--mono); color: var(--hi); border: 1px solid #6b5a22; background: #1d1a0d; border-radius: 3px; padding: 5px 9px; max-width: 46ch; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tabs button { font: 500 13px var(--body); color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 7px 12px; cursor: pointer; }
+.tabs button:hover { color: var(--fg); }
+.tabs button[aria-selected="true"] { color: #0a1315; background: var(--copper); border-color: var(--copper); }
+.grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 940px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; min-width: 0; }
+.panel > h2 { font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; padding: 9px 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; }
+.panel > h2 span { text-transform: none; letter-spacing: 0; }
+.stage { position: relative; }
+#bench { display: block; width: 100%; height: 470px; cursor: grab; touch-action: none; }
+#bench:active { cursor: grabbing; }
+@media (max-width: 600px) { #bench { height: 340px; } }
+.view { position: relative; }
+#labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.lab { position: absolute; transform: translate(-50%, -50%); font: 11px var(--mono); color: var(--fg); white-space: nowrap; text-shadow: 0 1px 3px #000, 0 0 8px #000; }
+.lab.dim { color: #b7c9c7; }
+.lab.val { font-size: 12px; background: rgba(10,19,21,0.82); border: 1px solid var(--line); border-radius: 3px; padding: 2px 7px; text-shadow: none; }
+.lab.pins { transform: translate(-50%, -100%); display: grid; gap: 2px; text-shadow: none; }
+.lab.pins span { background: rgba(10,19,21,0.86); border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; color: var(--muted); }
+.lab.pins span.high { color: #0a1315; background: var(--hi); border-color: var(--hi); }
+.zoom { position: absolute; left: 12px; top: 10px; display: flex; gap: 4px; }
+.zoom button { width: 30px; height: 30px; font: 16px var(--mono); color: var(--fg); background: rgba(10,19,21,0.78); border: 1px solid var(--line); border-radius: 3px; cursor: pointer; }
+.nogl[hidden] { display: none; }
+.nogl { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); }
+.stage .hint { position: absolute; left: 12px; bottom: 9px; font: 11px var(--mono); color: var(--muted); pointer-events: none; text-shadow: 0 1px 3px #000; }
+.stage .state { position: absolute; right: 12px; top: 10px; font: 12px var(--mono); color: var(--fg); background: rgba(10,19,21,0.78); border: 1px solid var(--line); border-radius: 3px; padding: 6px 9px; text-align: right; white-space: pre; }
+.about { padding: 12px; display: grid; gap: 10px; }
+.about p { margin: 0; text-wrap: pretty; }
+.about .checked { color: var(--ok); font-size: 13px; }
+.about .checked::before { content: "Checked at build: "; font: 11px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+.controls button { font: 500 13px var(--body); color: var(--fg); background: var(--raise); border: 1px solid var(--line); border-radius: 3px; padding: 6px 12px; cursor: pointer; min-width: 44px; }
+.controls button.run { background: var(--ok); border-color: var(--ok); color: #0a1315; min-width: 84px; }
+.controls .clock { font: 12px var(--mono); color: var(--muted); margin-left: auto; text-align: right; }
+.controls .clock b { color: var(--fg); font-weight: 500; }
+#scope { display: block; width: 100%; height: 190px; cursor: crosshair; touch-action: none; }
+.scopehint { font: 11px var(--mono); color: var(--muted); padding: 6px 12px 9px; }
+.fw { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.thread { border-bottom: 1px solid var(--line); min-width: 0; }
+.thread:last-child { border-bottom: 0; }
+.thread h3 { margin: 0; padding: 9px 12px 0; font: 500 13px var(--body); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.thread h3 .tag { font: 11px var(--mono); padding: 1px 6px; border-radius: 2px; color: #0a1315; }
+.thread h3 a { color: var(--muted); font: 12px var(--mono); }
+.thread .cfg { padding: 2px 12px 0; font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+pre { margin: 8px 0 0; padding: 10px 12px; background: #0b1618; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 12px/1.55 var(--mono); overflow: auto; max-height: 430px; color: var(--fg); tab-size: 8; }
+pre .c { color: var(--muted); }
+pre .l { color: var(--copper); }
+table { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+td, th { text-align: left; padding: 4px 12px; vertical-align: top; }
+th { color: var(--muted); font-weight: 400; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+tr.done td { color: var(--fg); } tr.wait td { color: var(--lo); }
+td.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.words { padding: 6px 0 10px; overflow: auto; max-height: 300px; }
+footer { color: var(--muted); font-size: 12px; }
+footer a, .about a { color: var(--copper); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Protocol Emulator: firmware on the bench
+      <small>one small two-thread CPU · each protocol is a program loaded after fabrication</small></h1>
+    <div class="sim">SIMULATION. Every waveform here is a recorded run of the reference model. Nothing on this page has run on silicon.</div>
+  </header>
+
+  <div class="tabs" id="tabs" role="tablist" aria-label="Scenes"></div>
+
+  <div class="grid">
+    <div style="display:grid; gap:14px; min-width:0; align-content:start">
+      <section class="panel stage">
+        <h2>The bench <span id="benchlabel"></span></h2>
+        <div class="view">
+          <canvas id="bench" aria-label="A drawing of a demo board carrying the chip, wired to a device that follows the recorded pins"></canvas>
+          <div id="labels" aria-hidden="true"></div>
+          <div class="state" id="state"></div>
+          <div class="zoom"><button id="zin" aria-label="Closer">+</button><button id="zout" aria-label="Further">&minus;</button></div>
+          <div class="hint">drag to turn · the board and devices are drawings, the pins are the record</div>
+          <div class="nogl" id="nogl" hidden>The 3D bench could not start here: it needs WebGL, which this browser or frame has not given the page. The record below is complete without it.</div>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Logic analyser <span id="scopelabel"></span></h2>
+        <div class="controls">
+          <button class="run" id="run">Run</button>
+          <button id="restart" title="Back to the start">Restart</button>
+          <button id="fit" title="Show the whole run">Whole run</button>
+          <div class="clock" id="clock"></div>
+        </div>
+        <canvas id="scope"></canvas>
+        <div class="scopehint">click or drag to move the cursor · scroll or pinch to zoom · shift-scroll to pan</div>
+      </section>
+    </div>
+    <div style="display:grid; gap:14px; min-width:0; align-content:start">
+      <section class="panel">
+        <h2>What this is</h2>
+        <div class="about"><p id="what"></p><p class="checked" id="checked"></p></div>
+      </section>
+      <section class="panel">
+        <h2>The firmware <span>all of it</span></h2>
+        <div class="fw" id="fw"></div>
+      </section>
+    </div>
+  </div>
+
+  <footer>
+    Generated by <code>bin/demo_traces.ml</code> from <code>model/isa.ml</code> and <code>model/firmware.ml</code>, the model and the firmware the test suite runs.
+    The chip is designed for tapeout and has not been fabricated. Clock: 10 MHz, and 40 MHz for Ethernet, as in the tests.
+    <a href="https://github.com/tavelarocque/protocol-emulator">Source, tests and proofs</a>.
+  </footer>
+</div>
+
+<script>/*THREE*/</script>
+<script>
+"use strict";
+const DATA = /*DATA*/null;
+const REPO = "https://github.com/tavelarocque/protocol-emulator/blob/main/";
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const COLORS = { t: [css("--t0"), css("--t1")], hi: css("--hi"), lo: css("--lo"), fg: css("--fg"), muted: css("--muted"), line: css("--line"), copper: css("--copper"), ok: css("--ok") };
+
+let scene = null, cursor = 0, playing = false, view = { from: 0, to: 1 };
+
+/* ---------------------------------------------------------------- the record */
+
+// Index of the last change at or before cycle c.
+function changeAt(s, c) {
+  let lo = 0, hi = s.changes.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (s.changes[mid][0] <= c) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+const level = (s, pin, c) => (s.changes[changeAt(s, c)][1] >> pin) & 1;
+
+// Cycles at which a pin rises, up to cycle c.
+function rises(s, pin, c) {
+  const out = [];
+  for (let i = 1; i < s.changes.length && s.changes[i][0] <= c; i++)
+    if (((s.changes[i][1] >> pin) & 1) && !((s.changes[i - 1][1] >> pin) & 1)) out.push(s.changes[i][0]);
+  return out;
+}
+
+function fmtTime(cycles) {
+  const us = cycles / (scene.clock_hz / 1e6);
+  if (us < 10) return (us * 1000).toFixed(0) + " ns";
+  if (us < 1000) return us.toFixed(us < 100 ? 1 : 0) + " us";
+  return (us / 1000).toFixed(us < 100000 ? 2 : 1) + " ms";
+}
+
+// What the device beside the board is doing at the cursor, from the pins alone.
+function deviceState(s, c) {
+  const d = s.device, st = {};
+  if (d.kind === "terminal" || d.kind === "both") {
+    st.text = s.marks.filter((m) => m.pin === d.pin && m.until <= c && /0x[0-9A-F]{2}$/.test(m.text))
+      .map((m) => String.fromCharCode(parseInt(m.text.slice(-2), 16))).join("");
+  }
+  if (d.kind === "stepper" || d.kind === "both") {
+    st.steps = 0;
+    for (const r of rises(s, d.step, c)) st.steps += level(s, d.dir, r) ? 1 : -1;
+  }
+  if (d.kind === "servo") {
+    st.us = null;
+    const rs = rises(s, d.pin, c);
+    for (let i = rs.length - 1; i >= 0; i--) {
+      const fall = s.changes[changeAt(s, rs[i]) + 1];
+      if (fall && fall[0] <= c) { st.us = (fall[0] - rs[i]) / (s.clock_hz / 1e6); break; }
+    }
+  }
+  if (d.kind === "lamp") st.lit = level(s, d.pin, c) === 1;
+  if (d.says) st.say = (d.says.filter((x) => x.c <= c).pop() || { text: d.kind === "network" ? "link up, line idle" : d.kind === "canbus" ? "bus idle" : "waiting to be addressed" }).text;
+  if (d.kind === "network") st.active = level(s, d.plus, c) !== level(s, d.minus, c);
+  if (d.kind === "canbus") { st.chipDrives = !level(s, d.txd, c); st.nodeDrives = !level(s, d.rxd, c) && !st.chipDrives; }
+  return st;
+}
+
+/* ------------------------------------------------------------------ the page */
+
+function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+function listing(src) {
+  return src.split("\n").map((ln) => {
+    const k = ln.indexOf(";");
+    let code = k < 0 ? ln : ln.slice(0, k), com = k < 0 ? "" : ln.slice(k);
+    code = esc(code).replace(/^([a-z_0-9]+:)/, '<span class="l">$1</span>');
+    return code + (com ? '<span class="c">' + esc(com) + "</span>" : "");
+  }).join("\n");
+}
+
+function showScene(id) {
+  scene = DATA.scenes.find((s) => s.id === id);
+  cursor = 0; playing = false;
+  // a run with too many edges to tell apart opens on its beginning
+  view = { from: 0, to: scene.changes.length > 300 ? Math.round(scene.cycles / 8) : scene.cycles };
+  for (const b of $("tabs").children) b.setAttribute("aria-selected", b.dataset.id === id ? "true" : "false");
+  $("what").textContent = scene.what;
+  $("checked").textContent = scene.checked;
+  $("benchlabel").textContent = scene.device.label;
+  $("scopelabel").textContent = scene.pins.map((p) => "P" + p.pin + " " + p.name).join(" · ");
+  $("fw").innerHTML = scene.threads.map((t, i) => {
+    const cfg = Object.entries(t.config).map(([k, v]) => k + " " + v).join(", ") || "the default configuration";
+    return '<div class="thread"><h3><span class="tag" style="background:' + COLORS.t[i] + '">thread ' + i + "</span>" +
+      esc(t.firmware) + " · " + t.words + " instructions " +
+      '<a href="' + REPO + "examples/" + t.firmware + '.s">examples/' + t.firmware + ".s</a></h3>" +
+      '<div class="cfg">' + esc(cfg) + "</div><pre>" + listing(t.source) + "</pre>" +
+      '<div class="words"><table><thead><tr><th>at</th><th></th><th>word</th><th>meaning</th></tr></thead><tbody id="tx' + i + '">' +
+      t.tx.map((w) => [w.c, "host sends", w.w, w.m]).concat(t.rx.map((w) => [w.c, "thread answers", w.w, w.m]))
+        .sort((a, b) => a[0] - b[0])
+        .map((r) => '<tr data-c="' + r[0] + '"><td class="n">' + fmtTime(r[0]) + "</td><td>" + r[1] + '</td><td class="n">0x' + r[2].toString(16).toUpperCase().padStart(4, "0") + "</td><td>" + esc(r[3]) + "</td></tr>").join("") +
+      "</tbody></table></div></div>";
+  }).join("");
+  try { history.replaceState(null, "", "#" + id); } catch (e) { /* a sandboxed frame has no history to write */ }
+  $("run").textContent = "Run";
+  if (bench) bench.setScene(scene);
+  draw();
+}
+
+function refreshRows() {
+  for (const tr of $("fw").querySelectorAll("tr[data-c]")) tr.className = +tr.dataset.c <= cursor ? "done" : "wait";
+  $("clock").innerHTML = "<b>" + fmtTime(cursor) + "</b> of " + fmtTime(scene.cycles) + "<br>cycle " + Math.round(cursor).toLocaleString("en") + " at " + scene.clock_hz / 1e6 + " MHz";
+}
+
+/* ----------------------------------------------------------- logic analyser */
+
+function fitCanvas(cv) {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * dpr) || cv.height !== Math.round(r.height * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [g, r.width, r.height];
+}
+
+const GUTTER = 62;
+const xOf = (c, w) => GUTTER + (c - view.from) / (view.to - view.from) * (w - GUTTER - 8);
+const cOf = (x, w) => view.from + (x - GUTTER) / (w - GUTTER - 8) * (view.to - view.from);
+
+function drawScope() {
+  const [g, w, h] = fitCanvas($("scope")), s = scene;
+  g.clearRect(0, 0, w, h);
+  const rows = s.pins.length, top = 22, rowH = (h - top - 6) / rows;
+  // time axis
+  g.font = "11px " + css("--mono"); g.textBaseline = "middle";
+  const span = view.to - view.from, raw = span / 6, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const tick = [1, 2, 5, 10].map((k) => k * mag).find((t) => t >= raw);
+  g.fillStyle = COLORS.muted; g.strokeStyle = COLORS.line; g.lineWidth = 1;
+  for (let c = Math.ceil(view.from / tick) * tick; c <= view.to; c += tick) {
+    const x = Math.round(xOf(c, w)) + 0.5;
+    g.beginPath(); g.moveTo(x, 16); g.lineTo(x, h); g.stroke();
+    g.fillText(fmtTime(c), x + 3, 8);
+  }
+  s.pins.forEach((p, r) => {
+    const y0 = top + r * rowH, hiY = y0 + 16, loY = y0 + rowH - 6;
+    const owner = s.threads.length > 1 ? (p.pin === s.device.pin ? 0 : 1) : 0;
+    g.fillStyle = COLORS.fg; g.fillText(p.name, 8, (hiY + loY) / 2 - 6);
+    g.fillStyle = COLORS.muted; g.fillText("P" + p.pin, 8, (hiY + loY) / 2 + 8);
+    // marks: what each stretch of the line means
+    g.textBaseline = "alphabetic";
+    for (const m of s.marks) if (m.pin === p.pin && m.until > view.from && m.from < view.to) {
+      const xa = Math.max(GUTTER, xOf(m.from, w)), xb = Math.min(w - 8, xOf(m.until, w));
+      g.fillStyle = cursor >= m.from && cursor < m.until ? "rgba(211,139,82,0.20)" : "rgba(211,139,82,0.08)";
+      g.fillRect(xa, y0 + 2, xb - xa, rowH - 4);
+      if (xb - xa > 26) { g.save(); g.beginPath(); g.rect(xa, y0, xb - xa, rowH); g.clip(); g.fillStyle = COLORS.copper; g.fillText(m.text, xa + 4, y0 + 12); g.restore(); }
+    }
+    g.textBaseline = "middle";
+    // the line itself
+    g.strokeStyle = COLORS.t[owner]; g.lineWidth = 1.6; g.beginPath();
+    let i = changeAt(s, Math.max(0, view.from)), lv = (s.changes[i][1] >> p.pin) & 1;
+    g.moveTo(GUTTER, lv ? hiY : loY);
+    for (i++; i < s.changes.length && s.changes[i][0] <= view.to; i++) {
+      const nv = (s.changes[i][1] >> p.pin) & 1, x = xOf(s.changes[i][0], w);
+      g.lineTo(x, lv ? hiY : loY);
+      if (nv !== lv) { g.lineTo(x, nv ? hiY : loY); lv = nv; }
+    }
+    g.lineTo(w - 8, lv ? hiY : loY); g.stroke();
+  });
+  // host words: a tick where the thread took each one
+  s.threads.forEach((t, i) => { g.fillStyle = COLORS.t[i]; for (const e of t.tx) { const x = xOf(e.c, w); if (x >= GUTTER && x <= w - 8) g.fillRect(x - 1, h - 5, 2, 5); } });
+  const cx = Math.round(xOf(cursor, w)) + 0.5;
+  if (cx >= GUTTER) { g.strokeStyle = COLORS.hi; g.lineWidth = 1; g.beginPath(); g.moveTo(cx, 14); g.lineTo(cx, h); g.stroke(); }
+}
+
+/* ---------------------------------------------------------------- the bench */
+// Drawn by demo/bench.js once the 3D library has loaded; until then, and if
+// the browser has no WebGL, everything else on the page still works.
+let bench = null;
+function drawBench() {
+  if (bench) bench.update(cursor);
+  $("state").textContent = scene.pins.map((p) => p.name.padEnd(4) + " " + (level(scene, p.pin, cursor) ? "high" : "low ")).join("\n");
+}
+
+function draw() { drawScope(); drawBench(); refreshRows(); }
+
+/* ----------------------------------------------------------------- controls */
+
+// A run lasts about nine seconds on screen whatever its real length.
+let last = 0;
+function frame(now) {
+  if (playing) {
+    cursor += (now - last) / 9000 * scene.cycles;
+    if (cursor >= scene.cycles - 1) { cursor = scene.cycles - 1; playing = false; $("run").textContent = "Run again"; }
+    draw();
+  }
+  last = now; requestAnimationFrame(frame);
+}
+$("run").onclick = () => {
+  if (!playing && cursor >= scene.cycles - 1) cursor = 0;
+  playing = !playing; $("run").textContent = playing ? "Pause" : "Run"; draw();
+};
+$("restart").onclick = () => { cursor = 0; playing = false; $("run").textContent = "Run"; draw(); };
+$("fit").onclick = () => { view = { from: 0, to: scene.cycles }; draw(); };
+
+function scopePointer(e) {
+  const r = $("scope").getBoundingClientRect();
+  cursor = Math.max(0, Math.min(scene.cycles - 1, cOf(e.clientX - r.left, r.width)));
+  playing = false; $("run").textContent = "Run"; draw();
+}
+$("scope").addEventListener("pointerdown", (e) => { $("scope").setPointerCapture(e.pointerId); scopePointer(e); });
+$("scope").addEventListener("pointermove", (e) => { if (e.buttons) scopePointer(e); });
+$("scope").addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = $("scope").getBoundingClientRect(), span = view.to - view.from;
+  if (e.shiftKey) { const d = (e.deltaY || e.deltaX) / r.width * span; view = { from: view.from + d, to: view.to + d }; }
+  else { const at = cOf(e.clientX - r.left, r.width), k = Math.exp(e.deltaY * 0.002), ns = Math.max(40, Math.min(scene.cycles, span * k)); view = { from: at - (at - view.from) * ns / span, to: at + (view.to - at) * ns / span }; }
+  const over = Math.max(0, view.to - scene.cycles); view.from -= over; view.to -= over;
+  if (view.from < 0) { view.to -= view.from; view.from = 0; }
+  view.to = Math.min(view.to, scene.cycles); draw();
+}, { passive: false });
+
+for (const s of DATA.scenes) {
+  const b = document.createElement("button");
+  b.textContent = s.title; b.dataset.id = s.id; b.setAttribute("role", "tab"); b.onclick = () => showScene(s.id);
+  $("tabs").appendChild(b);
+}
+window.addEventListener("resize", draw);
+showScene(DATA.scenes.some((s) => "#" + s.id === location.hash) ? location.hash.slice(1) : DATA.scenes[0].id);
+requestAnimationFrame(frame);
+</script>
+<script>
+/*BENCH*/
+makeBench($("bench"), $("labels")).then((b) => {
+  bench = b; b.setScene(scene); draw();
+  $("zin").onclick = () => b.zoomBy(0.85); $("zout").onclick = () => b.zoomBy(1.18);
+}).catch((e) => { console.warn("no 3D bench:", e); $("nogl").hidden = false; });
+</script>
+</body>
+</html>
