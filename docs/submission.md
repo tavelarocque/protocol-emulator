@@ -14,6 +14,12 @@ A laid-out chip in 3D, with the reference model running firmware on it:
 It shows v1.4's layout; the layouts since, with the memories in SRAM
 macros, have not been rendered yet.
 
+Firmware running, as eight recorded runs of the reference model with the
+pins on a logic analyser view: [`demo.html`](demo.html) (one
+self-contained file; download and open it, or
+[view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/demo.html)).
+Simulation only; each run is checked when the page is built.
+
 The chip is a small CPU whose instructions read pins, write pins and count
 clock cycles. A protocol is a program, loaded over SPI after fabrication;
 the largest here is 70 instructions. Nothing in the hardware knows what

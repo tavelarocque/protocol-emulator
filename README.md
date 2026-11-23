@@ -5,7 +5,7 @@
 An open-source protocol emulator ASIC for the
 [Jane Street protocol emulator competition](https://blog.janestreet.com/protocol-emulator-asic-competition/):
 a tiny CPU whose instructions read pins, write pins and count cycles, so UART,
-SPI, I2C and 33 other protocols, 10 Mbit Ethernet among them, are
+SPI, I2C and 47 other protocols, 10 Mbit Ethernet among them, are
 implemented in firmware loaded after fabrication rather than in fixed
 logic. Written in Hardcaml, designed for tapeout through
 [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (8x4 tiles).
@@ -66,6 +66,19 @@ one-page summary for judges. This page is the map.
   stands less jitter than the standard asks, so it needs a short cable.
   The full list is "What is not shown" in
   [`docs/submission.md`](docs/submission.md).
+
+## See it run
+
+[`docs/demo.html`](docs/demo.html) replays eight recorded runs of the
+reference model: UART, I2C with a device answering, CAN with a second
+node, a whole Ethernet frame, step and direction, an RC servo, Morse code,
+and two protocols at once. Each shows the pins as a logic analyser would,
+the firmware listing, and a drawing of the bench those pins would be
+wired to. Every run is checked when the page is built, and the build
+fails if a check does. It is simulation only: no board has been built
+and nothing here has run on hardware. It is one self-contained file with
+no network access: download it and open it in a browser, or
+[view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/demo.html).
 
 ## Architecture
 
@@ -242,7 +255,10 @@ hw/      Hardcaml RTL: pe_core (two threads and their memories, the packet
 model/   reference model, assembler, firmware, UART oracles (no dependency on hw/)
 bin/     pe_sim: assemble a .s file, or run it on the reference model and print
          the pins as they change (`dune exec bin/pe_sim.exe -- run -help`);
-         the Verilog, firmware-image and example generators
+         the Verilog, firmware-image and example generators;
+         demo_traces: records and checks the runs shown in docs/demo.html
+demo/    the demo page's template and bench drawing; vendor/ holds three.js (MIT)
+         and the IBM Plex fonts (SIL OFL 1.1), both built into the page
 examples/ one assembly file per protocol, generated from model/firmware.ml;
          ws2812/: the blind firmware test, task, notes and hidden test
 sim/     OCaml tests: ISA, lockstep harness, random and directed differential tests,
@@ -264,6 +280,7 @@ formal/  Yosys proof that the memories the tests and proofs use equal IHP's
 docs/    submission.md (one-page summary), design-and-verification.md (the report),
          figures.py and img/ (diagrams drawn from the reference model),
          chip.html (the layout in 3D, one self-contained page),
+         demo.html (firmware running on recorded pins, one self-contained page),
          isa.md (instruction set), firmware.md (every engine),
          verification-layers.md, bug-ledger.md, metrics.md,
          info.md (datasheet), coverage-closure.md, related-work.md
