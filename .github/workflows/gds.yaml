@@ -18,6 +18,35 @@ jobs:
         with:
           pdk: ihp-sg13cmos5l
 
+      - name: Print the layout's check reports into the log
+        # The flow only says that maximum slew and capacitance warnings
+        # exist; which nets, by how much, and the worst timing paths are in
+        # report files inside a 156 MB artifact. Printed here they can be
+        # read, and compared from one layout to the next.
+        if: always()
+        continue-on-error: true
+        run: |
+          runs=$(find . -maxdepth 4 -type d -path '*runs/wokwi' | head -n 1)
+          if [ -z "$runs" ]; then echo "no runs/wokwi directory here:"; ls; exit 0; fi
+          section() { echo "::group::$1"; }
+          for f in $(find "$runs" -path '*stapostpnr*' -name checks.rpt | sort); do
+            section "$f"; cat "$f"; echo "::endgroup::"
+          done
+          for f in $(find "$runs" -path '*stapostpnr*' \( -name ws.max.rpt -o -name ws.min.rpt \) | sort); do
+            echo "== $f"; cat "$f"
+          done
+          for f in $(find "$runs" -path '*stapostpnr*' -name max.rpt | sort); do
+            section "$f: the worst setup path"; sed -n 1,140p "$f"; echo "::endgroup::"
+          done
+          for f in $(find "$runs" -path '*repairdesign*' -name '*.log' | sort); do
+            section "$f"; tail -n 80 "$f"; echo "::endgroup::"
+          done
+          section "Magic's illegal overlaps, by kind, then the first twenty"
+          find "$runs" -path '*magic-spiceextraction*' -type f -exec grep -ih "illegal overlap" {} + > "$RUNNER_TEMP/overlaps.txt" || true
+          sed -E 's/(^|[^A-Za-z0-9_])-?[0-9]+(\.[0-9]+)?/\1N/g' "$RUNNER_TEMP/overlaps.txt" | sort | uniq -c | sort -rn | head -n 40
+          head -n 20 "$RUNNER_TEMP/overlaps.txt"
+          echo "::endgroup::"
+
   precheck:
     needs: gds
     runs-on: ubuntu-24.04

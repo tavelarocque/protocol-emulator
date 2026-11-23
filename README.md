@@ -62,8 +62,7 @@ one-page summary for judges. This page is the map.
   protocol decoders.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
-- **Not yet done:** no FPGA or silicon run; signoff warnings for slew and
-  capacitance that are not yet explained; and an Ethernet receiver that
+- **Not yet done:** no FPGA or silicon run; and an Ethernet receiver that
   stands less jitter than the standard asks, so it needs a short cable.
   The full list is "What is not shown" in
   [`docs/submission.md`](docs/submission.md).
@@ -301,10 +300,11 @@ then `node run_usb.mjs` there (see `test/board_emu/README.md`).
 ## Metrics
 
 The v2.3 layout, on Tiny Tapeout's ttihp27a flow (8x4 tiles, 20 ns
-target): 14,837 standard cells and three SRAM macros, 23.8% utilisation,
-0.75 m of wire, setup and hold met at every corner, LVS and the Tiny
-Tapeout precheck passing, laid out in under 40 minutes. The firmware here
-runs the chip at 10 MHz, 12 MHz for USB and 40 MHz for Ethernet. Slew and
-capacitance warnings remain and are not yet explained. The comparison
-with v1.4 and v2.0, the clock sweep and the warnings:
-[`docs/metrics.md`](docs/metrics.md).
+target): 15,065 standard cells and three SRAM macros, 23.8% utilisation
+at floorplanning, 0.76 m of wire, setup and hold met at every corner with
+1.2 ns to spare at the slow one, no slew or capacitance violations, LVS
+and the Tiny Tapeout precheck passing, laid out in about 70 minutes. The
+firmware here runs the chip at 10 MHz, 12 MHz for USB and 40 MHz for
+Ethernet. The comparison with v1.4 and v2.0, the clock sweep, and the
+signoff warnings of the earlier layouts, what caused them and what
+repairing them cost: [`docs/metrics.md`](docs/metrics.md).

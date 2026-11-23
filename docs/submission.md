@@ -214,12 +214,13 @@ runs a program on the reference model and prints the pins.
 | | |
 |---|---|
 | Tiles | 8x4 |
-| Standard cells | 14,837, and three SRAM macros; 23.8% utilisation |
+| Standard cells | 15,065, and three SRAM macros; 23.8% utilisation at floorplanning |
 | Flip-flops | 1,107 |
 | Clock target | 20 ns (50 MHz); the firmware here runs the chip at 10 MHz, 12 MHz for USB and 40 MHz for Ethernet |
-| Setup and hold, every corner | met |
+| Setup and hold, every corner | met; 1.24 ns of setup slack at the slow corner, 0.10 ns of hold slack at the fast one |
+| Slew and capacitance limits, every corner | met |
 | LVS, antenna | pass; Tiny Tapeout precheck (IHP's KLayout rule deck) passes |
-| Layout time | under 40 minutes |
+| Layout time | about 70 minutes |
 
 v2.0 was also laid out at 25 ns and at 16 ns and met timing at every
 corner both times; 20 ns keeps a margin. v1.4, with its program in
@@ -232,10 +233,14 @@ Stated here so nobody has to find it.
 
 - **No silicon and no FPGA run yet.** Everything above is simulation, formal
   proof and an emulated board.
-- **Signoff warnings, not yet explained.** Every layout since v2.0 has
-  maximum-slew and maximum-capacitance warnings at all three corners.
-  Setup and hold are met everywhere. The SRAM macros' pins are the
-  suspect, and that is not confirmed ([`metrics.md`](metrics.md)).
+- **A layout with little to spare.** Every layout from v2.0 to the first
+  of v2.3 had maximum-slew and maximum-capacitance warnings. On v2.3 all
+  but one net of them were on the SRAM macros' pins: the repair step does
+  not count the capacitance between wires. Wider repair margins cleared
+  them at every corner. That cost half a nanosecond of setup slack at the
+  slow corner, and detailed routing did not clear its violations until
+  its 18th iteration, where the first layout did on its 7th
+  ([`metrics.md`](metrics.md)).
 - **Speed is static timing analysis only.** The Ethernet tests clock the
   chip at 40 MHz, but a simulation has no gate delays in it.
 - **The Ethernet receiver needs a clean, short link.** It receives every

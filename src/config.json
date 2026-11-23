@@ -104,6 +104,21 @@
   "//": "Metal4 obstruction show up as illegal overlaps (there is no metal there in the GDS).",
   "ERROR_ON_ILLEGAL_OVERLAPS": 0,
 
+  "//": "Design repair with wide margins, after placement and again after global routing. The repair",
+  "//": "steps estimate a wire's capacitance to ground only; the extracted layout has as much again in",
+  "//": "coupling (70.8 pF to ground and 62.9 pF between wires over 0.75 m), so a net repaired to 80% of",
+  "//": "a limit ends at up to 160% of it. Only the SRAM macros' limits are tight enough for that to show:",
+  "//": "64 fF on a data output and 0.48 ns on an input, the ends of the macros' characterisation tables.",
+  "//": "With the default 20% margin, 15 data outputs were over (the worst 102 fF) and five inputs slow",
+  "//": "(the worst 1.5 ns at the slow corner); a second pass at 25% left 11 to 13 and five. At 60% a data",
+  "//": "output is repaired to 26 fF as the tool counts it. The cell library's own limits are 0.3 pF and",
+  "//": "2.5 ns, so few other nets are touched.",
+  "DESIGN_REPAIR_MAX_CAP_PCT": 60,
+  "DESIGN_REPAIR_MAX_SLEW_PCT": 75,
+  "RUN_POST_GRT_DESIGN_REPAIR": 1,
+  "GRT_DESIGN_REPAIR_MAX_CAP_PCT": 60,
+  "GRT_DESIGN_REPAIR_MAX_SLEW_PCT": 75,
+
   "//": "Configuration docs: https://librelane.readthedocs.io/en/latest/reference/configuration.html",
 
   "//": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",

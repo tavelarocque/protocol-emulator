@@ -15,7 +15,7 @@ AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
 | C1 | The RTL does what the instruction set and register map say, in every state, including states no test reaches | SAT equivalence proof of the whole chip against an independent spec; the spec checked against the reference model | Proof, for the RTL. The spec's agreement with the reference model is tested, not proven (section 3) |
 | C2 | The firmware implements each protocol correctly at the pins | Protocol oracles on the model and the RTL; device models written by other people from real datasheets and standards | Tests, judged by independent oracles |
 | C3 | The gate-level netlist behaves like the RTL | Formal equivalence of the post-layout netlist and the generated Verilog (Yosys, in CI after every layout); the cocotb suite rerun on the netlist; LVS | Proof, from the first cycle after a reset, on every output pin and every pin of the three memories, whatever the memories hold; Hardcaml's Verilog generation and the SRAM macro itself are trusted (section 7) |
-| C4 | The chip meets timing at the 10 MHz the firmware runs it at (12 MHz for USB, 40 MHz for Ethernet), with room to 50 MHz | Static timing analysis of the 8x4 layout at a 20 ns target (50 MHz), three corners | Setup and hold met at every corner. Slew and capacitance warnings stand at all three corners and are not yet explained (section 7). The Ethernet tests clock the chip at 40 MHz, but no simulation here has gate delays in it, so the speed rests on static timing analysis alone |
+| C4 | The chip meets timing at the 10 MHz the firmware runs it at (12 MHz for USB, 40 MHz for Ethernet), with room to 50 MHz | Static timing analysis of the 8x4 layout at a 20 ns target (50 MHz), three corners | Setup and hold met at every corner, with 1.24 ns of setup slack at the slow one, and no slew or capacitance violation at any (section 7). The Ethernet tests clock the chip at 40 MHz, but no simulation here has gate delays in it, so the speed rests on static timing analysis alone |
 | C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb, and in MicroPython on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL: UART, I2C, SPI, JTAG, SWD and USB against the same devices (1-Wire's driver runs there on a simulated bus; PS/2 and CAN do not run there yet; the drivers added since v2.0 run there against a chip that only records what it is asked, and must ask the same as under CPython) | Tests in simulation and emulation; not yet run on hardware |
 
 ## 2. Design
@@ -552,14 +552,19 @@ answer it.
   for USB and 40 MHz for Ethernet. The layout targets 20 ns and meets
   setup and hold at every corner. v2.0 had about 4 ns to spare between
   flip-flops at the slow corner (1.08 V, 125 °C) and also met 25 ns and
-  16 ns, the last with under 1 ns to spare; the slack of the v2.3 layout
-  has not been read from its report files. v1.4's builds showed that
+  16 ns, the last with under 1 ns to spare. The v2.3 layout has 1.24 ns
+  of setup slack at the slow corner, 4.40 ns at the typical one and
+  4.92 ns at the fast one, and 0.10 ns of hold slack at the fast corner;
+  its slowest path begins at a read of an SRAM macro. v1.4's builds showed that
   slack of about a nanosecond moves from one layout run to the next, so
   nothing above 50 MHz is claimed. And 50 MHz, like the 40 MHz Ethernet
   needs, rests on static timing analysis alone: the simulations that
-  clock the chip at 40 MHz have no gate delays in them. Maximum-slew and maximum-capacitance warnings are reported at all
-  three corners. They arrived with the SRAM macros, whose pins are the
-  suspect; the cause is not confirmed ([`metrics.md`](metrics.md)).
+  clock the chip at 40 MHz have no gate delays in them. The maximum-slew
+  and maximum-capacitance warnings that arrived with the SRAM macros were
+  on the macros' pins, because the repair step does not count the
+  capacitance between wires. The layout is now repaired with wider
+  margins and has none at any corner, for half a nanosecond of slack at
+  the slow corner and a harder routing run ([`metrics.md`](metrics.md)).
 - **Pads, reset and power** are Tiny Tapeout's and are not modelled beyond
   the gate-level simulation.
 - **Hardware.** Nothing has run on silicon yet. The host driver has run in
@@ -652,7 +657,7 @@ make -C test/board_emu && cd test/board_emu && node run_usb.mjs
 
 The setup is in the [README](../README.md). In recent GitHub Actions runs
 the OCaml job took about 55 minutes, more than half of it the proof of
-the packet buffer's memory, and the cocotb suite about 25. The layout itself takes under 40 minutes;
+the packet buffer's memory, and the cocotb suite about 25. The layout itself takes about 70 minutes;
 the gate-level rerun of the cocotb suite is the long part of that
 workflow, about an hour and a half. The RTL-to-netlist proof with its
 five planted bugs takes about 3 minutes.
