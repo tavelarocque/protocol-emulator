@@ -90,6 +90,17 @@ the TLC5620 DAC's four-wire interface; and Qi packets, EM4100 tags and
 Morse, all three framed by the driver on a three-instruction program that
 puts out levels at a fixed rate.
 
+Seventeen more devices then followed on engines the chip already had,
+with no firmware change, each judged by sigrok's decoder for the part:
+on I2C an ATSHA204A crypto chip, a PCA9571 port expander, an XFP optical
+module and HDCP's handshake on an HDMI link; on MDIO a CFP optical
+module, in clause 45 frames the driver builds; on SPI the in-system
+programming of an ATmega168; on Microwire an ADE7758 energy meter and an
+X2444M NOVRAM; on the UART a PAN1321 Bluetooth module, an Amulet display
+and ARM ITM trace, bare and in TPIU frames; on 1-Wire a DS2408 switch, a
+DS2432 EEPROM and a DS28EA00 thermometer; and on JTAG an STM32's two
+chained TAPs and a MIPS EJTAG session. That makes 67.
+
 **Then CAN, from a transmitter to a node.** The v1.4 engine sent frames
 the host had made and listened. On v2.1's CRC register the transmitter
 makes the whole frame itself: bit stuffing, CRC-15, arbitration. A node
@@ -175,6 +186,7 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 | LIN | master frames, on the DMX512 transmitter | no new firmware |
 | 24Cxx EEPROM, DS1307 clock, LM75 sensor | on the I2C controller | no new firmware |
 | SPI NOR flash, WS2801 LEDs, MAX7219 | on the SPI controller | no new firmware |
+| 17 more devices, from an ATSHA204A to MIPS EJTAG | on the I2C, MDIO, SPI, Microwire, UART, 1-Wire and JTAG controllers | no new firmware |
 
 ![SPI controller waveform from the reference model](img/spi.svg)
 
@@ -198,7 +210,7 @@ runs a program on the reference model and prints the pins.
    picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
    USB device, sockit_owm's 1-Wire slave. For USB, 1-Wire, WS2812, SWD, PS/2,
    CAN and every protocol added after them but Ethernet, the recorded pins
-   go to sigrok's protocol decoders, 48 tests in all, 46 of them with a
+   go to sigrok's protocol decoders, 65 tests in all, 63 of them with a
    fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
    receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
    sender has its own clock, 100 ppm off, and jitter on every edge.
@@ -206,7 +218,7 @@ runs a program on the reference model and prints the pins.
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
-5. **The gates, not only the RTL.** All 76 chip-level tests pass on the
+5. **The gates, not only the RTL.** All 93 chip-level tests pass on the
    post-layout netlist, with IHP's models of the SRAMs in place of the
    macros. That includes Ethernet at a 40 MHz clock, both ways.
 6. **The software that will run on the board.** The MicroPython driver is

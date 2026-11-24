@@ -5,7 +5,7 @@
 An open-source protocol emulator ASIC for the
 [Jane Street protocol emulator competition](https://blog.janestreet.com/protocol-emulator-asic-competition/):
 a tiny CPU whose instructions read pins, write pins and count cycles, so UART,
-SPI, I2C and 47 other protocols, 10 Mbit Ethernet among them, are
+SPI, I2C and 64 other protocols, 10 Mbit Ethernet among them, are
 implemented in firmware loaded after fabrication rather than in fixed
 logic. Written in Hardcaml, designed for tapeout through
 [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (8x4 tiles).
@@ -24,7 +24,7 @@ one-page summary for judges. This page is the map.
   protocol pins (input, push-pull or open-drain each), loaded over an SPI
   host port. LVS and the Tiny Tapeout precheck pass, and timing is met at
   50 MHz at every corner ([`docs/metrics.md`](docs/metrics.md)).
-- **50 protocols as firmware**, two running at a time. UART, SPI and I2C as
+- **67 protocols as firmware**, two running at a time. UART, SPI and I2C as
   required, in both roles for SPI and I2C; both stretch goals, low-speed
   USB as a host and 10 Mbit Ethernet, sending and receiving; JTAG, SWD,
   1-Wire, WS2812, PS/2 and CAN; I2S, DMX512, Wiegand, NEC and RC-5
@@ -33,9 +33,10 @@ one-page summary for judges. This page is the map.
   reader, TDM audio, a TLC5620 DAC, Qi packets, EM4100 tags and Morse.
   Twenty-six have firmware of their own. Four are framed by the driver on
   two senders that know no code (RC-6 on an infrared burst sender; Qi,
-  EM4100 and Morse on a sender of levels at a fixed rate), and twenty
-  more (MIDI, LIN, Modbus RTU and seventeen devices on I2C and SPI) run on
-  the other engines with framing in the host driver.
+  EM4100 and Morse on a sender of levels at a fixed rate), and thirty-seven
+  more (MIDI, LIN, Modbus RTU and thirty-four devices on I2C, SPI,
+  Microwire, UART, 1-Wire, JTAG and MDIO) run on the other engines with
+  framing in the host driver.
 - **Hardware that did not need to know the protocols.** Nine engines were
   added to v1.4 with no RTL change. v2.0 changed one thing, the program
   memory, and eleven more engines followed, again with no RTL change.
@@ -58,7 +59,7 @@ one-page summary for judges. This page is the map.
   the RTL; and the memories those proofs assume equal IHP's own models of
   the SRAM macros.
 - **Judged by tools this project did not write.** Device models by other
-  people where one exists; for 48 tests the recorded pins go to sigrok's
+  people where one exists; for 65 tests the recorded pins go to sigrok's
   protocol decoders.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
@@ -198,6 +199,15 @@ the largest engine, Ethernet transmit, uses 70.
 | SPI NOR flash, WS2801 LEDs | on the SPI controller | no new firmware | sigrok's decoder for each; picosoc's flash |
 | MAX7219 | on the SPI controller | no new firmware | sigrok's MAX7219 decoder |
 | nRF24L01, CC1101, RFM12 and MRF24J40 radios; ENC28J60 Ethernet controller; ADF435x synthesiser; SD card in SPI mode | on the SPI controller | no new firmware | sigrok's decoder for each, reading the commands sent and the bytes a scripted device answers |
+| ATSHA204A crypto chip (wake, a Read command with its CRC-16, sleep), PCA9571 port expander | on the I2C controller | no new firmware | each part written from its data sheet as a cocotbext-i2c device; sigrok's decoder for each |
+| XFP optical module (identifier and alarm thresholds); HDCP's handshake on an HDMI link (Bcaps, An, Aksv, Bksv, Ri', with no cipher) | on the I2C controller, through a repeated START | no new firmware | cocotbext-i2c's memory laid out as the part's map; sigrok's decoder for each |
+| CFP optical module's ID registers | on the MDIO controller, in clause 45 frames the driver builds | no new firmware | a clause 45 device written from IEEE 802.3 and the CFP agreement; sigrok's MDIO and CFP decoders |
+| AVR in-system programming of an ATmega168 (enable, signature, fuses) | on the SPI controller, RESET on a fourth pin | no new firmware | the part written from its data sheet; sigrok's AVR ISP decoder |
+| ADE7758 energy meter (register writes and reads); X2444M NOVRAM (writes and store; its reads answer on an edge the controller does not sample) | on the Microwire controller | no new firmware | each part written from its data sheet; sigrok's decoder for each |
+| PAN1321 Bluetooth module's AT commands; an Amulet display's ASCII protocol | on the UART, both ways | no new firmware | each device scripted from its manual, answering; sigrok's decoder for each |
+| ARM ITM trace over SWO, bare and inside TPIU frames | on the UART transmitter | no new firmware | a TPIU formatter written from ARM CoreSight; sigrok's ITM and TPIU decoders |
+| DS2408 switch, DS2432 EEPROM, DS28EA00 thermometer | on the 1-Wire controller | no new firmware | each part's commands written from its data sheet, on sockit_owm's slave model; sigrok's decoder for each |
+| An STM32's boundary-scan TAP and Cortex-M3 debug port, chained; a MIPS EJTAG session | on the JTAG controller | no new firmware | each TAP written from IEEE 1149.1 and the part's manual; sigrok's decoder for each (for EJTAG, its instruction and processor-access rows: its register rows label the scan before) |
 
 The "checked against" models are other people's wherever one exists. For
 SWD, PS/2 and CAN the device model is written here from the standard, so
@@ -205,7 +215,7 @@ the pins are also recorded and handed to sigrok's protocol decoders, which
 this project did not write ([`test/sigrok.py`](test/sigrok.py)). Every
 protocol from I2S down is judged the same way, by sigrok's decoder for it.
 The USB, 1-Wire and WS2812 recordings go to sigrok as well, beside the
-device models. In all but two of the 48 tests (DS1307 and PWM) one bit is
+device models. In all but two of the 65 tests (DS1307 and PWM) one bit is
 then forced on the recorded wire, and the decoder's verdict must change.
 Ethernet has only the receiver and sender written here from the standard,
 with the CRC-32 from `zlib`.
