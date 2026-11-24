@@ -1,0 +1,2 @@
+cell_cycles=8
+-config sideset_base=0,sideset_count=1,autopull=1,threshold=16,in_msb_first=1,clkdiv=4 -mode 0=pp

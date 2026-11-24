@@ -1,0 +1,1 @@
+-config out_base=0,out_count=1,threshold=16,autopull=1,clkdiv=25 -mode 0=pp

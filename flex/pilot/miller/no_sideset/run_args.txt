@@ -1,0 +1,1 @@
+-config clkdiv=5,set_base=0,set_count=1,threshold=8,timeout=0,timeout_vector=8 -mode 0=pp

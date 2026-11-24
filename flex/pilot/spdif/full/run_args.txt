@@ -1,0 +1,2 @@
+cell_cycles=8
+-config set_base=0,set_count=1,autopull=1,threshold=16 -mode 0=pp
