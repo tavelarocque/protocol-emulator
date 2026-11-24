@@ -2758,6 +2758,110 @@ async def test_mdio(dut):
         assert wrong[1].endswith("ERROR") and wrong[2:] == want[2:], wrong
 
 
+async def mdio_mmd(dut, registers, driving, prtad, devad, delay=3):
+    """A clause 45 MMD written from IEEE 802.3 clause 45, on the same pins as
+    mdio_phy. After 32 ones of preamble it takes ST 00, the opcode, PRTAD and
+    DEVAD. An address frame (opcode 00) sets its register address and a
+    write (01) stores to it, each from the 16 bits after the turnaround; a
+    read (11) drives the turnaround 0 and the register MSB first, [delay]
+    cycles after each rising edge, as mdio_phy does. Frames for another port
+    or device, and clause 22 frames, it leaves alone."""
+    bits, drive, out, was, cycle, due = [], [], 1, 0, 0, []
+    address, taking = 0, None  # taking: (opcode, bits still to come)
+    number = lambda field: int("".join(map(str, field)), 2)
+    while True:
+        await RisingEdge(dut.clk)
+        cycle += 1
+        while due and due[0][0] <= cycle:
+            out = due.pop(0)[1]
+        driving["phy"] = out
+        oe, pins = int(dut.uio_oe.value), int(dut.uio_out.value)
+        mdc = pins & 1
+        chip = 0 if (oe >> 1) & 1 and not (pins >> 1) & 1 else 1
+        dut.uio_in.value = (int(dut.uio_in.value) & ~2) | ((chip & out) << 1)
+        if mdc and not was:  # MDC rose on the pin one cycle ago
+            if drive:
+                due.append((cycle + delay - 2, drive.pop(0)))
+            elif taking is not None:
+                bits.append(chip & out)
+                if len(bits) == 18:  # the turnaround, then the 16 bits
+                    if taking == 0b00:
+                        address = number(bits[2:])
+                    else:
+                        registers[address] = number(bits[2:])
+                    bits, taking = [], None
+            else:
+                bits.append(chip & out)
+                frame = bits[-46:]
+                if len(frame) == 46 and all(frame[:32]) and frame[32:34] == [0, 0]:
+                    opcode = number(frame[34:36])
+                    if number(frame[36:41]) == prtad and number(frame[41:46]) == devad:
+                        if opcode == 0b11:
+                            value = registers.get(address, 0xFFFF)
+                            drive = [1, 0] + [(value >> (15 - k)) & 1 for k in range(16)] + [1]
+                            due.append((cycle + delay - 2, drive.pop(0)))
+                        elif opcode in (0b00, 0b01):
+                            taking = opcode
+                    bits = []
+        was = mdc
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_cfp_module(dut):
+    """A CFP 100 Gigabit module's management interface on the MDIO
+    controller: MDIO clause 45, which the same firmware carries because the
+    host writes the frame's header word. As the CFP MSA lays it out, the
+    module answers device address 1 at its port address, and the host reads
+    the first four registers of NVR 1, the basic ID table, each with an
+    address frame and a read frame. sigrok's CFP decoder, on its MDIO
+    decoder, must place each read in NVR 1 and name the module a CFP; the
+    module is written here from the MSA's register map."""
+    await reset(dut)
+    dut.dev_mode.value = 0  # an earlier test's device may still be wired to the pins
+    driving = {"phy": 1}
+    line = lambda: driving["phy"] & ~(int(dut.uio_oe.value) & ~int(dut.uio_out.value)) >> 1 & 1
+    trace = sigrok.Trace(dut, {"mdc": lambda: int(dut.uio_out.value) & 1, "mdio": line})
+    # Identifier CFP; power class 2; LC connector; 100GE-LR4. Each a byte in
+    # the low half of its register.
+    nvr1 = {0x8000: 0x0E, 0x8001: 0x40, 0x8002: 0x07, 0x8003: 0x01}
+    cocotb.start_soon(mdio_mmd(dut, dict(nvr1), driving, prtad=1, devad=1))
+    chip = pe.Chip(sim_port(dut))
+    got = []
+
+    def header(opcode, prtad, devad):
+        """ST 00 (clause 45), the opcode, the port and device, and the
+        turnaround: released for a read, 10 otherwise."""
+        return (opcode << 12) | (prtad << 7) | (devad << 2) | (0b11 if opcode & 0b10 else 0b10)
+
+    @bridge
+    def play():
+        bus = more.Mdio(chip, firmware("mdio"))
+        for register in nvr1:
+            bus._words([0xFFFF, 0xFFFF, header(0b00, 1, 1), register])
+            back = bus._words([0xFFFF, 0xFFFF, header(0b11, 1, 1), 0xFFFF])
+            got.append(None if back[2] & 1 else back[3])
+
+    await play()
+    await ClockCycles(dut.clk, 100)
+    trace.stop()
+    assert got == list(nvr1.values()), got
+    if sigrok.available():
+        decoder = "mdio,cfp"
+        want = ["CFP NVR 1: Basic ID register", "Module identifier: CFP"] + \
+            ["CFP NVR 1: Basic ID register"] * 3
+        found = trace.decode(decoder, "cfp")
+        assert texts(found) == want, texts(found)
+        reads = [t for t in texts(trace.decode("mdio")) if t.startswith("ADDR: ")]
+        assert reads == [f"ADDR: {r:04X} READ:  {v:04X} PRTAD: 01 DEVAD: 01"
+                         for r, v in nvr1.items()], reads
+        # The identifier's last bit held high as the module sends it: 0x0F.
+        a, b, _ = found[0]
+        rises = [t for t, v in trace.level("mdc") if v == 1 and a <= t <= b]
+        last = rises[-1]
+        wrong = texts(trace.forced("mdio", last - 2, last + 2, 1).decode(decoder, "cfp"))
+        assert wrong == [want[0], "Module identifier: CXP (TBD)"] + want[2:], wrong
+
+
 @cocotb.test(timeout_time=200, timeout_unit="ms")
 async def test_dali(dut):
     """DALI forward frames, read back by sigrok's DALI decoder; every half
@@ -4007,6 +4111,105 @@ async def test_pca9571_expander(dut):
         a, b = next((a, b) for a, b, text in found if text == "Outputs set: 3C")
         wrong = texts(trace.forced("sda", a, b, 0).decode(decoder, "pca9571"))
         assert wrong != want and any(t.startswith("Warning: read value") for t in wrong), wrong
+
+
+def i2c_bit(trace, at, k):
+    """The samples over which SDA carries bit k (0 the first, MSB) of the
+    byte whose first bit SCL clocks in at sample [at]: from the fall of SCL
+    before that bit's rising edge to the fall after it. Holding SDA there
+    changes that one bit and makes no START or STOP."""
+    scl = trace.level("scl")
+    rise = [t for t, v in scl if v == 1 and t >= at][k]
+    before = max(t for t, v in scl if v == 0 and t < rise)
+    after = min(t for t, v in scl if v == 0 and t > rise)
+    return before + 1, after
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_xfp_module(dut):
+    """An XFP optical module's management interface on the I2C controller:
+    at address 0x50 (0xA0 on the wire), as INF-8077i lays it out, the host
+    reads from byte 0 the module identifier and the alarm and warning
+    thresholds that follow it, through a repeated START, as a host does on
+    finding a module. sigrok's XFP decoder, on its I2C decoder, must name
+    the module and read each threshold in degrees and milliwatts;
+    cocotbext-i2c's memory holds the module's lower memory."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    memory, transfer, _, read_bytes = await i2c_session(dut, 0x50, 256)
+    lower = [0x06, 0x00]  # identifier XFP; signal conditioner control
+    word = lambda v: [(v >> 8) & 0xFF, v & 0xFF]
+    lower += word(75 * 256) + word(-10 * 256) + word(70 * 256) + word(-5 * 256)  # 1/256 degree
+    lower += [0] * 8  # reserved
+    lower += [0] * 8  # bias current thresholds, not set
+    lower += word(20000) + word(1000) + [0] * 4  # TX power alarms, 0.1 uW each
+    lower += [0] * 24  # RX power and AUX thresholds, not set
+    assert len(lower) == 58
+    memory.write_mem(0, bytes(lower))
+    reports = await transfer(read_bytes(0x00, len(lower)))
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert [rev8(r & 0xFF) for r in reports[3:]] == lower, reports
+    if sigrok.available():
+        decoder = "i2c,xfp"
+        want = ["Module identifier: XFP", "Temp high alarm: 75.0 C", "Temp low alarm: -10.0 C",
+                "Temp high warning: 70.0 C", "Temp low warning: -5.0 C",
+                "TX power high alarm: 2.00 mW", "TX power low alarm: 0.10 mW"]
+        found = trace.decode(decoder, "xfp=fieldnames-and-values")
+        assert texts(found) == want, texts(found)
+        # The identifier's last bit held high as it is read: 0x07, an XFF.
+        a, b = i2c_bit(trace, found[0][0], 7)
+        wrong = texts(trace.forced("sda", a, b, 1).decode(decoder, "xfp=fieldnames-and-values"))
+        assert wrong == ["Module identifier: XFF"] + want[1:], wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_hdcp(dut):
+    """HDCP 1.4 authentication as a source starts it over the HDMI DDC, which
+    is I2C with the sink's HDCP port at 0x3A (0x74 on the wire): read Bcaps,
+    write An and then Aksv, read Bksv, read Ri'. Each read sets the offset
+    and turns round with a repeated START. The sink is cocotbext-i2c's
+    memory holding a fixed Bksv, Bcaps and Ri'; no cipher runs, only the
+    register traffic. sigrok's HDCP decoder, on its I2C decoder, must name
+    each step."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    memory, transfer, write_bytes, read_bytes = await i2c_session(dut, 0x3A, 256)
+    bksv = [0x51, 0x1E, 0xF2, 0x1A, 0xCD]  # a KSV has twenty ones and twenty zeros
+    aksv = [0x14, 0xF7, 0x61, 0x03, 0xB7]
+    an = [0x34, 0x27, 0x1C, 0x13, 0x0A, 0x22, 0x13, 0x80]
+    ri = [0x3E, 0x51]
+    assert sum(bin(b).count("1") for b in bksv) == sum(bin(b).count("1") for b in aksv) == 20
+    memory.write_mem(0x00, bytes(bksv))
+    memory.write_mem(0x08, bytes(ri))
+    memory.write_mem(0x40, bytes([0x80]))  # Bcaps: HDMI capable, not a repeater
+    bcaps = await transfer(read_bytes(0x40, 1))
+    await ClockCycles(dut.clk, 200)
+    await transfer(write_bytes([0x18] + an))
+    await ClockCycles(dut.clk, 200)
+    await transfer(write_bytes([0x10] + aksv))
+    await ClockCycles(dut.clk, 200)
+    got_bksv = await transfer(read_bytes(0x00, 5))
+    await ClockCycles(dut.clk, 200)
+    got_ri = await transfer(read_bytes(0x08, 2))
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert rev8(bcaps[3] & 0xFF) == 0x80, bcaps
+    assert [rev8(r & 0xFF) for r in got_bksv[3:]] == bksv, got_bksv
+    assert [rev8(r & 0xFF) for r in got_ri[3:]] == ri, got_ri
+    assert memory.read_mem(0x18, 8) == bytes(an) and memory.read_mem(0x10, 5) == bytes(aksv)
+    if sigrok.available():
+        decoder = "i2c,hdcp"
+        want = ["1.4 Bcaps", "1.4 An - Session random number", "1.4 Aksv - Transmitter KSV",
+                "1.4 Bksv - Receiver KSV", "1.4 Ri' - Link Verification"]
+        found = trace.decode(decoder, "hdcp")
+        assert texts(found) == want, texts(found)
+        # In the last session the offset's bit 3 held low: 0x00, not 0x08,
+        # so the sink is asked for Bksv again instead of Ri'.
+        at = [a for a, _, text in trace.decode("i2c") if text == "Data write: 08"][-1]
+        a, b = i2c_bit(trace, at, 4)
+        wrong = texts(trace.forced("sda", a, b, 0).decode(decoder, "hdcp"))
+        assert wrong == want[:-1] + ["1.4 Bksv - Receiver KSV"], wrong
 
 
 @cocotb.test(timeout_time=60, timeout_unit="ms")
