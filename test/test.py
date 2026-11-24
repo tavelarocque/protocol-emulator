@@ -1224,6 +1224,310 @@ async def test_thirdparty_jtag(dut):
     ], f"monitor saw {seen}"
 
 
+# --- Devices on the JTAG controller: no new firmware -----------------------------
+#
+# The same firmware and driver against other parts' TAPs: only the
+# instructions and data the host shifts change. The TAPs are written here
+# from IEEE 1149.1 and each part's documents, in Python, on the pins
+# directly (dev_mode 0), and sigrok's decoder for the part, stacked on its
+# JTAG decoder, must read what the driver meant.
+
+JTAG_NEXT = {  # IEEE 1149.1's state diagram: state -> (next with TMS 0, with TMS 1)
+    "TEST-LOGIC-RESET": ("RUN-TEST/IDLE", "TEST-LOGIC-RESET"),
+    "RUN-TEST/IDLE": ("RUN-TEST/IDLE", "SELECT-DR-SCAN"),
+    "SELECT-DR-SCAN": ("CAPTURE-DR", "SELECT-IR-SCAN"),
+    "CAPTURE-DR": ("SHIFT-DR", "EXIT1-DR"),
+    "SHIFT-DR": ("SHIFT-DR", "EXIT1-DR"),
+    "EXIT1-DR": ("PAUSE-DR", "UPDATE-DR"),
+    "PAUSE-DR": ("PAUSE-DR", "EXIT2-DR"),
+    "EXIT2-DR": ("SHIFT-DR", "UPDATE-DR"),
+    "UPDATE-DR": ("RUN-TEST/IDLE", "SELECT-DR-SCAN"),
+    "SELECT-IR-SCAN": ("CAPTURE-IR", "TEST-LOGIC-RESET"),
+    "CAPTURE-IR": ("SHIFT-IR", "EXIT1-IR"),
+    "SHIFT-IR": ("SHIFT-IR", "EXIT1-IR"),
+    "EXIT1-IR": ("PAUSE-IR", "UPDATE-IR"),
+    "PAUSE-IR": ("PAUSE-IR", "EXIT2-IR"),
+    "EXIT2-IR": ("SHIFT-IR", "UPDATE-IR"),
+    "UPDATE-IR": ("RUN-TEST/IDLE", "SELECT-DR-SCAN"),
+}
+
+
+class JtagTap:
+    """A TAP controller written from IEEE 1149.1, timed as test/jtag_tap.v
+    is: the state changes and registers capture and shift as TCK rises; TDO
+    changes, and the instruction and data registers update, as it falls.
+    [registers] maps an instruction to (length, capture, update): capture()
+    is what Capture-DR loads, update(value) is given what Update-DR leaves
+    (or is None). Every other instruction selects the 1-bit BYPASS, which
+    captures 0. Test-Logic-Reset selects [reset_ir]."""
+
+    def __init__(self, ir_length, ir_capture, reset_ir, registers):
+        self.ir_length, self.ir_capture, self.reset_ir = ir_length, ir_capture, reset_ir
+        self.registers = registers
+        self.state, self.ir, self.shift, self.length, self.tdo = "TEST-LOGIC-RESET", reset_ir, 0, 1, 1
+
+    def selected(self):
+        return self.registers.get(self.ir, (1, lambda: 0, None))
+
+    def rise(self, tms, tdi):
+        if self.state == "CAPTURE-IR":
+            self.shift, self.length = self.ir_capture, self.ir_length
+        elif self.state == "CAPTURE-DR":
+            self.length, capture, _ = self.selected()
+            self.shift = capture()
+        elif self.state in ("SHIFT-IR", "SHIFT-DR"):
+            self.shift = (self.shift >> 1) | (tdi << (self.length - 1))
+        self.state = JTAG_NEXT[self.state][tms]
+
+    def fall(self):
+        self.tdo = self.shift & 1 if self.state in ("SHIFT-IR", "SHIFT-DR") else 1
+        if self.state == "UPDATE-IR":
+            self.ir = self.shift
+        elif self.state == "UPDATE-DR" and self.selected()[2]:
+            self.selected()[2](self.shift)
+        elif self.state == "TEST-LOGIC-RESET":
+            self.ir = self.reset_ir
+
+
+async def jtag_chain(dut, taps):
+    """[taps] in a chain, TDI to TDO, on the JTAG controller's pins: TCK
+    (pin 0), TMS (1) and TDI (2) from the chip into the first, each TAP's
+    TDO into the next one's TDI, and the last one's TDO into pin 3."""
+    was = 0
+    dut.uio_in.value = 0b1000
+    while True:
+        await FallingEdge(dut.clk)  # mid-cycle: chip outputs have settled
+        out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+        tck = out & oe & 1
+        if tck and not was:
+            tms, bit = (out >> 1) & 1, (out >> 2) & 1
+            for tap in taps:  # each takes the TDO its neighbour had before this edge
+                tdo = tap.tdo
+                tap.rise(tms, bit)
+                bit = tdo
+        elif was and not tck:
+            for tap in taps:
+                tap.fall()
+            dut.uio_in.value = (int(dut.uio_in.value) & ~8) | (taps[-1].tdo << 3)
+        was = tck
+
+
+async def jtag_session(dut, taps, play):
+    """Runs [play](driver) on the JTAG controller against [taps]; returns
+    its result and the recorded pins."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    pins = lambda: int(dut.uio_out.value) & int(dut.uio_oe.value)
+    trace = sigrok.Trace(dut, {"tck": lambda: pins() & 1, "tms": lambda: (pins() >> 1) & 1,
+                               "tdi": lambda: (pins() >> 2) & 1,
+                               "tdo": lambda: (int(dut.uio_in.value) >> 3) & 1})
+    device = cocotb.start_soon(jtag_chain(dut, taps))
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def run():
+        return play(pe.JtagController(chip, firmware("jtag")))
+
+    result = await run()
+    await ClockCycles(dut.clk, 20)
+    trace.stop()
+    device.cancel()
+    return result, trace
+
+
+JTAG_BUS = "jtag:tdi=tdi:tdo=tdo:tck=tck:tms=tms"
+
+
+def jtag_tdo_bit(trace, a, b, k, level):
+    """The recording with TDO held at [level] through bit k (counted from
+    the first out) of the scan between samples a and b, as sigrok's JTAG
+    decoder times the bits."""
+    bits = [(s, e) for s, e, _ in trace.decode(JTAG_BUS, "jtag=bit-tdo") if a <= s < b]
+    s, e = bits[k]
+    return trace.forced("tdo", s, e, level)
+
+
+STM32_CPU_IDCODE = 0x3BA00477  # Arm's JTAG-DP, as in an STM32F1's Cortex-M3
+STM32_BS_IDCODE = 0x16410041  # an STM32F1 medium-density, revision B
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_jtag_stm32(dut):
+    """An STM32F1's two TAPs on the JTAG controller, as RM0008 chains them:
+    TDI into the boundary scan TAP (5-bit instructions), then the
+    Cortex-M3's JTAG-DP (4-bit, from Arm's ADIv5) to TDO. The driver does
+    what a debugger does: reads both IDCODEs after reset, selects the
+    Cortex-M3's IDCODE with the other TAP in BYPASS and reads it, then
+    through DPACC writes CTRL/STAT's two power-up requests, reads CTRL/STAT
+    and gets the result, both requests acknowledged, from RDBUFF. sigrok's
+    STM32 JTAG decoder must name each instruction and read the IDCODE and
+    every DPACC transaction both ways."""
+    dp = {"ctrl": 0, "result": 0}
+
+    def ctrl_stat():  # each power-up request acknowledged at once
+        return dp["ctrl"] | ((dp["ctrl"] & 0x50000000) << 1)
+
+    def dpacc(value):  # DATA[34:3], A[3:2] at [2:1], RnW at [0]
+        rnw, a, data = value & 1, (value >> 1) & 3, value >> 3
+        if rnw:
+            dp["result"] = ctrl_stat() if a == 1 else 0  # RDBUFF reads 0 on a JTAG-DP
+        elif a == 1:
+            dp["ctrl"] = data & 0x50000000  # CSYSPWRUPREQ, CDBGPWRUPREQ
+
+    cpu = JtagTap(4, 0b0001, 0b1110, {
+        0b1110: (32, lambda: STM32_CPU_IDCODE, None),
+        0b1010: (35, lambda: (dp["result"] << 3) | 0b010, dpacc)})  # ACK OK/FAULT
+    boundary = JtagTap(5, 0b00001, 0b00001, {0b00001: (32, lambda: STM32_BS_IDCODE, None)})
+
+    def play(j):
+        j.reset()
+        both = j.shift_dr(0, 64)  # each TAP's IDCODE, the Cortex-M3's first out
+        captured = j.shift_ir(0b11111_1110, 9)  # boundary scan BYPASS, Cortex-M3 IDCODE
+        idcode = j.shift_dr(0, 33)
+
+        def access(a, rnw, data=0):
+            # The decoder reads one DR scan after each IR scan, so DPACC is
+            # selected again each time; the TAPs do not mind.
+            j.shift_ir(0b11111_1010, 9)
+            return j.shift_dr((data << 3) | (a << 1) | rnw, 36) & ((1 << 35) - 1)
+
+        access(1, 0, 0x50000000)  # write CTRL/STAT
+        access(1, 1)  # read CTRL/STAT
+        return both, captured, idcode, access(3, 1)  # read RDBUFF: CTRL/STAT comes out
+
+    (both, captured, idcode, ctrl), trace = await jtag_session(dut, [boundary, cpu], play)
+    assert both == (STM32_BS_IDCODE << 32) | STM32_CPU_IDCODE, f"{both:#x}"
+    assert captured == 0b00001_0001, f"IR capture {captured:#b}"
+    assert idcode == STM32_CPU_IDCODE, f"IDCODE {idcode:#x}"
+    assert ctrl == (0xF0000000 << 3) | 0b010, f"CTRL/STAT {ctrl >> 3:#x}, ACK {ctrl & 7:#b}"
+    if sigrok.available():
+        stack = JTAG_BUS + ",jtag_stm32"
+        found = trace.decode(stack, "jtag_stm32")
+
+        def dpacc_texts(new, previous):
+            return ["IR (BS TAP): BYPASS", "IR (M3 TAP): DPACC", "IR: DPACC",
+                    "New transaction: " + new, "Previous transaction result: " + previous]
+
+        want = ["IR (BS TAP): BYPASS", "IR (M3 TAP): IDCODE", "IR: IDCODE", "Reserved",
+                "Continuation code: 0x4", "Identity code: 0x3b", "Manufacturer: ARM Ltd.",
+                "Part: JTAG-DP", "Version: JTAG-DP", "BYPASS (BS TAP)",
+                "IDCODE: 0x3ba00477 (ARM Ltd.: JTAG-DP/JTAG-DP)"]
+        want += dpacc_texts("DATA: 0x50000000, A: DP CTRL/STAT, RnW: Write request", "DATA: 0x0, ACK: OK/FAULT")
+        want += dpacc_texts("DATA: 0x0, A: DP CTRL/STAT, RnW: Read request", "DATA: 0x0, ACK: OK/FAULT")
+        want += dpacc_texts("DATA: 0x0, A: DP RDBUFF, RnW: Read request", "DATA: 0xf0000000, ACK: OK/FAULT")
+        assert texts(found) == want, texts(found)
+        # CSYSPWRUPACK, bit 31 of the data, read as 0 in the last scan.
+        a, b = found[-1][:2]
+        wrong = texts(jtag_tdo_bit(trace, a, b, 3 + 31, 0).decode(stack, "jtag_stm32"))
+        assert wrong == want[:-1] + ["Previous transaction result: DATA: 0x70000000, ACK: OK/FAULT"], wrong
+
+
+class MipsDebug:
+    """The processor's side of a MIPS EJTAG port, from the EJTAG
+    specification: the EJTAG Control register's fields, and a core that,
+    when the probe requests a debug interrupt (EjtagBrk) with ProbEn and
+    ProbTrap set, enters debug mode (DM) and fetches from the debug vector
+    in the probe's memory, 0xFF200200, as a processor access (PrAcc, PRnW 0
+    for a fetch, Psz a word) the probe serves: ADDRESS holds the address,
+    DATA the word the probe puts there, and writing PrAcc 0 finishes it.
+    DERET, fetched that way, leaves debug mode; anything else is followed
+    by a fetch from the next word."""
+
+    ROCC, PRACC, PROBEN, PROBTRAP, EJTAGBRK, DM = 1 << 31, 1 << 18, 1 << 15, 1 << 14, 1 << 12, 1 << 3
+    DERET = 0x4200001F
+
+    def __init__(self):
+        self.rocc, self.proben, self.probtrap, self.dm, self.pracc = 1, 0, 0, 0, 0
+        self.address, self.data, self.fetched = 0, 0, []
+
+    def control(self):
+        return ((self.rocc << 31) | ((2 << 29) if self.pracc else 0) | (self.pracc << 18)
+                | (self.proben << 15) | (self.probtrap << 14) | (self.dm << 3))
+
+    def set_control(self, v):
+        if not v & self.ROCC:
+            self.rocc = 0  # the probe has seen the reset
+        self.proben, self.probtrap = int(bool(v & self.PROBEN)), int(bool(v & self.PROBTRAP))
+        if self.pracc and not v & self.PRACC:
+            self.fetched.append((self.address, self.data))
+            if self.data == self.DERET:
+                self.dm, self.pracc = 0, 0
+            else:
+                self.address += 4
+        if v & self.EJTAGBRK and not self.dm and self.proben and self.probtrap:
+            self.dm, self.pracc, self.address = 1, 1, 0xFF200200
+
+    def set_data(self, v):
+        self.data = v
+
+
+EJTAG_IMPCODE = 0x41404000  # EJTAG 2.6, DINTsup, 8-bit ASIDs, NoDMA, MIPS32
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_jtag_ejtag(dut):
+    """A MIPS core's EJTAG TAP on the JTAG controller (5-bit instructions),
+    halted and let go as a probe does it: IMPCODE read; CONTROL written with
+    ProbEn, ProbTrap and a debug interrupt request, then polled until the
+    core is in debug mode with a fetch pending; the fetch's address read
+    from ADDRESS; DERET put in DATA; CONTROL written with PrAcc 0 to finish
+    the fetch, then polled again: the core has left debug mode. sigrok's
+    EJTAG decoder must name each instruction and read the processor access:
+    a fetch, its address and the word served."""
+    core = MipsDebug()
+    ejtag = JtagTap(5, 0b00001, 0x01, {
+        0x01: (32, lambda: 0x00000001, None),  # IDCODE: only the low bit 1149.1 requires
+        0x03: (32, lambda: EJTAG_IMPCODE, None),
+        0x08: (32, lambda: core.address, None),
+        0x09: (32, lambda: core.data, core.set_data),
+        0x0A: (32, core.control, core.set_control)})
+    m = MipsDebug
+
+    def play(j):
+        j.reset()
+        captured = j.shift_ir(0x03, 5)  # IMPCODE
+        impcode = j.shift_dr(0, 32)
+        j.shift_ir(0x0A, 5)  # CONTROL
+        first = j.shift_dr(m.PRACC | m.PROBEN | m.PROBTRAP | m.EJTAGBRK, 32)  # Rocc 0: seen
+        halted = j.shift_dr(m.PRACC | m.PROBEN | m.PROBTRAP, 32)
+        j.shift_ir(0x08, 5)  # ADDRESS
+        address = j.shift_dr(0, 32)
+        j.shift_ir(0x09, 5)  # DATA
+        j.shift_dr(m.DERET, 32)
+        j.shift_ir(0x0A, 5)  # CONTROL
+        j.shift_dr(m.PROBEN | m.PROBTRAP, 32)  # PrAcc 0: the fetch is served
+        after = j.shift_dr(m.PRACC | m.PROBEN | m.PROBTRAP, 32)
+        return captured, impcode, first, halted, address, after
+
+    (captured, impcode, first, halted, address, after), trace = await jtag_session(dut, [ejtag], play)
+    assert captured == 0b00001, f"IR capture {captured:#b}"
+    assert impcode == EJTAG_IMPCODE, f"IMPCODE {impcode:#x}"
+    assert first == m.ROCC, f"CONTROL {first:#x}"
+    assert halted == 0x4004C008, f"CONTROL {halted:#x}"  # Psz word, PrAcc, ProbEn, ProbTrap, DM
+    assert address == 0xFF200200, f"ADDRESS {address:#x}"
+    assert after == m.PROBEN | m.PROBTRAP, f"CONTROL {after:#x}"
+    assert core.fetched == [(0xFF200200, m.DERET)], core.fetched
+    if sigrok.available():
+        # The instructions and the processor access, served. The decoder's
+        # register and CONTROL field rows are not asserted: the JTAG decoder
+        # reports Update-DR before that scan's bits, and jtag_ejtag labels
+        # the scan before it (its last_data) with the register now
+        # selected, so after each instruction change it names the previous
+        # register's bits wrongly (IMPCODE's word shown as CONTROL fields).
+        stack, rows = JTAG_BUS + ",jtag_ejtag", "jtag_ejtag=instruction:pracc"
+        found = trace.decode(stack, rows)
+        want = ["IMPCODE: Select Implementation register (0x03)",
+                "CONTROL: Select EJTAG Control register (0x0A)", "ADDRESS: Select Address register (0x08)",
+                "DATA: Select Data register (0x09)", "CONTROL: Select EJTAG Control register (0x0A)",
+                "PrAcc: Load/Fetch, A: 0xFF200200, D: 0x4200001F"]
+        assert texts(found) == want, texts(found)
+        # Bit 9 of the address the core put in ADDRESS read as 0.
+        a, b = next((a, b) for a, b, text in trace.decode(JTAG_BUS, "jtag=bitstring-tdo")
+                    if text.startswith("DR TDO") and "(0xff200200)" in text)
+        wrong = texts(jtag_tdo_bit(trace, a, b, 9, 0).decode(stack, rows))
+        assert wrong == want[:-1] + ["PrAcc: Load/Fetch, A: 0xFF200000, D: 0x4200001F"], wrong
+
+
 
 # --- SWD: the chip as an Arm Serial Wire Debug host ---------------------------
 
@@ -1505,6 +1809,325 @@ async def test_onewire_search(dut):
     want = {devs[k].rom: onewire_celsius(ONEWIRE_DEVICES[k][1]) for k in devs}
     assert sorted(roms) == sorted(want), f"found {[r.hex() for r in roms]}"
     assert temps == want, f"temperatures {temps}"
+
+
+# --- Devices on the 1-Wire controller: no new firmware --------------------------
+#
+# Other Maxim parts on the same wire and the same firmware: only the bytes
+# the host writes change. Each part's function layer is written here from
+# its data sheet, as a generator above OneWireDevice's ROM layer, and runs
+# on the slave model with typical timing (the fastest lets go of the wire
+# where sigrok samples; see test_onewire_read_rom). sigrok's decoder for the
+# part, stacked on its 1-Wire link and network decoders, must read what
+# the driver meant.
+
+def onewire_crc16(data):
+    """The 1-Wire CRC-16 (x^16 + x^15 + x^2 + 1, least significant bit
+    first, starting from 0), as Maxim's data sheets give it. The parts send
+    it inverted, low byte first."""
+    crc = 0
+    for b in data:
+        for _ in range(8):
+            mix = (crc ^ b) & 1
+            crc >>= 1
+            if mix:
+                crc ^= 0xA001
+            b >>= 1
+    return crc
+
+
+class OneWirePart(OneWireDevice):
+    """A 1-Wire part with its own function commands, under the same ROM
+    layer. After a ROM command selects it, [function] runs as a generator
+    given the command byte: a bare yield returns the next byte the host
+    writes, yielding bytes sends them, and yielding ("busy", n) reads 0 for
+    n slots, then 1. When it returns the part sends 1s until a reset."""
+
+    def __init__(self, family, serial):
+        super().__init__(serial, 0)
+        rom = [family] + [(serial >> (8 * i)) & 0xFF for i in range(6)]
+        self.rom = bytes(rom + [pe.onewire_crc8(rom)])
+        self.script = None
+
+    def reset(self):
+        super().reset()
+        self.script = None
+
+    def command(self, m, v):
+        if m != "function":
+            return super().command(m, v)
+        if self.script is None:
+            self.script = self.function(v)
+            v = None
+        self.run(v)
+
+    def run(self, value):
+        try:
+            action = self.script.send(value)
+        except StopIteration:
+            self.mode = "idle"
+            return
+        if action is None:
+            self.mode = "function"  # the next byte the host writes
+        elif isinstance(action, tuple):
+            self.mode, self.busy = "busy", action[1]
+        else:
+            self.send(action, "resume")
+
+    def slot(self, seen):
+        super().slot(seen)
+        if self.mode == "resume":
+            self.run(None)
+
+
+class Ds2408(OneWirePart):
+    """A DS2408 8-channel addressable switch (family 29h), from its data
+    sheet: Read PIO Registers (F0h) sends the registers from the target
+    address through 008Fh, then the inverted CRC-16 of the command, the
+    address and those bytes; Channel-Access Write (5Ah) takes a byte and its
+    inverse, sets the output latch (0 turns a channel's transistor on) and
+    answers AAh and the pins as they now read, or, if the inverse is wrong,
+    changes nothing and sends FFh. [outside] is what pulls on the pins from
+    outside the part (0 is a pin held low)."""
+
+    def __init__(self, serial, outside=0xFF):
+        super().__init__(0x29, serial)
+        self.outside, self.latch, self.activity = outside, 0xFF, 0x00
+        self.control = 0x88  # VCCP: powered from VCC; PORL: a power-on reset happened
+
+    def pins(self):
+        return self.latch & self.outside
+
+    def function(self, command):
+        if command == 0xF0:  # Read PIO Registers
+            ta1 = yield
+            ta2 = yield
+            start = ta1 | (ta2 << 8)
+            if not 0x88 <= start <= 0x8F:
+                return
+            registers = [self.pins(), self.latch, self.activity, 0x00, 0x00, self.control, 0xFF, 0xFF]
+            data = bytes(registers[start - 0x88:])
+            crc = onewire_crc16(bytes([command, ta1, ta2]) + data) ^ 0xFFFF
+            yield data + bytes([crc & 0xFF, crc >> 8])
+        elif command == 0x5A:  # Channel-Access Write
+            while True:
+                value = yield
+                inverse = yield
+                if inverse != value ^ 0xFF:
+                    return
+                was = self.pins()
+                self.latch = value
+                self.activity |= was ^ self.pins()
+                yield bytes([0xAA, self.pins()])
+
+
+class Ds2432(OneWirePart):
+    """A DS2432 1-Wire EEPROM (family 33h), its scratchpad from the data
+    sheet: Write Scratchpad (0Fh) takes a target address, whose low three
+    bits it clears, and eight bytes, then sends the inverted CRC-16 of the
+    command, the address as sent and the data; Read Scratchpad (AAh) sends
+    the address, the E/S byte, the eight bytes and the inverted CRC-16 of
+    all of it with the command. E/S after a full write is 5Fh: bits 6, 4,
+    3 and the ending offset always read 1, AA (copied) and PF (partial)
+    are 0. Copying to the EEPROM takes the SHA-1 engine, not modelled."""
+
+    def __init__(self, serial):
+        super().__init__(0x33, serial)
+        self.pad, self.target, self.es = bytearray(8), 0, 0x5F | 0x20  # PF: not yet written
+
+    def function(self, command):
+        if command == 0x0F:  # Write Scratchpad
+            ta1 = yield
+            ta2 = yield
+            self.target = (ta1 | (ta2 << 8)) & ~7
+            data = bytearray()
+            while len(data) < 8:
+                data.append((yield))
+            self.pad, self.es = data, 0x5F
+            crc = onewire_crc16(bytes([command, ta1, ta2]) + data) ^ 0xFFFF
+            yield bytes([crc & 0xFF, crc >> 8])
+        elif command == 0xAA:  # Read Scratchpad
+            sent = bytes([self.target & 0xFF, self.target >> 8, self.es]) + self.pad
+            crc = onewire_crc16(bytes([command]) + sent) ^ 0xFFFF
+            yield sent + bytes([crc & 0xFF, crc >> 8])
+
+
+class Ds28ea00(OneWirePart):
+    """A DS28EA00 thermometer (family 42h), from its data sheet: Convert T
+    (44h), during which a powered part reads 0 in every slot and then 1,
+    here for 12 slots rather than up to 750 ms; Read Scratchpad (BEh), nine
+    bytes: the temperature, TH, TL, the configuration (7Fh, 12 bits), the
+    reserved FFh, 0Ch and 10h, and the CRC8 of the eight."""
+
+    def __init__(self, serial, temp_raw):
+        super().__init__(0x42, serial)
+        pad = [temp_raw & 0xFF, temp_raw >> 8, 0x4B, 0x46, 0x7F, 0xFF, 0x0C, 0x10]
+        self.scratchpad = bytes(pad + [pe.onewire_crc8(pad)])
+
+    def function(self, command):
+        if command == 0x44:  # Convert T
+            yield ("busy", 12)
+        elif command == 0xBE:  # Read Scratchpad
+            yield self.scratchpad
+
+
+async def onewire_part(dut, part, k=1):
+    """[part] alone on the wire, on slave model k. Returns the recording
+    of the wire and the task running the part."""
+    await reset(dut)
+    dut.dev_mode.value = 8
+    dut.onewire_ena.value = 1 << k
+    task = cocotb.start_soon(onewire_device(dut, k, part, [0b111]))
+    await ClockCycles(dut.clk, 2)
+    return sigrok.Trace(dut, {"owr": lambda: str(dut.onewire.value) != "0"}), task
+
+
+ONEWIRE_STACK = "onewire_link:owr=owr,onewire_network"
+
+
+def onewire_one_bit_low(trace, a, b):
+    """The recording with one bit between samples a and b turned from 1 to
+    0: the wire held low for 30 us from the first slot sigrok's link
+    decoder read as 1 there, as a device sending 0 would hold it."""
+    bits = trace.decode("onewire_link:owr=owr", "onewire_link=bit")
+    s = next(s for s, e, text in bits if a <= s and e <= b and text == "Bit: 1")
+    return trace.forced("owr", s, s + 300, 0)
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_ds2408_switch(dut):
+    """A DS2408 8-channel switch on the 1-Wire controller, the only device
+    on the wire: READ ROM, then Read PIO Registers from 0088h with its
+    CRC-16 checked; then SKIP ROM and a Channel-Access Write turning four
+    channels on, confirmed with AAh and the pins read back. sigrok's DS2408
+    decoder must name both commands, the address, every register byte and
+    the write's inverse, and the confirmation."""
+    part = Ds2408(0x0000000A2408, outside=0xFE)  # something outside holds P0 low
+    trace, task = await onewire_part(dut, part)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        ow = pe.OneWire(chip, firmware("onewire"))
+        rom = ow.read_rom()
+        ow.write([0xF0, 0x88, 0x00])  # Read PIO Registers from 0088h
+        registers = ow.read(10)
+        ow.select()  # SKIP ROM: the only device
+        ow.write([0x5A, 0x0F, 0xF0])  # Channel-Access Write: P7 to P4 on
+        return rom, registers, ow.read(2)
+
+    rom, registers, answer = await session()
+    trace.stop()
+    task.cancel()
+    assert rom == part.rom, rom.hex()
+    assert registers[:8] == bytes([0xFE, 0xFF, 0x00, 0x00, 0x00, 0x88, 0xFF, 0xFF]), registers.hex()
+    assert onewire_crc16(bytes([0xF0, 0x88, 0x00]) + registers) == 0xB001, registers.hex()
+    assert answer == bytes([0xAA, 0x0E]), answer.hex()
+    assert (part.latch, part.activity) == (0x0F, 0xF0)
+    if sigrok.available():
+        stack = ONEWIRE_STACK + ",ds2408"
+        found = trace.decode(stack, "ds2408")
+        code = "ROM: 0x%016x (family code 0x29)" % int.from_bytes(rom, "little")
+        want = ["Reset/presence: true", code, "Read PIO Registers (0xf0)", "Target address: 0x0088"]
+        want += ["Data: 0x%02x" % b for b in registers]
+        want += ["Reset/presence: true", "Channel Access Write (0x5a)",
+                 "Data: 0x0f (bit-inversion correct: 0xf0)", "Success"]
+        assert texts(found) == want, texts(found)
+        # One bit of the confirmation read as 0: not AAh, so no success.
+        a, b = next((a, b) for a, b, text in found if text == "Success")
+        wrong = texts(onewire_one_bit_low(trace, a, b).decode(stack, "ds2408"))
+        assert wrong == want[:-1], wrong
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_ds2432_eeprom(dut):
+    """A DS2432 1-Wire EEPROM on the 1-Wire controller: READ ROM, then the
+    first half of every write, Write Scratchpad with eight bytes and the
+    CRC-16 the part sends back; then SKIP ROM and Read Scratchpad to check
+    them. sigrok's DS243x decoder must know the part from its family code,
+    read both commands, the address, the bytes and the E/S byte, and find
+    both CRCs good."""
+    part = Ds2432(0x0000000B2432)
+    trace, task = await onewire_part(dut, part)
+    chip = pe.Chip(sim_port(dut))
+    data = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x23, 0x45, 0x67]
+
+    @bridge
+    def session():
+        ow = pe.OneWire(chip, firmware("onewire"))
+        rom = ow.read_rom()
+        ow.write([0x0F, 0x00, 0x00] + data)  # Write Scratchpad at 0000h
+        written = ow.read(2)
+        ow.select()  # SKIP ROM: the only device
+        ow.write([0xAA])  # Read Scratchpad
+        return rom, written, ow.read(13)
+
+    rom, written, pad = await session()
+    trace.stop()
+    task.cancel()
+    assert rom == part.rom, rom.hex()
+    assert onewire_crc16(bytes([0x0F, 0x00, 0x00] + data) + written) == 0xB001, written.hex()
+    assert pad[:11] == bytes([0x00, 0x00, 0x5F] + data), pad.hex()
+    assert onewire_crc16(bytes([0xAA]) + pad) == 0xB001, pad.hex()
+    if sigrok.available():
+        stack = ONEWIRE_STACK + ",ds243x"
+        found = trace.decode(stack, "ds243x")
+        bytes_ = "Data: " + ",".join("0x%02x" % b for b in data)
+        want = ["Reset/presence: true",
+                "ROM: 0x%016x (family code is 0x33, DS2432 detected)" % int.from_bytes(rom, "little"),
+                "Function command: Write scratchpad (0x0f)", "Target address: 0x0000", bytes_, "CRC: ok",
+                "Reset/presence: true", "Function command: Read scratchpad (0xaa)",
+                "Target address: 0x0000", "Data status (E/S): 0x5f", bytes_, "CRC: ok"]
+        assert texts(found) == want, texts(found)
+        # One bit of the CRC the part sent after the scratchpad read as 0.
+        a, b = [(a, b) for a, b, text in found if text == "CRC: ok"][1]
+        wrong = texts(onewire_one_bit_low(trace, a, b).decode(stack, "ds243x"))
+        assert wrong == want[:-1] + ["CRC: error"], wrong
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_ds28ea00_thermometer(dut):
+    """A DS28EA00 thermometer on the 1-Wire controller: READ ROM and Convert
+    T, the conversion polled a byte at a time until it reads other than 0;
+    then MATCH ROM and Read Scratchpad, its CRC8 checked and 25.0625 degrees
+    read out of it. sigrok's DS28EA00 decoder must name both commands, the
+    polls and every scratchpad byte."""
+    part = Ds28ea00(0x0000000C28EA, 0x0191)  # 25.0625 degrees
+    trace, task = await onewire_part(dut, part)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        ow = pe.OneWire(chip, firmware("onewire"))
+        rom = ow.read_rom()
+        ow.write([0x44])  # Convert T
+        polls = [ow.read(1)[0]]
+        while not polls[-1] and len(polls) < 4:
+            polls.append(ow.read(1)[0])
+        ow.select(rom)
+        ow.write([0xBE])  # Read Scratchpad
+        return rom, polls, ow.read(9)
+
+    rom, polls, pad = await session()
+    trace.stop()
+    task.cancel()
+    assert rom == part.rom, rom.hex()
+    assert polls == [0x00, 0xF0], polls  # 12 slots of 0, then 1s
+    assert pe.onewire_crc8(pad) == 0, pad.hex()
+    assert onewire_celsius(pad[0] | (pad[1] << 8)) == 25.0625, pad.hex()
+    if sigrok.available():
+        stack = ONEWIRE_STACK + ",ds28ea00"
+        found = trace.decode(stack, "ds28ea00")
+        code = "ROM: 0x%016x" % int.from_bytes(rom, "little")
+        want = ["Reset/presence: true", code, "Function command: 0x44 'Convert temperature'",
+                "Temperature conversion status: 0x00", "Temperature conversion status: 0xf0",
+                "Reset/presence: true", code, "Function command: 0xbe 'Read scratchpad'"]
+        want += ["Scratchpad data: 0x%02x" % b for b in pad]
+        assert texts(found) == want, texts(found)
+        # One bit of the temperature's low byte read as 0: 0x90, not 0x91.
+        a, b = next((a, b) for a, b, text in found if text == "Scratchpad data: 0x91")
+        wrong = texts(onewire_one_bit_low(trace, a, b).decode(stack, "ds28ea00"))
+        assert wrong == want[:8] + ["Scratchpad data: 0x90"] + want[9:], wrong
 
 
 # --- Planted driver bugs: each must make its test fail ------------------------
