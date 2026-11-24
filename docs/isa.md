@@ -49,6 +49,9 @@ weakest for this job:
     the last refill.
   - `ISR` (input shift register), with a count of bits shifted in since the
     last push.
+  - When a thread is started, X and Y are 0, the ISR is empty and the OSR
+    is empty: its count stands at `threshold`, so the first `out` with
+    `autopull` fetches a word, and without it a `pull` comes first.
 - **FIFOs**, 4 entries of 16 bits per thread:
   - TX FIFO: host to thread.
   - RX FIFO: thread to host.
@@ -323,15 +326,59 @@ exactly v1.
 | 111 | `nop` | |
 
 Operand values: for `in` src and `out` dst, `pins` 0, `x` 1, `y` 2,
-`null` 3; for `set` dst, `pins` 0, `x` 1, `y` 2; for `mov`, `x` 0, `y` 1,
-`pins` 2, `isr` 3, `osr` 4, `null` 5. Conditions are numbered in the `jmp`
+`null` 3; for `set` dst, `pins` 0, `x` 1, `y` 2, `page` 3; for `mov`, `x` 0,
+`y` 1, `pins` 2, `isr` 3, `osr` 4, `null` 5, `crc` 6. Conditions are numbered in the `jmp`
 table below.
 
-Unused operand bits are ignored. These reserved encodings decode as `nop`
-(their delay field still applies):
+Unused operand bits are ignored. One reserved encoding is left, and it
+decodes as `nop` (its delay field still applies): `mov` with source or
+destination 7.
 
-- `set` with destination 3
-- `mov` with source or destination 6 or 7
+## Assembler syntax
+
+One instruction per line:
+
+```
+label:  op operands  side V  [delay]   ; comment
+```
+
+- A comment runs from `;` to the end of the line.
+- Operands are separated by spaces or commas: `jmp x-- loop` and
+  `jmp x--, loop` are the same line.
+- A label is a name followed by `:`, before an instruction or on a line of
+  its own, and names the next instruction. A jump target is a label or a
+  number, a place within the current page.
+- Mnemonics, operands and labels are not case-sensitive.
+- Numbers are decimal, or hexadecimal with `0x`.
+- `[n]` at the end of the line is the delay: the instruction then takes
+  `1 + n` ticks. `n` is 0 to 15, or 0 to 7, 3 or 1 once `.side_set` has
+  taken 1, 2 or 3 bits of the field. The delay applies to every
+  instruction, a `jmp` included whether or not it is taken.
+- After `.side_set N`, every instruction says `side V`, before the delay if
+  there is one: `out pins, 1  side 1 [3]`.
+- Directives, each on a line of its own: `.side_set N`, `.align` and
+  `.page N` (see `jmp` below).
+
+`bin/pe_sim.ml` is the assembler and a simulator of the reference model as
+one command-line tool. `pe_sim asm FILE.s` prints the words in hex, one
+per line. `pe_sim run FILE.s` runs the program on thread 0:
+
+- `-config k=v,...` sets the thread's configuration, with the field names
+  of the per-thread configuration table. What is not set is 0 or off, except `out_count` 1,
+  `set_count` 1 and `threshold` 8.
+- `-mode P=pp|od|in`, once per pin, makes pin P push-pull, open-drain or
+  an input (the default): `-mode 0=pp`.
+- `-tx FILE` gives the host's TX words, one per line, decimal or `0x` hex.
+  A word is pushed as soon as the FIFO has room.
+- `-inputs HEX` is what the input pins read (bit k is pin Pk), and
+  `-stimulus FILE` changes that over time: each line is `CYCLE HEX`, in
+  increasing cycle order, and holds until the next line's cycle.
+- `-cycles N` is how long to run.
+
+It prints `pins CYCLE XX` whenever the pins' output changes, the levels
+being those at the start of that cycle: a write made by the instruction
+that runs in cycle c shows as `pins c+1`. It prints `rx CYCLE WORD` for
+every word the thread pushes.
 
 ## Instructions
 
@@ -394,8 +441,15 @@ bit first by default; with `out_msb_first` it takes them from the top and
 shifts the OSR left. `dst` is one of:
 
 - `pins`: written from `out_base` up
-- `x` or `y`
+- `x` or `y`: the bits arrive right-justified, the rest of the register 0
 - `null`: discarded
+
+With `out_msb_first` the bits come from bit 15 of the OSR downward,
+whatever `threshold` is, so a host sending fewer than 16 bits per word
+puts them at the top of the word. `threshold` only decides when the OSR
+counts as empty, for `!osre` and `autopull`. Without `autopull`, an `out`
+past that point still shifts: it gives what is left of the 16-bit word,
+then zeros.
 
 With `autopull`, an `out` that empties the OSR refills it from the TX FIFO
 in the same cycle, if the FIFO has a word, so a program can shift bits
@@ -407,7 +461,8 @@ the next.
 right-justified, then clears the ISR. It stalls while the RX FIFO is full.
 
 **`pull`** loads the OSR from the TX FIFO and marks it full. It stalls while
-the TX FIFO is empty.
+the TX FIFO is empty. It always takes a new word, also with `autopull` on
+and bits still in the OSR.
 
 **`mov dst, src`** copies a 16-bit value.
 
@@ -422,6 +477,12 @@ the TX FIFO is empty.
 
 **`set dst, value`** writes a 5-bit immediate to `pins` (`set_count` pins
 from `set_base`), `x`, `y` or `page` (the value modulo 4).
+
+Every write of several pins, by `set pins`, `out pins`, `mov pins` or
+side-set, puts bit k of the value on pin `base + k`, wrapping from P7 to
+P0. No instruction inverts a pin: a program that toggles one keeps the
+level in its flow of control, or in a register it writes back with
+`mov pins`.
 
 ## Host interface
 

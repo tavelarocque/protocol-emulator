@@ -6,6 +6,7 @@
 
    Operands are separated by spaces or commas. A jump target is a label or a
    number. [delay] is 0..15 extra idle cycles after the instruction.
+   Mnemonics, operands and labels are not case-sensitive.
 
      nop
      jmp [cond] target      cond: !x x-- !y y-- x!=y !osre !isrf
@@ -145,7 +146,9 @@ let assemble_with_labels ?(origin = 0) (source : string)
     let text =
       match String.lsplit2 text ~on:':' with
       | Some (lbl, rest) when is_label (String.strip lbl) ->
-        let lbl = String.strip lbl in
+        (* Pass 2 reads the whole line in lower case, so a label is stored in
+           lower case too: [Loop:] and [jmp Loop] must name the same place. *)
+        let lbl = String.lowercase (String.strip lbl) in
         if Hashtbl.mem labels lbl then error ~line (sprintf "duplicate label %S" lbl);
         (* A label names the address of the next instruction. *)
         Hashtbl.set labels ~key:lbl ~data:(origin + !count);

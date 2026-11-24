@@ -5,14 +5,18 @@
        firmware images in test/ are
 
      pe_sim run PROGRAM.s [-config k=v,...] [-mode P=pp|od|in ...]
-                [-tx FILE] [-cycles N] [-inputs HEX]
+                [-tx FILE] [-cycles N] [-inputs HEX] [-stimulus FILE]
        runs it on thread 0 of the reference model (model/isa.ml, the model
        the RTL is checked against every cycle). TX words (one per line,
        decimal or 0x hex) are pushed whenever the TX FIFO has room. Prints
        every change of the 8 protocol pins' output as "pins CYCLE XX" (bit
        k = pin Pk as driven; an open-drain 1 and an input read as 1), and
        every word the thread pushes as "rx CYCLE WORD". Pins that are inputs
-       read [-inputs] (default 0xFF).
+       read [-inputs] (default 0xFF). [-stimulus FILE] changes those levels
+       as the run goes: each line is "CYCLE HEX", meaning that from that
+       cycle on the input pins read HEX (bit k = pin Pk), until the next
+       line's cycle. Lines must be in increasing cycle order; blank lines
+       and lines starting with # are skipped.
 
    -config keys are the thread configuration's fields, as in docs/isa.md:
    start, out_base, out_count, set_base, set_count, in_base, threshold,
@@ -104,7 +108,13 @@ let run_cmd =
      and modes = flag "-mode" (listed string) ~doc:"P=pp|od|in pin mode (default in)"
      and tx = flag "-tx" (optional string) ~doc:"FILE TX words, one per line"
      and cycles = flag "-cycles" (optional_with_default 100_000 int) ~doc:"N cycles to run"
-     and inputs = flag "-inputs" (optional_with_default "0xFF" string) ~doc:"HEX input pin levels" in
+     and inputs = flag "-inputs" (optional_with_default "0xFF" string) ~doc:"HEX input pin levels"
+     and stimulus =
+       flag
+         "-stimulus"
+         (optional string)
+         ~doc:"FILE input pin levels over time, one \"CYCLE HEX\" per line"
+     in
      fun () ->
        let m =
          Isa.create
@@ -122,7 +132,27 @@ let run_cmd =
               |> List.filter ~f:(fun l -> not (String.is_empty l || String.is_prefix l ~prefix:"#"))
               |> List.map ~f:parse_int)
        in
-       let inputs = parse_int inputs in
+       let inputs = ref (parse_int inputs) in
+       let changes =
+         Queue.of_list
+           (match stimulus with
+            | None -> []
+            | Some f ->
+              In_channel.read_lines f
+              |> List.map ~f:String.strip
+              |> List.filter ~f:(fun l -> not (String.is_empty l || String.is_prefix l ~prefix:"#"))
+              |> List.map ~f:(fun l ->
+                match String.split_on_chars l ~on:[ ' '; '\t' ] |> List.filter ~f:(Fn.non String.is_empty) with
+                | [ c; v ] ->
+                  let v = if String.is_prefix (String.lowercase v) ~prefix:"0x" then v else "0x" ^ v in
+                  parse_int c, parse_int v
+                | _ -> failwithf "-stimulus: expected \"CYCLE HEX\", got %S" l ()))
+       in
+       ignore
+         (Queue.fold changes ~init:(-1) ~f:(fun prev (c, _) ->
+            if c <= prev then failwithf "-stimulus: cycle %d is not after %d" c prev ();
+            c)
+          : int);
        let last = ref (-1) in
        for c = 0 to cycles - 1 do
          (match Queue.peek pending with
@@ -133,7 +163,12 @@ let run_cmd =
          then (
            printf "pins %d %02x\n" c pins;
            last := pins);
-         Isa.step m ~inputs;
+         (match Queue.peek changes with
+          | Some (at, v) when at <= c ->
+            inputs := v;
+            ignore (Queue.dequeue changes : (int * int) option)
+          | _ -> ());
+         Isa.step m ~inputs:!inputs;
          Option.iter (Isa.pop_rx m ~thread:0) ~f:(fun w -> printf "rx %d %d\n" c w)
        done)
 ;;

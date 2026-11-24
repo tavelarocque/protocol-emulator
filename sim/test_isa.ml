@@ -33,6 +33,23 @@ let%test_unit "disassemble then assemble round-trips for every word" =
   done
 ;;
 
+(* A label may be written in any case, like everything else on the line. A
+   blind programmer found that [Loop:] followed by [jmp Loop] was rejected:
+   the line was read in lower case but the label was stored as written. *)
+let%test_unit "labels are not case-sensitive" =
+  let lower = Asm.assemble "loop:\n  nop\n  jmp x-- loop\n" in
+  List.iter
+    [ "Loop:\n  nop\n  jmp x-- Loop\n"
+    ; "LOOP:\n  NOP\n  JMP X-- loop\n"
+    ; "loop:\n  nop\n  jmp x--, LOOP\n"
+    ]
+    ~f:(fun text ->
+      [%test_result: Isa.Instruction.t array] (Asm.assemble text) ~expect:lower ~message:text);
+  match Asm.assemble "Loop:\n  nop\nloop:\n  nop\n" with
+  | exception _ -> ()
+  | _ -> failwith "two labels differing only in case were accepted"
+;;
+
 let%test_unit "assembler rejects bad input" =
   List.iter
     [ "jmp nowhere"
