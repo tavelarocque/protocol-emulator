@@ -4527,6 +4527,309 @@ async def test_modbus_rtu(dut):
         assert "CRC correct" not in wrong, wrong
 
 
+def uart_bytes(trace, line, baud):
+    """Where each byte on a UART line starts, as [(first data bit's sample,
+    byte)], read by sigrok's UART decoder: to aim a forced bit at one."""
+    found = trace.decode(f"uart:rx={line}:baudrate={baud}", "uart=rx-data")
+    return [(a, int(text, 16)) for a, _, text in found]
+
+
+async def uart_device_session(dut, divisor):
+    """The chip as one end of a serial link: the UART transmitter on P0 and
+    the receiver on P1 (uart_duplex.hex, one per thread, as in
+    test_thirdparty_uart), wired to cocotbext-uart's sink and source for the
+    device on the other end. Returns the sink, the source, and a trace of
+    both lines named as the chip sees them, tx and rx."""
+    dut.dev_mode.value = 3
+    baud = 10_000_000 // divisor
+    sink = UartSink(dut.uart_tx, baud=baud, bits=8)
+    source = UartSource(dut.uart_rx, baud=baud, bits=8)
+    trace = sigrok.Trace(dut, {
+        "tx": lambda: (int(dut.uio_out.value) & 1) if int(dut.uio_oe.value) & 1 else 1,
+        "rx": lambda: int(dut.uart_rx.value)})
+    await load(dut, firmware("uart_duplex"))
+    await write(dut, OUT_CFG, 0x10)
+    await write(dut, SET_CFG, 0x10)
+    await write(dut, START + BANK1, UART_RX_ORIGIN)
+    await write(dut, IN_BASE + BANK1, 1)
+    await write(dut, 0x45 + BANK1, 9)
+    await write(dut, TIMEOUT + BANK1, 0)
+    await write(dut, TIMEOUT_VECTOR + BANK1, UART_RX_ORIGIN + 13)
+    await write(dut, PIN_MODES, 0b00_01)
+    await write(dut, CTRL, 0b11)
+    for v in [divisor - 4, divisor // 2 - 1]:
+        await push(dut, v, bank=BANK1)
+    await push(dut, divisor - 4)
+    return sink, source, trace
+
+
+async def uart_exchange(dut, command, reply_length):
+    """The host's side of one exchange: send [command] on the chip's
+    transmitter, then take [reply_length] bytes from its receiver, each
+    with its stop bit seen."""
+    for b in command:
+        await push(dut, b)
+    words = [await pop(dut, bank=BANK1) for _ in range(reply_length)]
+    assert all(w & 0x100 for w in words), f"stop bits: {[hex(w) for w in words]}"
+    return bytes(w & 0xFF for w in words)
+
+
+async def sink_read_until(sink, end):
+    got = bytearray()
+    while not got.endswith(end):
+        got += await sink.read(1)
+    return bytes(got)
+
+
+async def pan1321_module(sink, source):
+    """A Panasonic PAN1321 Bluetooth module's serial side, as its AT
+    command set has it: "ROK" once it has started, then "OK" for each
+    command line the host sends. Every line ends in CR LF."""
+    await source.write(b"ROK\r\n")
+    while True:
+        line = await sink_read_until(sink, b"\r\n")
+        assert line.startswith(b"AT+J"), line
+        await source.write(b"OK\r\n")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_pan1321_bluetooth(dut):
+    """A Panasonic PAN1321 Bluetooth module on the UART, both directions,
+    at 114,943 baud (115,200 within 0.3%). The host waits for the module's
+    "ROK", then sets it up as a driver does after reset: security first
+    (fixed PIN 1234), then the name it advertises, then auto-accept of
+    connections, reading the module's "OK" after each. The module is
+    scripted from its AT command set. sigrok's PAN1321 decoder, on its
+    UART decoder with the host's line as TX and the module's as RX, must
+    read every command and every reply."""
+    await reset(dut)
+    sink, source, trace = await uart_device_session(dut, 87)
+    module = cocotb.start_soon(pan1321_module(sink, source))
+    replies = [await uart_exchange(dut, b"", 5)]
+    for command in [b"AT+JSEC=1,1,2,04,1234\r\n", b"AT+JSLN=04,PE01\r\n", b"AT+JAAC=1\r\n"]:
+        replies.append(await uart_exchange(dut, command, 4))
+    assert replies == [b"ROK\r\n"] + [b"OK\r\n"] * 3, replies
+    await ClockCycles(dut.clk, 1000)
+    module.cancel()
+    trace.stop()
+    if sigrok.available():
+        decoder = "uart:tx=tx:rx=rx:baudrate=114943,pan1321"
+        want = ["Device initialized correctly",
+                'Host set the Bluetooth PIN to "1234"', "Device acknowledged last command",
+                'Host set the Bluetooth name to "PE01"', "Device acknowledged last command",
+                "Auto-accept new connections", "Device acknowledged last command"]
+        found = trace.decode(decoder, "pan1321=text-verbose")
+        assert texts(found) == want, texts(found)
+        # The lowest bit of the first reply's "O" held low: the module said
+        # "NK", which is no reply the decoder knows.
+        a = [s for s, b in uart_bytes(trace, "rx", 114943)][5]
+        wrong = texts(trace.forced("rx", a, a + 87, 0).decode(decoder, "pan1321=text-verbose"))
+        assert wrong[2] == "Device sent an unknown reply: NK" and wrong[4:] == want[4:], wrong
+
+
+async def amulet_display(sink, source):
+    """An Amulet LCD controller's serial side, from Amulet's ASCII protocol:
+    each command to set a variable in the display's internal RAM is answered
+    with the same bytes under the reply code, the command's plus 0x10.
+    Addresses and values travel as ASCII hex; a string ends in a zero."""
+    lengths = {0xD5: 4, 0xD6: 6}  # Set byte: address, value. Set word: address, value.
+    while True:
+        command = await sink.read(1)
+        code = command[0]
+        if code == 0xD7:  # Set string: address, then the string and its zero
+            command += await sink_read_until(sink, b"\x00")
+        else:
+            while len(command) < 1 + lengths[code]:
+                command += await sink.read(1)
+        await source.write(bytes([code + 0x10]) + command[1:])
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_amulet_display(dut):
+    """An Amulet LCD controller on the UART, both directions, at 114,943
+    baud: the host sets a byte, a word and a string variable in the
+    display's internal RAM, the way a program updates what a screen shows,
+    and reads each echo the display sends back. The display is scripted
+    from Amulet's ASCII protocol. sigrok's Amulet ASCII decoder, on its
+    UART decoder, must read each command and each reply."""
+    await reset(dut)
+    sink, source, trace = await uart_device_session(dut, 87)
+    display = cocotb.start_soon(amulet_display(sink, source))
+    commands = [bytes([0xD5]) + b"02" + b"7F",      # byte variable 0x02 = 0x7F
+                bytes([0xD6]) + b"10" + b"1234",    # word variable 0x10 = 0x1234
+                bytes([0xD7]) + b"20" + b"READY\0"]  # string variable 0x20
+    for command in commands:
+        echo = await uart_exchange(dut, command, len(command))
+        assert echo == bytes([command[0] + 0x10]) + command[1:], echo
+    await ClockCycles(dut.clk, 1000)
+    display.cancel()
+    trace.stop()
+    if sigrok.available():
+        decoder = "uart:tx=tx:rx=rx:baudrate=114943,amulet_ascii:ms_chan=TX:sm_chan=RX"
+        want = []
+        for name, short, address, value in [("Set byte variable", "SBV", "0x02", "0x7F"),
+                                            ("Set word variable", "SWV", "0x10", "0x1234"),
+                                            ("Set string variable", "SSV", "0x20", "READY")]:
+            for n, s in [(name, short), (name + " reply", short + "R")]:
+                command = f"Command: {n} ({s})"
+                want += [command, f"Address: {address}", f"Value: {value}", command]
+        found = trace.decode(decoder, "amulet_ascii=fields:commands")
+        assert texts(found) == want, texts(found)
+        # The lowest bit of the address's second digit in the first echo held
+        # high: the display answered for variable 0x03, not 0x02.
+        a = [s for s, b in uart_bytes(trace, "rx", 114943)][2]
+        wrong = texts(trace.forced("rx", a, a + 87, 1).decode(decoder, "amulet_ascii=fields:commands"))
+        assert wrong[5] == "Address: 0x03" and wrong[:5] + wrong[6:] == want[:5] + want[6:], wrong
+
+
+# ARM trace over SWO in its NRZ mode, which is a UART: 8 data bits, LSB
+# first, no parity. The chip plays a Cortex-M's trace output (or a test
+# source for a trace probe). ITM packets are from the ARMv7-M Architecture
+# Reference Manual, appendix "Debug ITM and DWT Packet Protocol":
+# a software packet is a header (stimulus port << 3 | size code) and its
+# payload, little-endian; an exception trace packet is 0x0E, the exception
+# number, and the function (1 entry, 2 exit) in bits 5:4; a local
+# timestamp is 0xC0 and the count in 7-bit groups, a set top bit meaning
+# more follow.
+ITM_ENTER_SYSTICK = [0x0E, 15, 0x10]
+ITM_EXIT_SYSTICK = [0x0E, 15, 0x20]
+ITM_TIMESTAMP_400 = [0xC0, 0x80 | (400 & 0x7F), 400 >> 7]
+ITM_PORT1_WORD = [0x0B, 0x78, 0x56, 0x34, 0x12]  # 0x12345678 on stimulus port 1
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_arm_itm(dut):
+    """ARM ITM over SWO, the formatter bypassed, as a Cortex-M sends it at
+    114,943 baud: firmware prints "boot" through stimulus port 0 a
+    character at a time, as ITM_SendChar does, and later writes a 32-bit
+    word to port 1, while the DWT reports SysTick's entry and exit with a
+    local timestamp between. sigrok's ITM decoder, on its UART decoder,
+    must read every packet."""
+    await reset(dut)
+    trace = pin_trace(dut, swo=0)
+    chip = pe.Chip(sim_port(dut))
+    boot = [b for c in b"boot" for b in (0x01, c)]
+    later = ITM_PORT1_WORD + ITM_ENTER_SYSTICK + ITM_TIMESTAMP_400 + ITM_EXIT_SYSTICK
+    uart = None
+
+    @bridge
+    def start():
+        nonlocal uart
+        uart = pe.UartTx(chip, firmware("uart_tx"), divisor=87)
+        uart.write(boot)
+
+    @bridge
+    def send_later():
+        uart.write(later)
+
+    await start()
+    # A pause of 20 characters after the last of the four still queued: the
+    # decoder closes a string only when the next software packet comes more
+    # than 16 characters after it.
+    await ClockCycles(dut.clk, (FIFO_DEPTH + 20) * 870)
+    await send_later()
+    await ClockCycles(dut.clk, (FIFO_DEPTH + 2) * 870)
+    trace.stop()
+    if sigrok.available():
+        decoder = "uart:rx=swo:baudrate=114943,arm_itm"
+        want = ['0: "boot"', "1: 0x12345678", "Enter: SysTick", "Timestamp: 400 (exact)",
+                "SysTick", "Exit: SysTick"]
+        found = trace.decode(decoder, "arm_itm")
+        assert texts(found) == want, texts(found)
+        # The lowest bit of the exception number on entry held low: 14,
+        # PendSV, not 15, SysTick.
+        sent = uart_bytes(trace, "swo", 114943)
+        assert [b for _, b in sent] == boot + later, sent
+        a = sent[len(boot) + len(ITM_PORT1_WORD) + 1][0]
+        wrong = texts(trace.forced("swo", a, a + 87, 0).decode(decoder, "arm_itm"))
+        assert wrong[2] == "Enter: PendSV" and "Enter: SysTick" not in wrong, wrong
+
+
+def tpiu_frames(items):
+    """The TPIU formatter's 16-byte frames, written from the CoreSight
+    Architecture Specification, for [items], a list of (source ID, byte).
+    In the first 15 bytes, an odd byte is always data; an even byte is
+    either an ID change (ID << 1 | 1) or data with its lowest bit moved to
+    byte 15, which holds those bits for the even bytes in order. For an ID
+    change, its bit in byte 15 says when it takes effect: 0 at once, 1
+    after the byte that follows it. The last frame is filled out with null
+    source (ID 0) data."""
+    get = lambda k: items[k] if k < len(items) else (0, 0)
+    frames, cur, i = [], None, 0
+    while i < len(items):
+        frame, aux = [], 0
+        while len(frame) < 15:
+            p = len(frame)
+            source, b = get(i)
+            if p % 2:
+                assert source == cur
+                frame.append(b)
+                i += 1
+            elif source != cur:  # an ID change, at once
+                frame.append((source << 1) | 1)
+                cur = source
+            elif p < 14 and get(i + 1)[0] != cur:  # one, delayed past this byte
+                frame += [(get(i + 1)[0] << 1) | 1, b]
+                aux |= 1 << (p // 2)
+                i += 1
+                cur = get(i)[0]
+            else:
+                frame.append(b & 0xFE)
+                aux |= (b & 1) << (p // 2)
+                i += 1
+        frames.append(bytes(frame + [aux]))
+    return frames
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_arm_tpiu(dut):
+    """ARM trace through the TPIU's formatter, on SWO at 114,943 baud: a
+    full frame sync, then two 16-byte frames that carry ITM packets as
+    source 1 (a word written to stimulus port 1, SysTick's entry, a
+    timestamp, its exit) with the ETM's A-sync packet as source 2 between
+    them. The frames use every form the formatter has: data in odd and even
+    bytes, an ID change at once and one delayed, a lowest bit carried in
+    byte 15. sigrok's TPIU decoder, on its UART decoder, must hand each
+    source its own bytes, and sigrok's ITM decoder stacked on it must read
+    source 1's packets."""
+    await reset(dut)
+    trace = pin_trace(dut, swo=0)
+    chip = pe.Chip(sim_port(dut))
+    itm = ITM_PORT1_WORD + ITM_ENTER_SYSTICK + ITM_TIMESTAMP_400 + ITM_EXIT_SYSTICK
+    etm = [0x00] * 5 + [0x80]  # the ETM's A-sync packet
+    items = [(1, b) for b in itm[:5]] + [(2, b) for b in etm] + [(1, b) for b in itm[5:]]
+    frames = tpiu_frames(items)
+    assert frames == [bytes.fromhex("03 0b 78 56 34 12 05 00 00 00 00 00 03 80 0e 40"),
+                      bytes.fromhex("0e 10 c0 90 02 0e 0e 20 01 00 00 00 00 00 00 0d")], frames
+    sent = [0xFF, 0xFF, 0xFF, 0x7F] + [b for f in frames for b in f]
+
+    @bridge
+    def send():
+        pe.UartTx(chip, firmware("uart_tx"), divisor=87).write(sent)
+
+    await send()
+    await ClockCycles(dut.clk, (FIFO_DEPTH + 2) * 870)
+    trace.stop()
+    if sigrok.available():
+        on_wire = uart_bytes(trace, "swo", 114943)
+        assert [b for _, b in on_wire] == sent, on_wire
+        decoder = "uart:rx=swo:baudrate=114943,arm_tpiu:stream={}"
+        streams = ["Stream 1", "Stream 2", "Stream 1"]
+        for source, data in [(1, itm), (2, etm)]:
+            found = texts(trace.decode(decoder.format(source), "arm_tpiu"))
+            assert [t for t in found if t.startswith("0x")] == [f"0x{b:02x}" for b in data], found
+            assert [t for t in found if t.startswith("Stream")] == streams, found
+        itm_decoder = decoder.format(1) + ",arm_itm"
+        want = ["1: 0x12345678", "Enter: SysTick", "Timestamp: 400 (exact)", "SysTick",
+                "Exit: SysTick"]
+        assert texts(trace.decode(itm_decoder, "arm_itm")) == want
+        # Bit 0 of the second frame's byte 15 held low: the lowest bit of
+        # the exception number in its byte 0 is lost, 14, PendSV, not 15.
+        a = on_wire[4 + 16 + 15][0]
+        wrong = texts(trace.forced("swo", a, a + 87, 0).decode(itm_decoder, "arm_itm"))
+        assert wrong[1] == "Enter: PendSV" and "Enter: SysTick" not in wrong, wrong
+
+
 async def nes_pad_model(dut, state):
     """A gamepad's 4021 shift register, from its data sheet: while the latch
     (pin 0) is high it holds the eight buttons, A at the output; each rising
