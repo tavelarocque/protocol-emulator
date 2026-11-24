@@ -694,7 +694,7 @@ async def test_uart_duplex(dut):
 # (Alex Forencich, MIT). The chip's firmware has to speak the real protocol
 # well enough for someone else's device to understand it.
 
-from cocotbext.i2c import I2cMaster, I2cMemory
+from cocotbext.i2c import I2cDevice, I2cMaster, I2cMemory
 from cocotbext.uart import UartSink, UartSource
 
 
@@ -3582,13 +3582,14 @@ async def test_hdmi_cec(dut):
 # bus, must find in the recording what the host meant.
 
 
-async def i2c_session(dut, address, size):
+async def i2c_session(dut, address, size=None, device=None):
     """The divider-timed I2C controller on a bus with cocotbext-i2c's memory
-    at [address]; returns the memory and a function running one transfer
-    (the words to push; the reports popped)."""
+    at [address], or with the model [device] makes of the bus wires; returns
+    the memory (or model) and a function running one transfer (the words to
+    push; the reports popped)."""
     dut.dev_mode.value = 1
-    memory = I2cMemory(sda=dut.i2c_sda, sda_o=dut.i2c_sda_dev, scl=dut.i2c_scl,
-                       scl_o=dut.i2c_scl_dev, addr=address, size=size)
+    pins = dict(sda=dut.i2c_sda, sda_o=dut.i2c_sda_dev, scl=dut.i2c_scl, scl_o=dut.i2c_scl_dev)
+    memory = device(**pins) if device else I2cMemory(**pins, addr=address, size=size)
     await load(dut, firmware("i2c"))
     await configure_i2c(dut)
     await write(dut, PIN_MODES, 0b1010)  # P0 SDA, P1 SCL open-drain
@@ -3838,6 +3839,174 @@ async def test_edid(dut):
         a, b = next((a, b) for a, b, text in found if text.startswith("Checksum: "))
         wrong = texts(trace.forced("sda", a, b, 0).decode(decoder, "edid"))
         assert not any(t.startswith("Checksum: ") and t.endswith("(OK)") for t in wrong), wrong[-6:]
+
+
+def atsha_crc(data):
+    """The ATSHA204A's CRC-16 as its data sheet gives it: polynomial 0x8005,
+    each byte taken from its low bit, sent low byte first. The wake token
+    04 11 checks to 33 43."""
+    crc = 0
+    for byte in data:
+        for k in range(8):
+            top = crc >> 15
+            crc = (crc << 1) & 0xFFFF
+            if (byte >> k) & 1 != top:
+                crc ^= 0x8005
+    return [crc & 0xFF, crc >> 8]
+
+
+class Atsha204a(I2cDevice):
+    """An ATSHA204A's I/O, written from its data sheet. Asleep it answers no
+    address. SDA held low for 60 us or more wakes it, and 2.5 ms later it
+    answers at 0x64 with the wake token (count 4, status 0x11, CRC). After
+    word address 0x03 it takes a command packet, checks its count and CRC,
+    and leaves the answer (count, data, CRC) for the next read; a packet
+    that fails is answered with status 0xFF. Word address 0x01 puts it to
+    sleep. Of the commands only Read of four configuration bytes is here."""
+
+    def __init__(self, config, **pins):
+        self.config, self.awake, self.packet, self.answer, self.at = list(config), False, [], [], 0
+        super().__init__(**pins)
+        cocotb.start_soon(self._wake())
+
+    @property
+    def addr(self):
+        return 0x64 if self.awake else None
+
+    def reply(self, data):
+        self.answer, self.at = [len(data) + 3] + data + atsha_crc([len(data) + 3] + data), 0
+
+    async def _wake(self):
+        while True:
+            await FallingEdge(self.sda)
+            fell = get_sim_time("us")
+            await RisingEdge(self.sda)
+            if not self.awake and get_sim_time("us") - fell >= 60:  # tWLO
+                await Timer(2500, "us")  # tWHI
+                self.awake = True
+                self.reply([0x11])
+
+    def handle_start(self):
+        self.packet = []
+
+    async def handle_write(self, data):
+        self.packet.append(data)
+
+    def handle_stop(self):
+        packet, self.packet = self.packet, []
+        if not packet:
+            return
+        if packet[0] in (0x01, 0x02):  # sleep, idle
+            self.awake = False
+        elif packet[0] == 0x00:  # reset: read the answer from its start
+            self.at = 0
+        elif packet[0] == 0x03:  # command
+            body = packet[1:]
+            if len(body) < 7 or body[0] != len(body) or atsha_crc(body[:-2]) != body[-2:]:
+                self.reply([0xFF])
+            elif body[1] == 0x02 and body[2] == 0x00:  # Read, configuration zone, 4 bytes
+                word = body[3] | (body[4] << 8)
+                self.reply(self.config[4 * word:4 * word + 4])
+            else:
+                self.reply([0x03])  # parse error
+
+    async def handle_read(self):
+        data = self.answer[self.at] if self.at < len(self.answer) else 0xFF
+        self.at += 1
+        return data
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_atsha204a_crypto(dut):
+    """A Microchip ATSHA204A crypto authentication chip on the I2C
+    controller, its I/O written from the data sheet. The driver wakes it
+    (address 0 sent at 98 kHz holds SDA low for 87 us), reads the wake
+    token, sends a Read command for the first configuration word with its
+    CRC, reads the answer, the first four bytes of the serial number, and
+    puts the chip to sleep. sigrok's ATSHA204A decoder, on its I2C decoder,
+    must name every field of the command and of the answer."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    config = [0x01, 0x23, 0x9A, 0x4C]  # SN[0:3]; every part's serial number begins 01 23
+    chip, transfer, write_bytes, _ = await i2c_session(
+        dut, 0x64, device=lambda **pins: Atsha204a(config, **pins))
+    read = lambda n: [i2c_write_word(0xC9, False)] + [i2c_read_word(k == n - 1) for k in range(n)]
+    await write(dut, CLKDIV, 17)  # the wake: 98 kHz, so the zeros last past tWLO
+    wake = await transfer([i2c_write_word(0x00, True)])
+    await ClockCycles(dut.clk, 200)
+    await write(dut, CLKDIV, 3)
+    await Timer(2500, "us")  # tWHI
+    token = await transfer(read(4))
+    await ClockCycles(dut.clk, 200)
+    command = [0x07, 0x02, 0x00, 0x00, 0x00]  # count, Read, 4 bytes of the configuration zone, word 0
+    await transfer(write_bytes([0x03] + command + atsha_crc(command)))
+    await ClockCycles(dut.clk, 200)
+    answer = await transfer(read(7))
+    await ClockCycles(dut.clk, 200)
+    await transfer(write_bytes([0x01]))  # sleep
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    got = lambda reports: [rev8(r & 0xFF) for r in reports[1:]]
+    assert rev8(wake[0] & 0xFF) == 0x00 and wake[0] & 0x100, wake  # nobody answers address 0
+    assert got(token) == [0x04, 0x11, 0x33, 0x43], token
+    assert got(answer) == [0x07] + config + atsha_crc([0x07] + config), answer
+    assert not chip.awake
+    if sigrok.available():
+        decoder = "i2c,atsha204a"
+        want = ["Count: 4",
+                "Word addr: COMMAND", "Count: 7", "Opcode: Read",
+                "Zone: CONFIG, Length: 4 bytes", "Address: 00 00", "CRC: 1E 2D",
+                "Count: 7", "Data: 01 23 9a 4c", "CRC: C5 74",
+                "Word addr: SLEEP"]
+        found = trace.decode(decoder, "atsha204a")
+        assert texts(found) == want, texts(found)
+        # The data line held low through the command's count: 0, not 7.
+        a, b = next((a, b) for a, b, text in found if text == "Count: 7")
+        wrong = texts(trace.forced("sda", a, b, 0).decode(decoder, "atsha204a"))
+        assert wrong != want and any(t.startswith("Warning: Invalid frame length") for t in wrong), wrong
+
+
+class Pca9571(I2cDevice):
+    """A PCA9571's one register, written from its data sheet: it answers at
+    0x25 only, every byte written sets the eight outputs, and a read
+    returns them. Outputs high at power-on."""
+
+    def __init__(self, **pins):
+        self.addr, self.port = 0x25, 0xFF
+        super().__init__(**pins)
+
+    async def handle_write(self, data):
+        self.port = data
+
+    async def handle_read(self):
+        return self.port
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_pca9571_expander(dut):
+    """An NXP PCA9571 8-bit output expander on the I2C controller, written
+    from its data sheet: the driver sets the outputs, then reads them back
+    to check them. sigrok's PCA9571 decoder must name the value set and the
+    value read, and find them the same."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    chip, transfer, write_bytes, _ = await i2c_session(dut, 0x25, device=Pca9571)
+    await transfer(write_bytes([0x3C]))
+    await ClockCycles(dut.clk, 200)
+    reports = await transfer([i2c_write_word(0x4B, False), i2c_read_word(True)])
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert chip.port == 0x3C
+    assert rev8(reports[1] & 0xFF) == 0x3C, reports
+    if sigrok.available():
+        decoder = "i2c,pca9571"
+        want = ["Outputs set: 3C", "Outputs read: 3C"]
+        found = trace.decode(decoder, "pca9571")
+        assert texts(found) == want, texts(found)
+        # The data line held low through the value set: the read no longer matches it.
+        a, b = next((a, b) for a, b, text in found if text == "Outputs set: 3C")
+        wrong = texts(trace.forced("sda", a, b, 0).decode(decoder, "pca9571"))
+        assert wrong != want and any(t.startswith("Warning: read value") for t in wrong), wrong
 
 
 @cocotb.test(timeout_time=60, timeout_unit="ms")
