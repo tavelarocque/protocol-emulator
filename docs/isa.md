@@ -88,6 +88,11 @@ arrives during cycle t is seen by the threads in cycle t + 2. The first
 flop may go metastable; it has a whole cycle to settle before the second
 samples it.
 
+Both flip-flops hold 1 when the chip is reset, as an idle bus would read.
+So in the first two cycles after reset every synchronised input reads
+high, whatever level is on the pin: a pin held low from the start is
+seen to fall in cycle 2.
+
 The host can bypass the synchroniser per pin (SYNC_BYPASS). That is only
 safe for a signal known to be stable whenever it is sampled, and it is
 needed only where two cycles of delay are too many: the side-set SPI
