@@ -35,7 +35,9 @@ def drive(dut, sck, cs_n, mosi):
 
 
 async def reset(dut, period_ps=100_000):
-    cocotb.start_soon(Clock(dut.clk, period_ps, unit="ps").start())  # 10 MHz by default
+    """Starts the clock and resets the chip; returns the clock."""
+    clock = Clock(dut.clk, period_ps, unit="ps")
+    clock.start()  # 10 MHz by default
     dut.ena.value = 1
     drive(dut, 0, 1, 0)
     dut.uio_in.value = 0
@@ -43,6 +45,7 @@ async def reset(dut, period_ps=100_000):
     await ClockCycles(dut.clk, 10)
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 4)
+    return clock
 
 
 async def transfer(dut, write, addr, data=0):
@@ -3567,6 +3570,224 @@ async def test_microwire_eeprom(dut):
         assert wrong != want, wrong
 
 
+def bits_of(value, width):
+    return [(value >> (width - 1 - k)) & 1 for k in range(width)]
+
+
+def value_of(bits):
+    return int("".join(map(str, bits)), 2) if bits else 0
+
+
+class Ade7758Model:
+    """An ADE7758 energy meter's serial interface, from its datasheet, with
+    CS tied low, as the datasheet allows when the part is alone on the
+    bus. It takes DIN as SCLK falls. The first byte is the communications
+    register: bit 7 set for a write, the register's address below it. A
+    write's data follows, MSB first, a byte for every eight bits of the
+    register or part of eight. A read's data goes out on DOUT from the
+    next rising edge of SCLK, which must come 1.1 us (t9) or more after the
+    command's last falling edge, and DOUT lets go after the last falling
+    edge. Nothing pulls DOUT, so it keeps its last level: the part holds
+    its bit 10 ns or more past that edge, which a recording at 10 MHz
+    could not show had the line been made to move at once."""
+
+    WIDTH = {0x13: 8, 0x1C: 16, 0x0D: 24}  # OPMODE, LINECYC, AVRMS
+
+    def __init__(self, registers):
+        self.registers = dict(registers)
+        self.dout, self.sclk, self.cycle = 1, 0, 0
+        self.taken, self.cmd, self.sending, self.sent = [], None, [], 0
+        self.log, self.t9 = [], []
+
+    def step(self, sclk, din):
+        self.cycle += 1
+        if sclk and not self.sclk and self.sending:
+            if self.sent == 0:
+                self.t9.append(self.cycle - self.last_fall)
+            self.dout, self.sent = self.sending[self.sent], self.sent + 1
+        elif self.sclk and not sclk:
+            self.last_fall = self.cycle
+            if self.sending:
+                if self.sent == len(self.sending):
+                    self.log.append(("read", self.cmd & 0x7F, value_of(self.sending)))
+                    self.sending, self.cmd = [], None
+            else:
+                self.taken.append(din)
+                if self.cmd is None and len(self.taken) == 8:
+                    self.cmd, self.taken = value_of(self.taken), []
+                    self.n = -(-self.WIDTH[self.cmd & 0x7F] // 8) * 8  # whole bytes
+                    if not self.cmd & 0x80:
+                        self.sending, self.sent = bits_of(self.registers[self.cmd], self.n), 0
+                elif self.cmd is not None and len(self.taken) == self.n:
+                    register, value = self.cmd & 0x7F, value_of(self.taken)
+                    self.registers[register] = value
+                    self.log.append(("write", register, value))
+                    self.cmd, self.taken = None, []
+        self.sclk = sclk
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_ade7758(dut):
+    """An ADE7758 three-phase energy meter on the Microwire controller,
+    which has the part's clock phase: the part takes DIN as SCLK falls and
+    sends DOUT from each rise, and the controller changes DI after SK falls
+    and reads DO after SK rises. Its chip select is tied low, as the
+    datasheet allows for a part alone on its bus; the controller's CS goes
+    nowhere. At CLKDIV 4, SK is low for 1.2 us, longer than the 1.1 us the
+    part needs between a read's command and its data. The driver reads the
+    mode register, sets the line cycle count and reads it back, and reads
+    phase A's voltage. sigrok's ADE77xx decoder, on its SPI decoder with
+    the same clock phase, must read each register and its value."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    model = Ade7758Model({0x13: 0x04, 0x1C: 0xFFFF, 0x0D: 0x0C1E8A})
+
+    async def wires():
+        while True:
+            await FallingEdge(dut.clk)
+            driven = int(dut.uio_out.value) & int(dut.uio_oe.value)
+            model.step((driven >> 1) & 1, (driven >> 2) & 1)
+            dut.uio_in.value = 0xF7 | (model.dout << 3)
+
+    line = lambda k: (lambda: (int(dut.uio_out.value) & int(dut.uio_oe.value)) >> k & 1)
+    trace = sigrok.Trace(dut, {"sclk": line(1), "din": line(2),
+                               "dout": lambda: (int(dut.uio_in.value) >> 3) & 1})
+    bus = cocotb.start_soon(wires())
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        wire = more.Microwire(chip, firmware("microwire"), clkdiv=4)
+
+        def read(register, size):
+            return value_of(wire.transfer(bits_of(register, 8) + [0] * 8 * size)[8:])
+
+        def write(register, value, size):
+            wire.transfer(bits_of(0x80 | register, 8) + bits_of(value, 8 * size))
+
+        opmode = read(0x13, 1)
+        write(0x1C, 200, 2)  # LINECYC: 200 half cycles of the line
+        return opmode, read(0x1C, 2), read(0x0D, 3)
+
+    got = await session()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    bus.cancel()
+    assert got == (0x04, 200, 0x0C1E8A), got
+    assert model.log == [("read", 0x13, 0x04), ("write", 0x1C, 200), ("read", 0x1C, 200),
+                         ("read", 0x0D, 0x0C1E8A)], model.log
+    assert min(model.t9) >= 11, model.t9  # cycles of 100 ns
+    if sigrok.available():
+        decoder = "spi:clk=sclk:mosi=din:miso=dout:cpha=1,ade77xx"
+        found = trace.decode(decoder, "ade77xx")
+        want = ["OPMODE: 0x4", "LINECYC: 0xc8", "LINECYC: 0xc8", "AVRMS: 0xc1e8a"]
+        assert texts(found) == want, texts(found)
+        assert texts(trace.decode(decoder, "ade77xx=write")) == ["LINECYC: 0xc8"]
+        # DOUT held low through the voltage's middle byte: not that voltage.
+        a, b = found[-1][0], found[-1][1]
+        rises = [t for t, v in trace.level("sclk") if v and t <= b][-32:]  # command, three bytes
+        assert a - 20 < rises[0] < a, (a, rises)
+        wrong = texts(trace.forced("dout", rises[16], rises[24], 0).decode(decoder, "ade77xx"))
+        assert wrong[:3] == want[:3] and wrong[3] != want[3], wrong
+
+
+class X2444Model:
+    """A Xicor X2444 NOVRAM, sixteen 16-bit words of RAM with an EEPROM
+    copy, from its datasheet. CE high selects it; it takes DI as SK rises,
+    passes over 0s until a 1, and takes that 1 and the seven bits after it
+    as an instruction, 1AAAAOOO. WRITE (011) puts the next 16 bits in RAM
+    word AAAA; STO (001) copies the RAM to the EEPROM; WREN (100) and WRDS
+    (000) set and clear the write enable latch, which is clear at power-up
+    and without which writes and stores are ignored. CE falling ends an
+    instruction."""
+
+    def __init__(self):
+        self.ram, self.eeprom = [0xFFFF] * 16, [0xFFFF] * 16
+        self.enabled, self.taken, self.ce, self.sk, self.log = False, [], 0, 0, []
+
+    def step(self, ce, sk, di):
+        if not ce:
+            self.taken = []
+        elif sk and not self.sk and (self.taken or di):
+            self.taken.append(di)
+            t = self.taken
+            if len(t) == 8:
+                op, address = value_of(t[5:]), value_of(t[1:5])
+                if op == 0b100:
+                    self.enabled = True
+                elif op == 0b000:
+                    self.enabled = False
+                elif op == 0b001 and self.enabled:
+                    self.eeprom = list(self.ram)
+                if op != 0b011:
+                    self.log.append(({0b100: "WREN", 0b000: "WRDS", 0b001: "STO"}.get(op, op), self.enabled))
+            elif len(t) == 24 and value_of(t[5:8]) == 0b011:
+                address, word = value_of(t[1:5]), value_of(t[8:])
+                if self.enabled:
+                    self.ram[address] = word
+                self.log.append(("WRITE", address, word, self.enabled))
+        self.ce, self.sk = ce, sk
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_x2444_novram(dut):
+    """An X2444 NOVRAM on the Microwire controller, whose chip select is
+    active high as the part's CE is: a write refused because the write
+    enable latch is clear at power-up, the latch set, two words written to
+    RAM, and the RAM stored in the EEPROM. Only writes: the part puts a
+    read's first bit out as SK falls on the instruction's last bit and the
+    rest as SK rises, and the controller reads DO only after SK rises, so
+    that bit would be missed. The NOVRAM is a model written from the
+    datasheet; sigrok's X2444M/P decoder, on its SPI decoder with CE active
+    high, must name every instruction, with the address and word of each
+    write."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    model = X2444Model()
+
+    async def wires():
+        while True:
+            await FallingEdge(dut.clk)
+            driven = int(dut.uio_out.value) & int(dut.uio_oe.value)
+            model.step(driven & 1, (driven >> 1) & 1, (driven >> 2) & 1)
+
+    line = lambda k: (lambda: (int(dut.uio_out.value) & int(dut.uio_oe.value)) >> k & 1)
+    trace = sigrok.Trace(dut, {"ce": line(0), "sk": line(1), "di": line(2),
+                               "do": lambda: (int(dut.uio_in.value) >> 3) & 1})
+    bus = cocotb.start_soon(wires())
+    chip = pe.Chip(sim_port(dut))
+    writes = [(3, 0x1234), (5, 0xBEEF), (15, 0x8001)]
+
+    @bridge
+    def session():
+        wire = more.Microwire(chip, firmware("microwire"))
+        instruction = lambda address, op: bits_of(0x80 | (address << 3) | op, 8)
+        wire.transfer(instruction(writes[0][0], 0b011) + bits_of(writes[0][1], 16))
+        wire.transfer(instruction(0, 0b100))  # WREN
+        for address, word in writes[1:]:
+            wire.transfer(instruction(address, 0b011) + bits_of(word, 16))
+        wire.transfer(instruction(0, 0b001))  # STO
+
+    await session()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    bus.cancel()
+    assert model.log == [("WRITE", 3, 0x1234, False), ("WREN", True), ("WRITE", 5, 0xBEEF, True),
+                         ("WRITE", 15, 0x8001, True), ("STO", True)], model.log
+    assert model.eeprom[3] == 0xFFFF and (model.eeprom[5], model.eeprom[15]) == (0xBEEF, 0x8001)
+    if sigrok.available():
+        decoder = "spi:clk=sk:mosi=di:miso=do:cs=ce:cs_polarity=active-high,x2444m"
+        found = trace.decode(decoder, "x2444m")
+        want = ["WRITE: 0x3 => 0x1234", "WREN", "WRITE: 0x5 => 0xbeef", "WRITE: 0xf => 0x8001", "STO"]
+        assert texts(found) == want, texts(found)
+        # DI held high through the word written to address 5: not 0xbeef.
+        a, b = next((a, b) for a, b, text in found if text == "WRITE: 0x5 => 0xbeef")
+        wrong = texts(trace.forced("di", (a + b) // 2, b, 1).decode(decoder, "x2444m"))
+        assert wrong[:2] == want[:2] and wrong[2] != want[2] and wrong[3:] == want[3:], wrong
+
+
 class CecFollower:
     """A CEC follower at [address], from the specification's timing table
     for receivers: a start bit is low for 3.5 to 3.9 ms of a 4.3 to 4.7 ms
@@ -4792,6 +5013,149 @@ async def test_rfm12(dut):
                    ["Configuration command", "Frequency: 868MHz", "Capacitance: 12.0pF", "Power management",
                     "Frequency setting"],
                    damage="Frequency: 868MHz", line="mosi")
+
+
+class AvrIsp:
+    """An ATmega168 at 16 MHz, as its serial programming interface is
+    described in its datasheet. While RESET is low it takes MOSI as SCK
+    rises and shifts MISO out as SCK falls, MSB first. Instructions are
+    four bytes, counted from the fall of RESET. Its shift register echoes
+    each byte one byte later, except that a read instruction's answer
+    takes the place of the fourth. Programming Enable (AC 53) is taken only
+    20 ms or more after RESET falls, and the other instructions only once
+    programming is enabled. MISO floats (high here) while RESET is high."""
+
+    SIGNATURE = (0x1E, 0x94, 0x06)
+    FUSES = {(0x50, 0x00): 0x62, (0x58, 0x08): 0xDF, (0x50, 0x08): 0xF9}  # as shipped
+
+    def __init__(self, dut):
+        self.dut, self.miso, self.was_reset, self.was_sck = dut, 1, 1, 0
+        self.log, self.widths = [], []  # instructions taken; SCK's high and low times, ns
+
+    def _answer(self, cmd):
+        """The byte that replaces the echo in a read instruction's fourth."""
+        if not self.enabled:
+            return None
+        if cmd[0] == 0x30:
+            return self.SIGNATURE[cmd[2] & 3]
+        return self.FUSES.get((cmd[0], cmd[1]))
+
+    async def run(self):
+        """Watches the pins; nothing is lost if it is stopped while they
+        stand still and started again."""
+        dut = self.dut
+        while True:
+            await FallingEdge(dut.clk)  # mid-cycle: chip outputs have settled
+            now = get_sim_time("ns")
+            out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+            sck, mosi = out & oe & 1, (out & oe) >> 1 & 1
+            reset = (out >> 4) & 1 if (oe >> 4) & 1 else 1  # a pull-up on RESET
+            if self.was_reset and not reset:
+                self.fell, self.enabled, self.edge = now, False, None
+                self.cmd, self.shift, self.bits, self.out, self.started = [], 0, 0, 0x00, None
+                self.miso = self.out >> 7
+            if reset:
+                self.miso = 1
+            elif sck != self.was_sck:
+                if self.edge is not None:
+                    self.widths.append(now - self.edge)
+                self.edge = now
+                if sck:
+                    self.shift, self.bits = ((self.shift << 1) | mosi) & 0xFF, self.bits + 1
+                    if self.started is None:
+                        self.started = now
+                else:
+                    if self.bits == 8:
+                        self.cmd.append(self.shift)
+                        self.out, self.bits = self.shift, 0
+                        if len(self.cmd) == 3 and self._answer(self.cmd) is not None:
+                            self.out = self._answer(self.cmd)
+                        if len(self.cmd) == 4:
+                            if self.cmd[:2] == [0xAC, 0x53]:
+                                self.enabled = self.started - self.fell >= 20_000_000  # 20 ms
+                            self.log.append((bytes(self.cmd).hex(), self.enabled))
+                            self.cmd, self.started = [], None
+                    self.miso = (self.out >> (7 - self.bits)) & 1
+            dut.uio_in.value = (int(dut.uio_in.value) & ~4) | (self.miso << 2)
+            self.was_reset, self.was_sck = reset, sck
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_avr_isp(dut):
+    """An ATmega168 programmed in system over the SPI controller, as
+    avrdude begins: RESET held low, 20 ms waited, Programming Enable, the
+    three signature bytes and the three fuse bytes read. SCK runs at 900
+    kHz on the controller with a half-period word, as a 16 MHz part needs
+    SCK high and low for more than three of its clocks. RESET is pin 4,
+    which every MOV of the firmware holds low once OUT spans four pins;
+    letting it go ends the session. sigrok's AVR ISP decoder must name the
+    part from its signature and read each fuse. (The 20 ms, in which the
+    pins stand still, are left out of the recording.)"""
+    clock = await reset(dut)
+    dut.dev_mode.value = 0
+    avr = AvrIsp(dut)
+    running = cocotb.start_soon(avr.run())
+    chip = pe.Chip(sim_port(dut))
+    spi_pins = {0: pe.PUSH_PULL, 1: pe.PUSH_PULL, 3: pe.PUSH_PULL}
+    commands = [H("ac530000"), H("30000000"), H("30000100"), H("30000200"),
+                H("50000000"), H("58080000"), H("50080000")]
+
+    @bridge
+    def hold_reset():
+        chip.stop()
+        chip.load(firmware("spi_controller"))
+        # MOV writes pins 1 to 4: MOSI, MISO's unused output, CS_N, RESET.
+        chip.configure(set_base=0, set_count=1, out_base=1, out_count=4, in_base=2)
+        chip.set_pin_modes({**spi_pins, 4: pe.PUSH_PULL})
+        chip.run()
+        chip.push(1)  # H = 1: 11 cycles a bit, SCK high 5 and low 6
+
+    @bridge
+    def program():
+        replies = []
+        for cmd in commands:  # each its own selection; CS_N goes nowhere
+            for i, b in enumerate(cmd):
+                chip.push(pe.rev8(b) | (int(i == 3) << 8))
+            replies.append(bytes(pe.rev8(chip.pop() & 0xFF) for _ in cmd))
+        chip.set_pin_modes(spi_pins)  # RESET let go: the part runs again
+        return replies
+
+    await hold_reset()
+    await ClockCycles(dut.clk, 20)
+    assert avr.was_reset == 0, "RESET is not held low"
+    # Nothing moves on the pins for 20 ms: the chip's clock is stopped
+    # meanwhile, which only spares the simulator.
+    running.cancel()
+    clock.stop()
+    await Timer(20, unit="ms")
+    clock.start()
+    running = cocotb.start_soon(avr.run())
+    trace = sigrok.Trace(dut, {
+        "sck": lambda: int(dut.uio_out.value) & int(dut.uio_oe.value) & 1,
+        "mosi": lambda: (int(dut.uio_out.value) >> 1) & 1,
+        "miso": lambda: (int(dut.uio_in.value) >> 2) & 1,
+        "reset": lambda: (int(dut.uio_out.value) >> 4) & 1 if (int(dut.uio_oe.value) >> 4) & 1 else 1,
+    })
+    replies = await program()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    running.cancel()
+    assert avr.log == [(c.hex(), True) for c in commands], avr.log
+    assert min(avr.widths) >= 200, min(avr.widths)  # ns: over three clocks at 16 MHz
+    # The echo of each byte in the next, and the answers in the fourth.
+    assert replies == [H("00ac5300"), H("0030001e"), H("00300094"), H("00300006"),
+                       H("00500062"), H("005808df"), H("005008f9")], [r.hex() for r in replies]
+    if sigrok.available():
+        decoder = "spi:clk=sck:mosi=mosi:miso=miso:cs=reset,avr_isp"
+        found = trace.decode(decoder, "avr_isp")
+        want = ["Programming enable", "Vendor code: 0x1e (Atmel)", "Part family / memory size: 0x94",
+                "Part number: 0x06", "Device: Atmel ATmega168", "Read fuse bits: 0x62",
+                "Read fuse high bits: 0xdf", "Read extended fuse bits: 0xf9"]
+        assert texts(found) == want, texts(found)
+        # MISO held high through the low fuse's instruction: not 0x62.
+        a, b = next((a, b) for a, b, text in found if text == "Read fuse bits: 0x62")
+        wrong = texts(trace.forced("miso", a, b, 1).decode(decoder, "avr_isp"))
+        assert "Read fuse bits: 0x62" not in wrong and "Read fuse bits: 0xff" in wrong, wrong
 
 
 @cocotb.test(timeout_time=60, timeout_unit="ms")
