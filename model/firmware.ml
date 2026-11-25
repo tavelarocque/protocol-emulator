@@ -4786,6 +4786,1131 @@ let lfast_config ~clkdiv =
    [words] (its CRC left out). *)
 let lfast_words ~header (words : int list) = ((header lsl 8) lor (List.length words - 1)) :: words
 
+(* MIL-STD-1553B, the bus of military aircraft and spacecraft: the chip as
+   the bus controller (BC), sending commands and data words to remote
+   terminals (RTs), with a second thread that hears every word on the bus,
+   the RTs' answers included, and hands each to the host.
+
+   A word is 20 bit times at 1 Mbit/s in Manchester II: a sync of three
+   bit times, 16 bits most significant first, and odd parity. A bit is
+   high then low for a 1, low then high for a 0. A command or status word's
+   sync is high for a bit and a half and then low for as long; a data
+   word's is the opposite. The words of one message follow one another
+   with no gap.
+
+   This program, on thread 0, is the transmitter. The host gives it a
+   command word and, for a receive command, the data words that go with
+   it. The firmware makes each word's sync, its Manchester code and its
+   parity (the CRC register with polynomial 1 follows the 16 bits OUT
+   shifts, and its bit 0 is then their parity), and reads the command word
+   to know how many data words follow it: none for a transmit command (T/R
+   set, the RT answers with the data); for a receive command the word
+   count, 0 meaning 32, or for a mode command (subaddress 0 or 31) one if
+   the mode code is 16 or above. After the message it waits until the bus
+   has been quiet for the response timeout before it takes the next
+   command, so an RT's answer is never talked over: each wait on RX either
+   sees the bus rise within the timeout, and starts again once it is low,
+   or times out to [next]. The monitor ([mil1553_mon]) on thread 1 reads
+   the answers.
+
+   On a real bus the pins drive a 1553 transceiver (an HI-1573 or similar)
+   and through it a coupling transformer onto the twisted pair: TX and
+   TX-bar are its inputs, both low to keep its transmitter off, and RX is
+   its receiver's positive output, which shows every word on the bus, this
+   chip's own included.
+
+   Pins: P0 = TX, P1 = TX-bar, push-pull; P2 = RX, an input. Config:
+   [mil1553_bc_config]: set_base 0, set_count 2; threshold 16; out most
+   significant bit first; crc_poly 1, crc_init 0; timeout_vector
+   [mil1553_bc_next], timeout 140 (14 us, the standard's least
+   no-response timeout); a bit is 10 ticks, so CLKDIV 1 at 10 MHz and 5 at
+   50 MHz give 1 Mbit/s exactly.
+
+   Host protocol on the TX FIFO: a command word, then for a receive
+   command its data words. Words of one message must follow each other
+   with no gap on the bus, so a data word is taken during the sync before
+   it: the host must have it there by then (one every 20 us), or that sync
+   is stretched. *)
+let mil1553_bc =
+  {|
+        set pins, 0             ; the transmitter off: TX and TX-bar low
+next:   pull                    ; a command word
+        mov isr, osr            ; kept to send
+        out null, 5             ; the RT address
+        out x, 1                ; T/R
+        set y, 0
+        jmp !x rcv
+        jmp send                ; transmit: the RT sends the data, no data words here
+rcv:    out y, 5                ; the subaddress
+        jmp !y mode
+        set x, 31
+        jmp x!=y count
+mode:   out y, 1                ; a mode code: one data word for codes 16 to 31
+        jmp send
+count:  out y, 5                ; the word count
+        jmp !y w32
+        jmp send
+w32:    set x, 1                ; 0 means 32: 1 shifted up five places
+        mov osr, x
+        out null, 5
+        mov y, osr
+send:   mov osr, isr            ; Y: data words to follow
+        mov crc, null
+        set pins, 1 [14]        ; command sync: high for a bit and a half,
+        set pins, 2 [11]        ; then low
+        jmp bit
+bit:    out x, 1                ; a bit, most significant first; the CRC takes it
+        jmp !x zero
+        set pins, 1 [4]         ; a 1: high,
+        set pins, 2             ; then low
+        jmp tail
+zero:   set pins, 2 [4]         ; a 0: low,
+        set pins, 1             ; then high
+        jmp tail
+tail:   jmp !osre bit
+        mov x, crc              ; the parity of the 16
+        jmp !x pone
+        set pins, 2 [4]         ; odd already: the parity bit is a 0
+        set pins, 1 [2]
+        jmp ptail
+pone:   set pins, 1 [4]         ; even: a 1
+        set pins, 2 [2]
+        jmp ptail
+ptail:  jmp y-- dword           ; a data word follows at once
+        set pins, 0             ; the end of the message: transmitter off
+quiet:  wait 0 pin 2            ; until the bus has been quiet for the timeout
+        wait 1 pin 2 timeout
+        jmp quiet
+dword:  set pins, 2 [12]        ; data sync: low for a bit and a half,
+        pull                    ; the data word
+        mov crc, null
+        set pins, 1 [11]        ; then high
+        jmp bit
+|}
+;;
+
+let mil1553_bc_next = 1
+
+let mil1553_bc_config =
+  { Isa.Thread_config.default with
+    set_base = 0
+  ; set_count = 2
+  ; threshold = 16
+  ; out_msb_first = true
+  ; crc_poly = 1
+  ; crc_init = 0
+  ; timeout_vector = mil1553_bc_next
+  ; timeout = 140
+  }
+;;
+
+(* The MIL-STD-1553B bus monitor, on thread 1 beside [mil1553_bc] (see
+   there): every word on the bus, the BC's own and the RTs' answers, goes
+   to the host as two RX words, the 16 bits and then a tag.
+
+   A word from a quiet bus starts with a command or status sync, whose
+   middle is a falling edge a bit and a half after the bus rises; after a
+   word, a quarter of a bit time past its end, the bus is high if a
+   command or status sync follows at once, and low for a data sync or a
+   quiet bus, and then a data sync's middle is a rising edge. From the
+   middle of the sync each bit is read a quarter of a bit time into it,
+   in its first half, which is the bit (the receiver does not check that
+   the second half is the opposite). The CRC register, following the bits
+   IN takes, checks the parity over the 17. When no data sync's middle
+   comes within two bit times the bus is quiet: [mil1553_mon_idle], the
+   timeout vector.
+
+   Pins: P2 = RX, an input. Config: [mil1553_mon_config]: in_base 2;
+   threshold 16, autopush; in most significant bit first; crc_poly 1,
+   crc_init 0, crc_in; timeout_vector [mil1553_mon_idle], timeout 20; CLKDIV
+   as thread 0's.
+
+   Host protocol on the RX FIFO, two words for each word on the bus: its
+   16 bits, then a tag: bit 0 set for a command or status sync, clear for
+   a data sync; bit 1 set if the parity is right (odd over the 17 bits);
+   bit 2 the parity bit as received. Two words every 20 us is more than
+   the host port carries at 10 MHz: the driver records them in the packet
+   buffer. *)
+let mil1553_mon =
+  {|
+        wait 0 pin 2            ; the bus quiet (RX reads high for two cycles after reset)
+idle:   wait 1 pin 2            ; a quiet bus: a command or status sync rises
+csync:  set y, 1                ; a command or status sync
+        wait 0 pin 2            ; its middle falls
+        jmp word [9]
+dsync:  set y, 0 [3]            ; a data sync
+        wait 1 pin 2 timeout    ; its middle rises, or the bus is quiet
+        jmp word [9]
+word:   mov isr, null
+        mov crc, null
+        set x, 15 [3]
+bit:    in pins, 1 [8]          ; a bit's first half, most significant first
+        jmp x-- bit             ; the 16th pushes the word
+        in pins, 1              ; the parity bit
+        mov x, crc              ; 1 if the 17 bits have odd parity
+        in x, 1
+        in y, 1
+        push                    ; the tag
+        mov isr, null [4]
+        in pins, 1              ; just after the word: what comes next
+        mov x, isr
+        jmp !x dsync
+        jmp csync
+|}
+;;
+
+let mil1553_mon_idle = 1
+
+let mil1553_mon_config =
+  { Isa.Thread_config.default with
+    in_base = 2
+  ; threshold = 16
+  ; autopush = true
+  ; in_msb_first = true
+  ; crc_poly = 1
+  ; crc_init = 0
+  ; crc_in = true
+  ; timeout_vector = mil1553_mon_idle
+  ; timeout = 8
+  }
+;;
+
+(* The two programs, each at address 0 of its own thread's memory. *)
+module Mil1553 = struct
+  let bc = Asm.assemble mil1553_bc
+  let mon = Asm.assemble mil1553_mon
+
+  (* A command word: RT address, T/R, subaddress (or 0 or 31 for a mode
+     code), word count (0 meaning 32) or mode code. *)
+  let command ~rt ~transmit ~subaddress ~count =
+    (rt lsl 11) lor (Bool.to_int transmit lsl 10) lor (subaddress lsl 5) lor (count land 31)
+  ;;
+end
+
+(* ARINC 429, the avionics data bus: 32-bit words on one twisted pair, at
+   100 kbit/s (high speed) or 12.5 kbit/s (low speed). A bit is bipolar
+   return to zero: the line goes to HI for the first half of a 1, to LO for
+   the first half of a 0, and back to NULL for the second half; words are
+   separated by at least four bit times of NULL. A word is sent bit 1
+   first: bits 1 to 8 the label, its most significant bit first (the
+   reverse of the rest of the word); 9 and 10 the SDI; 11 to 29 the data;
+   30 and 31 the SSM; 32 the parity, which makes the ones odd.
+
+   The host gives the label as its octal number reads, in the bottom byte;
+   the firmware turns it round in the ISR (IN shifting left), sends the 31
+   bits, makes the parity on the CRC register (polynomial 1, following the
+   bits OUT shifts), sends it, and keeps four bit times of NULL before the
+   next word.
+
+   The line is two wires at +-10 V between them; the chip's pins are the
+   inputs of an ARINC 429 line driver (an HI-8586, HI-3182 or similar),
+   which takes one logic input high for HI and the other for LO, both low
+   for NULL. A logic analyser on those two inputs sees what the decoders
+   here read.
+
+   Pins: P0 = HI (the line driver's "1" input), P1 = LO (its "0" input),
+   push-pull, both low between words. Config: [arinc429_config]: set_base
+   0, set_count 2; threshold 16; in most significant bit first, out least
+   significant first; crc_poly 1, crc_init 0. A bit is 20 ticks: CLKDIV 5
+   at 10 MHz and 25 at 50 MHz for 100 kbit/s, 40 and 200 for 12.5 kbit/s,
+   all exact.
+
+   Host protocol: two TX words a word on the line ([arinc429_words]):
+     word 1 : the label in bits 7:0 (octal 205 is 0x85), the SDI in 9:8,
+              and data bits 11 to 16 in 15:10
+     word 2 : data bits 17 to 29 in 12:0, the SSM in 14:13; bit 15 unused
+   Both words of the next are taken in the gap, and when they are there
+   in time the gap is exactly four bit times; when not, the line stays at
+   NULL until they come. *)
+let arinc429_tx =
+  {|
+        set pins, 0             ; NULL: HI and LO both low
+next:   pull                    ; word 1
+        out x, 8                ; X: the label
+        mov y, osr
+        in y, 8                 ; the SDI and data bits 11 to 16, to send after it
+        mov osr, x
+        set y, 7
+rev:    out x, 1                ; the label from its least significant bit
+        in x, 1                 ; into the ISR's bottom: turned round
+        jmp y-- rev
+        pull                    ; word 2
+        mov x, isr              ; bits 1 to 16, bit 1 lowest
+        mov isr, osr            ; word 2 waits in the ISR
+        mov osr, x
+        mov crc, null           ; the parity from bit 1
+        set y, 30               ; 31 bits
+bit:    out x, 1
+        jmp !x zero
+        set pins, 1 [8]         ; a 1: HI for half a bit
+        jmp low
+zero:   set pins, 2 [8]         ; a 0: LO
+        jmp low
+low:    set pins, 0 [4]         ; NULL for the other half
+        jmp !osre more
+        mov osr, isr            ; after bit 16: word 2
+        jmp y-- bit
+more:   nop
+        jmp y-- bit
+        mov x, crc              ; the 31 bits' parity
+        jmp !x pone             ; even: the parity bit is a 1
+        set pins, 2 [8]         ; odd: a 0
+        jmp gap
+pone:   set pins, 1 [8]
+        jmp gap
+gap:    set pins, 0 [15]        ; NULL: the rest of the bit and four more
+        nop [15]
+        nop [15]
+        jmp next [3]
+|}
+;;
+
+let arinc429_config =
+  { Isa.Thread_config.default with
+    set_base = 0
+  ; set_count = 2
+  ; threshold = 16
+  ; in_msb_first = true
+  ; crc_poly = 1
+  ; crc_init = 0
+  }
+;;
+
+(* The two TX words for an ARINC 429 word. [label] is the octal label's
+   value (0o205); [data] is the 19 bits 11 to 29, bit 11 lowest. *)
+let arinc429_words ~label ~sdi ~data ~ssm =
+  [ label land 0xFF lor ((sdi land 3) lsl 8) lor ((data land 0x3F) lsl 10)
+  ; (data lsr 6) land 0x1FFF lor ((ssm land 3) lsl 13)
+  ]
+;;
+
+(* SpaceWire (ECSS-E-ST-50-12C), data-strobe encoded: two lines, D
+   carrying the bits and S changing whenever D does not, so that exactly
+   one of the two changes every bit. The characters: a data character is a
+   parity bit, a 0 flag and 8 bits least significant first; a control
+   character a parity bit, a 1 flag and two bits (FCT 00, EOP 01, EEP 10,
+   ESC 11, in the order sent); NULL is ESC then FCT. Each parity bit makes
+   the ones odd over itself, the flag after it and the data bits of the
+   character before.
+
+   Two threads. This program, on thread 0, makes the characters: it reads
+   the host's words, works out each parity bit and pushes the bits, two to
+   an RX word, which CHAIN carries to thread 1. [spacewire_ds] on thread 1
+   puts them on D and S at one bit every 5 ticks. Every character is an
+   even number of bits, so a word never straddles two. The parity is the
+   CRC register, which follows the bits IN shifts (polynomial 1: its bit 0
+   is their parity): it starts again after each flag, so when the next
+   character comes it holds the parity of the last one's data bits, the
+   parity bit of a control character (flag 1), and its opposite that of a
+   data character, X less one being X's bit 0 turned over.
+
+   Config: [spacewire_chars_config]: threshold 2, autopush; shifts least
+   significant bit first; crc_poly 1, crc_init 0, crc_in. CHAIN on.
+
+   Host protocol on thread 0's TX FIFO:
+     0x000 to 0x0FF : a data character
+     0x100          : EOP, the end of a packet
+     0x200 + n      : n NULLs (1 to 255)
+   A link starts with NULLs; so the first word should be some. The line
+   takes a data character every 50 ticks, faster than the host port can
+   push words: the driver plays them from the packet buffer. *)
+let spacewire_chars =
+  {|
+next:   pull
+        mov y, osr              ; the word, kept
+        out null, 8
+        out x, 1                ; bit 8: EOP
+        jmp !x notend
+        mov x, crc              ; EOP: the parity,
+        in x, 1
+        set x, 1
+        in x, 1                 ; the flag 1,
+        mov crc, null
+        in null, 1              ; then 0, 1
+        in x, 1
+        jmp next
+notend: out x, 1                ; bit 9: NULLs
+        jmp !x data
+        mov osr, y
+        out y, 8                ; how many
+nulls:  jmp y-- null
+        jmp next
+null:   mov x, crc              ; ESC: the parity,
+        in x, 1
+        set x, 1
+        in x, 1                 ; the flag 1,
+        mov crc, null
+        in x, 1                 ; 1, 1
+        in x, 1
+        mov x, crc              ; FCT: the parity,
+        in x, 1
+        set x, 1
+        in x, 1                 ; the flag 1,
+        mov crc, null
+        in null, 1              ; 0, 0
+        in null, 1
+        jmp nulls
+data:   mov x, crc              ; a data character: the parity,
+        jmp x-- dpar            ; turned over: X less one
+dpar:   in x, 1
+        in null, 1              ; the flag 0,
+        mov crc, null
+        mov osr, y
+        set y, 7
+dbit:   out x, 1                ; the 8 bits, least significant first
+        in x, 1
+        jmp y-- dbit
+        jmp next
+|}
+;;
+
+let spacewire_chars_config =
+  { Isa.Thread_config.default with
+    threshold = 2
+  ; autopush = true
+  ; crc_poly = 1
+  ; crc_init = 0
+  ; crc_in = true
+  }
+;;
+
+(* SpaceWire's data-strobe encoding, on thread 1 beside [spacewire_chars]
+   on thread 0 (see there). Two bits a word, from the chain: after a bit in
+   an even place D and S differ, after one in an odd place they are equal,
+   so exactly one of them changes every bit; both start low, as a link
+   does after reset. A bit is 5 ticks: CLKDIV 1 gives 2 Mbit/s at 10 MHz,
+   the standard's lowest data signalling rate, and 10 Mbit/s at 50 MHz, the
+   rate a link starts at. When the bits run out the lines hold still, which
+   a receiver takes for a disconnect after 850 ns: this is a transmitter
+   only, and sends no FCT of its own.
+
+   Real links are LVDS pairs: the pins are the inputs of an LVDS driver
+   for each of D and S.
+
+   Pins: P0 = D, P1 = S, push-pull. Config: [spacewire_ds_config]:
+   set_base 0, set_count 2; threshold 2, autopull; shifts least
+   significant bit first; CLKDIV sets the rate. *)
+let spacewire_ds =
+  {|
+        set pins, 0             ; D and S low
+even:   out x, 1
+        jmp !x e0
+        set pins, 1 [1]         ; D 1, S 0
+        jmp odd
+e0:     set pins, 2 [1]         ; D 0, S 1
+        jmp odd
+odd:    out x, 1
+        jmp !x o0
+        set pins, 3 [1]         ; D 1, S 1
+        jmp even
+o0:     set pins, 0 [1]         ; D 0, S 0
+        jmp even
+|}
+;;
+
+let spacewire_ds_config ~clkdiv =
+  { Isa.Thread_config.default with
+    set_base = 0
+  ; set_count = 2
+  ; threshold = 2
+  ; autopull = true
+  ; clkdiv
+  }
+;;
+
+module Spacewire = struct
+  let chars = Asm.assemble spacewire_chars
+  let ds = Asm.assemble spacewire_ds
+  let eop = 0x100
+  let nulls n = 0x200 lor n
+end
+
+(* ISO 7816-3 smart card reader (the interface device), the character
+   layer of T=0: the card's clock, its reset, and characters both ways on
+   one open-drain I/O line with their parity, guard times and the error
+   signal that asks for a character again.
+
+   The card's rules (ISO/IEC 7816-3): an elementary time unit (etu) is
+   F/D clock cycles, 372 until a PPS exchange changes it. A character is a
+   start bit (low), 8 data bits and a parity bit, each one etu, then I/O
+   high for the guard time: the next character starts 12 etu or more after
+   the one before, and a character sent the other way 16 etu or more after
+   it. A receiver that finds the parity wrong pulls I/O low 10.5 etu after
+   the start for 1 to 2 etu (the error signal); the sender looks at I/O at
+   11 etu and, if it is low, sends the character again 2 etu or more
+   later. A reset is RST low for 400 clock cycles or more with the clock
+   running; the card's answer to reset starts 400 to 40,000 cycles after
+   RST rises.
+
+   Two threads. Thread 1 runs [iso7816_clk], the clock: CLK on P0, high
+   one tick and low the next, so CLK is the core clock over 2 x its CLKDIV,
+   5 MHz at 10 MHz (CLKDIV 1) and at 50 MHz (CLKDIV 5), the most a card may
+   be given during its answer to reset. Thread 0 runs this program with
+   twice that CLKDIV, so one of its ticks is one period of CLK and an etu
+   is 372 ticks, exactly, whatever the clock: 74.4 us at 5 MHz, 13,441
+   bit/s, a character every 893 us. Both start in one CTRL write.
+
+   The bit timing is the default F = 372, D = 1 only: the reader sends no
+   PPS, which leaves a card in the negotiable mode at those values, and a
+   card in the specific mode (TA2 in its answer) at other values needs
+   another program. CLK runs as long as thread 1 does; the card's clock
+   stop is not used.
+
+   A reset is the thread starting: RST low for 2,118 ticks, then high
+   (400 clock cycles is the least ISO 7816-3 allows; the rest covers the
+   host's time to make the pins outputs after the first start). The host
+   resets the card by stopping thread 0 and starting it again, which
+   leaves thread 1 and CLK running.
+
+   Then the program listens. A start bit is taken from a [wait] on I/O
+   whose timeout (TIMEOUT ticks; 3 or more) lands on [poll], which looks
+   for a word from the host without waiting for one: with autopull, the
+   OUT that empties the OSR refills it only if the TX FIFO has a word, and
+   [jmp !osre] tells which. So a character from the card is caught a few
+   ticks after its start bit falls even while the host is silent, and a
+   word from the host is sent as soon as the line is free.
+
+   A character from the card is sampled in the middle of each bit, from
+   1.5 etu after its start bit falls; the CRC register (polynomial 1)
+   follows the bits IN takes, so after the parity bit it holds 0 if the
+   parity is right. Right: the byte goes to the host. Wrong: nothing goes
+   to the host, I/O is pulled low from 10.5 etu for 1.46 etu (544 ticks),
+   and the program listens for the card's repetition.
+
+   A character to the card: the byte from the host; a start bit; 8 data
+   bits, least significant first, each read back from the line as it ends
+   so the CRC register follows what was sent; the parity bit from the CRC
+   register; I/O released at 10 etu; and at 11 etu a [wait] for the card's
+   error signal: if there is none, its timeout lands on [poll] again. If
+   the card signals an error, the character goes again 2.4 etu after the
+   signal is seen. Characters from the host follow one another 12.08 etu
+   apart (TIMEOUT 31). The first one after a character from the card
+   waits 6 etu more, so it starts 16 etu or more after that character's
+   start bit: X is 0 when the last thing on the line was the card's.
+
+   The convention is the host's: the CRC register's starting value is the
+   parity, 0 for the direct convention (TS = 3Bh: a high level is a 1, the
+   least significant bit first, an even number of 1s with the parity bit)
+   and 1 for the inverse (TS = 3Fh: low is 1, most significant bit first,
+   so the levels have an odd number of highs); in the inverse convention
+   the host turns each byte round and inverts it. The program does not
+   change convention on TS by itself.
+
+   Pins: P0 = CLK (thread 1, push-pull, side-set); P1 = RST, push-pull;
+   P2 = I/O, open-drain, with the card's pull-up. Config:
+   [iso7816_config]: set_base 1, set_count 2 (RST and I/O: SET writes 2
+   for RST low, 3 for RST high and I/O released, 1 to pull I/O low with
+   RST high); out_base 2, out_count 1; in_base 2; threshold 8; autopull;
+   crc_in, crc_poly 1, crc_init 0 or 1; timeout_vector [iso7816_poll];
+   timeout 31. [iso7816_clk_config]: sideset_base 0, sideset_count 1.
+
+   Host protocol: TX words are bytes to send, the line's bits in bits 7:0
+   (the byte itself in the direct convention). RX words are the
+   characters the card sent and the reader took: the line's bits in 7:0
+   and the parity bit in bit 8. A full RX FIFO holds up the program, and
+   a character from the card meanwhile is lost: the host takes each word
+   within about 12 etu (893 us at 5 MHz). *)
+let iso7816 =
+  {|
+        set pins, 2             ; RST low, I/O released: the card is reset
+        set x, 3                ;   for 2,118 ticks,
+rst1:   set y, 31         [15]
+rst:    jmp y-- rst       [15]
+        jmp x-- rst1
+        set pins, 3             ;   then RST high: the answer to reset comes
+        jmp idle
+poll:   mov osr, null           ; the timeout vector: has the host a word?
+        out null, 7
+        out null, 1             ; the OSR empties: autopull refills it if there is one
+        jmp !osre send
+idle:   wait 0 pin 2 timeout    ; a start bit from the card, or after TIMEOUT ticks poll
+        mov isr, null     [15]  ; a character from the card: R
+        mov crc, null     [15]
+        set y, 31         [13]
+rs:     jmp y-- rs        [15]
+rbit:   in pins, 1              ; the 8 data bits from R + 558, the middle of each
+        set y, 29         [9]
+rl:     jmp y-- rl        [11]
+        jmp !isrf rbit
+        in pins, 1              ; the parity bit, R + 3534
+        mov x, crc              ; X: 0 if the parity is right
+        jmp !x good
+        mov isr, null     [15]  ; wrong: dropped, and from R + 3905
+        set y, 20         [15]
+el:     jmp y-- el        [15]
+        set pins, 1       [15]  ;   I/O low, the error signal
+        set y, 31         [15]
+eh:     jmp y-- eh        [15]
+        set pins, 3             ;   released 544 ticks later
+        jmp idle                ;   the card sends it again
+good:   push                    ; the byte, and its parity bit in bit 8
+        wait 1 pin 2            ; the parity bit over
+        jmp idle
+send:   jmp x-- go              ; X is 0 after a character from the card:
+        set x, 5                ;   six times
+ta:     set y, 29         [9]
+tal:    jmp y-- tal       [11]
+        jmp x-- ta              ;   an etu, which leaves X not 0
+go:     set y, 29               ; an etu: the guard time after a character sent
+gl:     jmp y-- gl        [11]
+again:  mov isr, osr            ; the byte
+        mov crc, null
+        set pins, 1       [10]  ; the start bit: T
+        set y, 29
+sl0:    jmp y-- sl0       [11]
+sbit:   mov pins, isr     [8]   ; a data bit, from T + 372
+        set y, 29
+sl:     jmp y-- sl        [11]
+        in pins, 1              ; read back as it ends, for the parity
+        jmp !isrf sbit
+        mov pins, crc     [10]  ; the parity bit, T + 3348
+        set y, 29
+pl:     jmp y-- pl        [11]
+        set pins, 3       [10]  ; I/O released, T + 3720: the guard time
+        set y, 29
+gt:     jmp y-- gt        [11]
+        wait 0 pin 2 timeout    ; T + 4092: the card's error signal? If not, poll
+        set y, 31         [15]  ; it is: wait for it to end,
+w:      jmp y-- w         [15]
+        wait 1 pin 2
+        jmp go                  ; and send the character again
+|}
+;;
+
+(* Where [iso7816]'s timeout vector points: the label [poll]. *)
+let iso7816_poll = 7
+
+let iso7816_config ~clkdiv ~inverse =
+  { Isa.Thread_config.default with
+    set_base = 1
+  ; set_count = 2
+  ; out_base = 2
+  ; out_count = 1
+  ; in_base = 2
+  ; threshold = 8
+  ; autopull = true
+  ; crc_in = true
+  ; crc_poly = 1
+  ; crc_init = Bool.to_int inverse
+  ; timeout_vector = iso7816_poll
+  ; timeout = 31
+  ; clkdiv
+  }
+;;
+
+(* The card's clock, on thread 1 beside [iso7816]: high one tick, low the
+   next. *)
+let iso7816_clk =
+  {|
+        .side_set 1
+clk:    nop                 side 1
+        jmp clk             side 0
+|}
+;;
+
+let iso7816_clk_config ~clkdiv = { Isa.Thread_config.default with sideset_base = 0; sideset_count = 1; clkdiv }
+
+(* A byte as the line carries it: itself in the direct convention; in the
+   inverse, turned round and inverted. Its own inverse either way. *)
+let iso7816_line ~inverse byte = if inverse then lnot (reverse_byte byte) land 0xFF else byte
+
+(* KNX TP1, the twisted-pair medium of the KNX building automation bus: a
+   sender of telegrams, which then listens for the acknowledgement. 9600
+   bit/s; a logical 0 is the bus pulled low for 35 us at the start of its
+   104 us bit, a logical 1 is no pulse. A character is a start bit (a 0), 8
+   data bits least significant first, an even parity bit and a stop bit
+   (a 1), and the next character of a telegram starts two bit times after
+   that stop bit: thirteen bit times from start to start. A telegram is its
+   control field, source address, destination address, the field with the
+   address type, hop count and length, the TPCI and APCI and data, and a
+   checksum: the exclusive or of all its bytes, inverted.
+
+   The host sends the bytes. The firmware makes every character, the
+   parity bits, the timing and the checksum. The checksum is the CRC
+   register with the polynomial 0x80: every bit OUT shifts goes in at the
+   top of eight bits that turn right once a bit, so after each byte the
+   register is its old value exclusive or the byte; read inverted, its low
+   byte is the checksum. The parity is Y: it starts at 0 and counts down
+   once for every 1 sent, so its bit 0 is the parity of the 1s so far.
+
+   After the checksum's stop bit the bus is left alone and the firmware
+   waits for an acknowledgement (KNX's receivers send one character 15 bit
+   times after a telegram): it waits [timeout] ticks for a start bit and
+   reads ten bits, each 17 us into its bit time, where a 0's pulse is.
+   Then the bus is quiet for 54 bit times or more before the next
+   telegram. It sends without listening first, so it does not give way to
+   another sender (KNX's arbitration), and it does not repeat a telegram
+   that is not acknowledged: the host decides.
+
+   The real bus is 30 V DC, and a 0 is a drop of a few volts with the
+   overshoot that follows it: a transceiver (a TP-UART, an NCN5120, or
+   discrete parts) drives and reads it. Here the pin stands for the bus as
+   a wired AND: open-drain, low for a pulse, and read back for the
+   acknowledgement, which another device pulls low.
+
+   Pins: P0 = the bus, open-drain, with a pull-up. Config:
+   [knx_tx_config]: out_base 0, out_count 1; set_base 0, set_count 1;
+   in_base 0; threshold 8; crc_poly 0x80, crc_init 0, crc_invert;
+   timeout_vector [knx_noack], timeout = the ticks to wait for an
+   acknowledgement (one is due 1727 ticks after the wait starts, so 2000
+   leaves two and a half bit times to spare); a tick is 1 us:
+   CLKDIV 10 at 10 MHz, 50 at 50 MHz, 1 at 1 MHz. A bit is 104 ticks, so
+   the bit rate is 9615 bit/s, 0.16% fast; the pulse is 35 ticks.
+
+   Host protocol, per telegram:
+     TX : its bytes without the checksum, one a word; the last with bit 8
+          set ([knx_words]). The next byte is taken in the stop bit of the
+          character before, so a host that is late stretches the gap,
+          which a receiver takes as the end of the telegram.
+     RX : one word once the acknowledgement has been read: its ten bits,
+          the byte in bits 7:0, its parity bit in bit 8 and its stop bit
+          in bit 9 (0x2CC for an ACK); or 0 if no start bit came. *)
+let knx_tx =
+  {|
+next:   mov crc, null           ; the checksum, the bytes' exclusive or, from 0
+        pull                    ; a telegram's first byte
+char:   set y, 0                ; -1: Y counts this character's 1s down
+        set pins, 0             ; 0: the start bit, a 0: the bus pulled low
+        nop [15]                ; 1..16
+        nop [15]                ; 17..32
+        nop [1]                 ; 33..34
+        set pins, 1             ; 35: released
+        set x, 3                ; 36
+sr:     jmp x-- sr [15]         ; 37..100
+        jmp bit [1]             ; 101..102
+bit:    out x, 1                ; 103: a data bit, least significant first; the checksum takes it
+        mov pins, x             ; 0: a 0 pulls the bus low, a 1 leaves it
+        jmp !x zero             ; 1
+        jmp y-- one             ; 2: a 1: Y's bit 0 becomes the parity so far
+one:    nop [15]                ; 3..18
+        nop [15]                ; 19..34
+        set pins, 1             ; 35
+        set x, 3                ; 36
+br:     jmp x-- br [15]         ; 37..100
+        nop                     ; 101
+        jmp !osre bit           ; 102
+        nop                     ; 103
+        mov pins, y             ; 0: the parity bit, even
+        nop [15]                ; 1..16
+        nop [15]                ; 17..32
+        nop [1]                 ; 33..34
+        set pins, 1             ; 35: the stop bit and two bit times of rest follow
+        mov x, osr              ; 36: the word's bits 15:8, now at the bottom
+        jmp !x more             ; 37: 0: another byte
+        jmp x-- last            ; 38
+last:   jmp !x cks              ; 39: it was 1: the checksum next
+        jmp ack                 ; 40: it was the checksum (0xFF): listen
+more:   pull                    ; 38: the next byte
+        set x, 22               ; 39
+mw:     jmp x-- mw [15]         ; 40..407
+        nop [5]                 ; 408..413
+        jmp char                ; 414: the next start bit at 416, 13 bit times after this one's
+cks:    mov osr, crc            ; 40: the checksum, the exclusive or inverted; the register stops
+        set x, 22               ; 41
+cw:     jmp x-- cw [15]         ; 42..409
+        nop [3]                 ; 410..413
+        jmp char                ; 414
+zero:   jmp one                 ; 2: a 0, as long as a 1
+ack:    wait 0 pin 0 timeout    ; the acknowledgement's start bit, or to [noack]
+        set y, 9                ; ten bits
+        set x, 6
+aw:     jmp x-- aw [15]
+        nop [3]
+abit:   in pins, 1              ; 17 us into each bit: low for a 0
+        set x, 5
+ab:     jmp x-- ab [15]
+        nop [4]
+        jmp y-- abit            ; every 104 ticks
+        push                    ; the byte, its parity bit and its stop bit
+        jmp quiet
+noack:  mov isr, null           ; no start bit in time: 0
+        push
+quiet:  set y, 10               ; 54 bit times and more of quiet bus
+qo:     set x, 31
+qi:     jmp x-- qi [15]
+        jmp y-- qo
+        jmp next
+|}
+;;
+
+let knx_noack = Asm.label knx_tx "noack"
+
+let knx_tx_config ~clkdiv ~timeout =
+  { Isa.Thread_config.default with
+    out_base = 0
+  ; out_count = 1
+  ; set_base = 0
+  ; set_count = 1
+  ; in_base = 0
+  ; threshold = 8
+  ; crc_poly = 0x80
+  ; crc_init = 0
+  ; crc_invert = true
+  ; timeout_vector = knx_noack
+  ; timeout
+  ; clkdiv
+  }
+;;
+
+(* A telegram's TX words: its bytes, the checksum left out, the last with
+   bit 8 set. *)
+let knx_words bytes =
+  List.mapi bytes ~f:(fun i b -> (b land 0xFF) lor if i = List.length bytes - 1 then 0x100 else 0)
+;;
+
+(* IEC 61375-3-1 MVB, the Multifunction Vehicle Bus of trains: a sender of
+   master frames and slave frames. 1.5 Mbit/s, Manchester coded: a 1 is
+   high then low, a 0 low then high. A frame starts with a start bit (a 1)
+   and an 8-bit start delimiter that has non-data symbols in it, NH (high
+   for a whole bit time) and NL (low): 1 NH NL 0 NH NL 0 0 0 for a master
+   frame, 1 1 1 1 NL NH 1 NL NH for a slave frame. Then the data, most
+   significant bit first: a master frame is 16 bits (the function code
+   and the address), a slave frame 16, 32, 64, 128 or 256 bits, and after
+   every 64 bits, or after all of them in a shorter frame, an 8-bit check
+   sequence. The frame ends with an end delimiter; here it is an NH, after
+   which the line goes silent (low), so a frame both starts and ends with
+   a change of level.
+
+   The check sequence is a 7-bit CRC with the generator x^7 + x^6 + x^5 +
+   x^2 + 1, an even parity bit over the data and those 7 bits, and all 8
+   inverted. The firmware computes it on the CRC register with one
+   polynomial, x^8 + x^5 + x^3 + x^2 + x + 1: the generator times x + 1
+   (0xF4 written for a register that shifts right). The remainder R by
+   that product gives both. The 8 bits wanted are R itself when R's last
+   bit (which is the parity bit) is 0; when it is 1, they are R with the
+   bits for x^7, x^6, x^5 and x^2 turned over, because the generator plus
+   1 is a multiple of x + 1 whose remainder by the generator is 1. So
+   after a block the register is read inverted, its parity bit decides,
+   and the eight bits go out from the ISR, which shifts right as the
+   register holds them (first bit lowest), with a mask in the OSR that
+   says which to turn over.
+
+   The words after the first are counted down in Y, and a word with a
+   multiple of 4 words after it ends a 64-bit block. That is tested when a
+   word is pulled, and picks one of two copies of the bit loop: the copy
+   for a word that ends a block goes on to the check sequence.
+
+   Timing: a half bit is 16 ticks, so the core clock must be 48 MHz times
+   CLKDIV: at 48 MHz with CLKDIV 1 the bit rate is exactly 1.5 Mbit/s. At
+   50 MHz no whole number of clocks makes a bit (33.3 are needed); 33 would
+   be 1.0% fast, and 32, this program at CLKDIV 1, 4.2% fast.
+
+   The real bus is RS-485 (ESD) or transformer coupled (EMD): the pins are
+   for a line driver, P0 its data input and P1 its enable. A frame starts
+   after eight bit times or more of silence.
+
+   Pins: P0 = data, high for the line's high; P1 = the driver's enable;
+   both push-pull, low while the bus is silent. Config: [mvb_config]:
+   out_base 0, out_count 1; set_base 0, set_count 2; threshold 16; out
+   most significant bit first; crc_poly 0xF4, crc_init 0, crc_invert.
+
+   Host protocol, per frame:
+     TX word 0 : bit 15 set for a master frame; bits 3:0 the number of
+                 16-bit words less one: 0 for a master frame; 0, 1, 3, 7 or
+                 15 for a slave frame of 16 to 256 bits ([mvb_words])
+     then      : the words. A master frame's word is the function code in
+                 bits 15:12 and the address in 11:0.
+   A word is taken in the last bit of the one before, one every 10.7 us:
+   the driver plays them from the packet buffer, faster than the host port
+   could push them. *)
+let mvb =
+  {|
+next:   set pins, 0             ; silent: the line low, the driver off
+        set x, 15
+gap:    jmp x-- gap [15]        ; eight bit times
+        pull                    ; the header
+        out x, 1                ; bit 15: a master frame
+        out null, 11
+        out y, 4                ; Y: the words after the first
+        pull                    ; the first word
+        jmp !x slave
+        set pins, 3 [15]        ; half bit 1: the start bit, high; the driver on
+        set pins, 2 [15]        ; 2
+        set pins, 3 [15]        ; 3, 4: NH
+        nop [15]
+        set pins, 2 [15]        ; 5, 6: NL
+        nop [15]
+        nop [15]                ; 7, 8: 0
+        set pins, 3 [15]
+        nop [15]                ; 9, 10: NH
+        nop [15]
+        set pins, 2 [15]        ; 11, 12: NL
+        nop [15]
+        nop [15]                ; 13, 14: 0
+        set pins, 3 [15]
+        set pins, 2 [15]        ; 15, 16: 0
+        set pins, 3 [15]
+        set pins, 2 [14]        ; 17, 18: 0
+        jmp first
+slave:  set pins, 3 [15]        ; 1: the start bit
+        set pins, 2 [15]        ; 2
+        set pins, 3 [15]        ; 3, 4: 1
+        set pins, 2 [15]
+        set pins, 3 [15]        ; 5, 6: 1
+        set pins, 2 [15]
+        set pins, 3 [15]        ; 7, 8: 1
+        set pins, 2 [15]
+        nop [15]                ; 9, 10: NL
+        nop [15]
+        set pins, 3 [15]        ; 11, 12: NH
+        nop [15]
+        nop [15]                ; 13, 14: 1
+        set pins, 2 [15]
+        nop [15]                ; 15, 16: NL
+        nop [15]
+        set pins, 3 [14]        ; 17, 18: NH
+        jmp first
+first:  set pins, 3             ; 272: half bit 18, high
+        mov crc, null           ; 273: the check sequence covers the data alone
+        out x, 1                ; 274: the first bit
+        jmp !y fl [10]          ; 275..285: a frame of one word: it ends the block
+        set page, 1             ; 286
+        jmp bitn                ; 287
+fl:     set page, 1             ; 286
+        jmp bitl                ; 287
+.align
+bitn:   mov pins, x             ; 0: the first half: the bit
+        jmp x-- n1 [14]         ; 1..15: X - 1, whose bit 0 is the bit's opposite
+n1:     mov pins, x             ; 16: the second half
+        jmp !osre nmore [5]     ; 17..22
+        jmp y-- nw              ; 23: the word has gone; Y > 0 here
+nw:     pull                    ; 24: the next word
+        mov isr, null           ; 25
+        in y, 2                 ; 26
+        mov x, isr              ; 27: the words after it, modulo 4
+        jmp !x lw               ; 28: 0: it ends a block
+        out x, 1 [1]            ; 29..30: its first bit; the CRC register takes it
+        jmp bitn                ; 31
+lw:     out x, 1 [1]            ; 29..30
+        jmp bitl                ; 31
+nmore:  out x, 1 [7]            ; 23..30: the next bit
+        jmp bitn                ; 31
+bitl:   mov pins, x             ; 0: the same, in a word that ends a block
+        jmp x-- l1 [14]         ; 1..15
+l1:     mov pins, x             ; 16
+        jmp !osre lmore         ; 17
+        mov isr, crc            ; 18: the block has gone: the register, inverted; it stops
+        mov osr, isr            ; 19
+        out null, 8             ; 20
+        out x, 1                ; 21: its bit 7, the parity bit, inverted
+        jmp !x odd              ; 22
+        set x, 0                ; 23: parity bit 0: every bit as it is
+        jmp x-- even            ; 24: X = 0xFFFF
+even:   mov osr, x              ; 25
+        out null, 8 [1]         ; 26..27: the mask in bits 15:8, a 1 for each bit as it is
+cb:     out x, 1                ; 28: the mask's bit for the next check bit
+        jmp !x cf               ; 29
+        nop [1]                 ; 30..31
+        mov pins, isr           ; 0: the bit
+        mov x, isr              ; 1
+        jmp x-- cq [13]         ; 2..15
+cq:     mov pins, x             ; 16: its opposite
+        jmp ct                  ; 17
+cf:     mov x, isr              ; 30
+        jmp x-- cg              ; 31
+cg:     mov pins, x             ; 0: the bit turned over
+        nop [14]                ; 1..15
+        mov pins, isr [1]       ; 16..17: and its opposite
+ct:     in null, 1              ; 18: the next check bit to bit 0
+        jmp !osre cw            ; 19: eight in all
+        jmp !y end              ; 20: the frame's last block
+        mov crc, null           ; 21: the next block's from 0
+        jmp y-- nw [1]          ; 22..23
+cw:     jmp cb [7]              ; 20..27
+odd:    set x, 27               ; 23: parity bit 1: 00011011, bits 0, 1, 2 and 5 turned over
+        mov osr, x              ; 24
+        out null, 8             ; 25
+        jmp cb [1]              ; 26..27
+lmore:  out x, 1 [12]           ; 18..30
+        jmp bitl                ; 31
+end:    nop [10]                ; 21..31
+        set pins, 3 [15]        ; 32..47: the end delimiter, NH
+        nop [13]                ; 48..61
+        set page, 0             ; 62
+        jmp next                ; 63
+|}
+;;
+
+let mvb_config ~clkdiv =
+  { Isa.Thread_config.default with
+    out_base = 0
+  ; out_count = 1
+  ; set_base = 0
+  ; set_count = 2
+  ; threshold = 16
+  ; out_msb_first = true
+  ; crc_poly = 0xF4
+  ; crc_init = 0
+  ; crc_invert = true
+  ; clkdiv
+  }
+;;
+
+(* A frame's TX words: its header, then its 16-bit words. *)
+let mvb_words ~master (words : int list) =
+  let n = List.length words in
+  assert (if master then n = 1 else List.mem [ 1; 2; 4; 8; 16 ] n ~equal:Int.equal);
+  ((if master then 0x8000 else 0) lor (n - 1)) :: words
+;;
+
+(* SMPTE linear timecode (LTC) at 25 frames a second, as EBU uses it: an
+   80-bit frame every 40 ms, 2000 bit/s, in biphase mark code: the level
+   turns over at the start of every bit, and a 1 turns it over in its
+   middle too. A frame is the time and the user bits laid out as SMPTE 12M
+   has them, least significant bit first (frame units 0-3, user bits 4-7,
+   frame tens 8-9, drop frame 10, colour frame 11, user bits 12-15, then
+   seconds, minutes and hours the same way, with flags at 27, 43, 58 and
+   59), and then the sync word 0011 1111 1111 1101.
+
+   The host sends each frame's first 64 bits as four words; the firmware
+   sends them biphase coded with nothing between frames, makes the sync
+   word, and puts the polarity correction bit (bit 59 at 25 frames a
+   second) into each frame: it makes the frame's 1s even, so every frame
+   starts with the line at the same level. That bit depends on bits that
+   come after it (60 to 63), so when the fourth word arrives it is run
+   through the CRC register (polynomial 1: the parity of every bit OUT
+   shifts) before it is sent: all its bits once, bit 48 twice more and bit
+   59 once more, which with the three words before leaves the parity of
+   every bit but 59; read inverted, that is the polarity bit, and the word
+   is put back together around it in the ISR. Bit 59 as the host sends it
+   does not count.
+
+   The level is Y's bit 0: Y counts down once for every edge, and
+   [mov pins, y] puts it out. The ISR counts the frame's five words
+   (four, then the sync word, built in the ISR from SET values); at the
+   end of each word the count picks what comes next, with every path the
+   same length.
+
+   It does not count the frames itself: the host sends every frame's time.
+   It sends only 25 frame timecode: at 30 frames a second the polarity bit
+   is bit 27, and it depends on 36 bits the host has not sent by then.
+
+   A half bit is 100 ticks: 25 frames a second with CLKDIV 25 at 10 MHz,
+   125 at 50 MHz, 1 at 400 kHz, all exact. A real LTC output is an audio
+   level signal: the pin needs a level shifter or a transformer.
+
+   Pins: P0 = the line, push-pull. Config: [ltc_config]: out_base 0,
+   out_count 1; set_base 0, set_count 1; threshold 16; least significant
+   bit first; crc_poly 1, crc_init 0, crc_invert.
+
+   Host protocol: four words for each frame, bits 0-15, 16-31, 32-47 and
+   48-63 ([ltc_words]). A frame's first word is taken as its first bit
+   starts, the others a bit before they are needed, so the host has a
+   frame's time (40 ms) to send the next; if it sends none, the line
+   stays at the level the last frame's sync word ended with an edge to. *)
+let ltc =
+  {|
+        set y, 1                ; the level, turned over before each bit: low first
+        pull                    ; the first frame's first word: wait for the host
+        set x, 5
+        mov isr, x              ; five words to a frame
+        jmp bit                 ; the first edge
+frame:  mov crc, null           ; 108: the parity, from 0
+        set x, 5                ; 109
+        mov isr, x              ; 110: five words to the frame
+        set x, 21               ; 111
+fw:     jmp x-- fw [3]          ; 112..199
+        jmp y-- fe              ; 0: the level turns over
+fe:     mov pins, y             ; 1: the edge the frame's first bit starts with
+        pull                    ; 2: its first word: wait for the host
+        jmp bo                  ; 3
+bit:    jmp y-- edge            ; 0: the level turns over
+edge:   mov pins, y [2]         ; 1..3: the edge every bit starts with
+bo:     out x, 1                ; 4: the bit; the CRC register takes it
+        jmp !x zero             ; 5
+        set x, 22 [1]           ; 6..7: a 1
+one:    jmp x-- one [3]         ; 8..99
+        jmp y-- mid             ; 100
+mid:    mov pins, y             ; 101: its edge in the middle
+        jmp rest                ; 102
+zero:   set x, 23               ; 6: a 0
+zl:     jmp x-- zl [3]          ; 7..102
+rest:   jmp !osre more          ; 103
+        mov x, isr              ; 104: the word has gone
+        jmp x-- dw              ; 105
+dw:     mov isr, x              ; 106
+        jmp !x frame            ; 107: the sync word: a new frame
+        jmp x-- dx              ; 108
+dx:     jmp !x tosync           ; 109: the fourth word: the sync word next
+        jmp x-- dz              ; 110
+dz:     jmp !x last             ; 111: the third: the fourth next
+        pull                    ; 112: the second or the third word
+wt:     set x, 20               ; 113
+wl:     jmp x-- wl [3]          ; 114..197
+        jmp bit [1]             ; 198..199
+more:   jmp wt [8]              ; 104..112
+last:   pull                    ; 112: the fourth word; its bit 11 is bit 59
+        mov isr, osr            ; 113: a copy
+        out null, 1             ; 114: bit 48 to the parity
+        mov osr, isr            ; 115
+        set x, 15               ; 116
+lp:     out null, 1             ; 117..148: bits 48 to 63 to the parity
+        jmp x-- lp
+        mov osr, isr            ; 149
+        mov isr, null           ; 150
+        out x, 11               ; 151: bits 48 to 58; 48 to the parity a third time
+        in x, 11                ; 152
+        out null, 1             ; 153: bit 59, to the parity a second time
+        mov x, crc              ; 154: the parity of the rest, inverted: the polarity bit
+        in x, 1                 ; 155
+        out x, 4                ; 156: bits 60 to 63
+        in x, 4                 ; 157
+        mov osr, isr            ; 158: the word with its polarity bit
+        set x, 2                ; 159
+        mov isr, x              ; 160: two words left
+        set x, 8                ; 161
+ll:     jmp x-- ll [3]          ; 162..197
+        jmp bit [1]             ; 198..199
+tosync: set page, 1             ; 110
+        jmp sync                ; 111
+.align
+sync:   mov isr, null           ; 112
+        in null, 2              ; 113: bits 64 and 65: 0
+        set x, 31               ; 114
+        in x, 5                 ; 115: 66 to 70: 1
+        in x, 5                 ; 116: 71 to 75
+        in x, 2                 ; 117: 76 and 77
+        in null, 1              ; 118: 78: 0
+        set x, 1                ; 119
+        in x, 1                 ; 120: 79: 1
+        mov osr, isr            ; 121: the sync word
+        mov isr, x              ; 122: one word left
+        set x, 17               ; 123
+sl:     jmp x-- sl [3]          ; 124..195
+        set page, 0 [2]         ; 196..198
+        jmp bit                 ; 199
+|}
+;;
+
+let ltc_config ~clkdiv =
+  { Isa.Thread_config.default with
+    out_base = 0
+  ; out_count = 1
+  ; set_base = 0
+  ; set_count = 1
+  ; threshold = 16
+  ; crc_poly = 1
+  ; crc_init = 0
+  ; crc_invert = true
+  ; clkdiv
+  }
+;;
+
+(* A frame's four TX words, from the time (each part in BCD in the frame),
+   the eight user-bit nibbles (first in bits 4-7) and the colour frame
+   flag; bit 59, the polarity bit, is left 0 for the chip. *)
+let ltc_words ?(user = List.init 8 ~f:(fun _ -> 0)) ?(colour = false) ~hours ~minutes ~seconds ~frames () =
+  assert (hours < 24 && minutes < 60 && seconds < 60 && frames < 25 && List.length user = 8);
+  let digit v k = (if k = 0 then v % 10 else v / 10) in
+  let u k = List.nth_exn user k land 0xF in
+  let word ~units ~tens ~u0 ~u1 ~flags = units lor (u0 lsl 4) lor (tens lsl 8) lor (flags lsl 10) lor (u1 lsl 12) in
+  [ word ~units:(digit frames 0) ~tens:(digit frames 1) ~u0:(u 0) ~u1:(u 1) ~flags:(Bool.to_int colour lsl 1)
+  ; word ~units:(digit seconds 0) ~tens:(digit seconds 1) ~u0:(u 2) ~u1:(u 3) ~flags:0
+  ; word ~units:(digit minutes 0) ~tens:(digit minutes 1) ~u0:(u 4) ~u1:(u 5) ~flags:0
+  ; word ~units:(digit hours 0) ~tens:(digit hours 1) ~u0:(u 6) ~u1:(u 7) ~flags:0
+  ]
+;;
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo
@@ -4838,4 +5963,14 @@ let all =
   ; "cjtag", cjtag
   ; "pjdl", pjdl ~mode:4
   ; "lfast", lfast
+  ; "mil1553_bc", mil1553_bc
+  ; "mil1553_mon", mil1553_mon
+  ; "arinc429_tx", arinc429_tx
+  ; "spacewire_chars", spacewire_chars
+  ; "spacewire_ds", spacewire_ds
+  ; "iso7816", iso7816
+  ; "iso7816_clk", iso7816_clk
+  ; "knx_tx", knx_tx
+  ; "mvb", mvb
+  ; "ltc", ltc
   ]

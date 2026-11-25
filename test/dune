@@ -450,3 +450,83 @@
   (with-stdout-to
    lfast.hex
    (run %{dep:../bin/firmware_hex.exe} lfast))))
+
+(rule
+ (targets mil1553_bc.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   mil1553_bc.hex
+   (run %{dep:../bin/firmware_hex.exe} mil1553_bc))))
+
+(rule
+ (targets mil1553_mon.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   mil1553_mon.hex
+   (run %{dep:../bin/firmware_hex.exe} mil1553_mon))))
+
+(rule
+ (targets arinc429_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   arinc429_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} arinc429_tx))))
+
+(rule
+ (targets spacewire_chars.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   spacewire_chars.hex
+   (run %{dep:../bin/firmware_hex.exe} spacewire_chars))))
+
+(rule
+ (targets spacewire_ds.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   spacewire_ds.hex
+   (run %{dep:../bin/firmware_hex.exe} spacewire_ds))))
+
+(rule
+ (targets iso7816.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   iso7816.hex
+   (run %{dep:../bin/firmware_hex.exe} iso7816))))
+
+(rule
+ (targets iso7816_clk.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   iso7816_clk.hex
+   (run %{dep:../bin/firmware_hex.exe} iso7816_clk))))
+
+(rule
+ (targets knx_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   knx_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} knx_tx))))
+
+(rule
+ (targets mvb.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   mvb.hex
+   (run %{dep:../bin/firmware_hex.exe} mvb))))
+
+(rule
+ (targets ltc.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   ltc.hex
+   (run %{dep:../bin/firmware_hex.exe} ltc))))

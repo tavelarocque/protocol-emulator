@@ -1057,6 +1057,9 @@ import i3c_protocols
 import auto_protocols as auto
 import misc_protocols as misc
 import link_protocols as link
+import aero_protocols as aero
+import card_protocols as card_proto
+import rail_protocols as rail
 import sigrok  # noqa: E402
 
 try:
@@ -4775,6 +4778,248 @@ async def test_lfast_sipi(dut):
         assert "FE" in wrong and "DE" not in wrong and "CRC OK" not in wrong[:12], wrong
 
 
+class KnxDevice:
+    """A KNX TP1 device on the bus, written here from the TP1 rules: a bit
+    is 104 us, a 0 a 35 us pulse at its start; a character is a start bit,
+    8 data bits least significant first, even parity and a stop bit, and a
+    telegram's characters start 13 bit times apart; its last byte is the
+    checksum, the exclusive or of the others inverted. It reads each bit
+    17 us in. When a telegram ends (no start bit 13 bit times after the
+    last), it checks the checksum and, if the telegram is for [group],
+    acknowledges as a KNX receiver does: 0xCC, 15 bit times after the last
+    stop bit. It looks at the bus once a microsecond, every clock at 1 MHz,
+    and is the bus's wired AND: it drives uio_in[0] low when either it or
+    the chip pulls the line."""
+
+    def __init__(self, dut, group):
+        self.dut, self.group = dut, group
+        self.telegrams, self.errors = [], []
+
+    async def run(self):
+        dut = self.dut
+        t, prev, pull_until, start, chars, ack_at = 0, 1, set(), None, [], None
+        while True:
+            await RisingEdge(dut.clk)
+            t += 1
+            chip_low = bool(int(dut.uio_oe.value) & 1) and not int(dut.uio_out.value) & 1
+            bus = 0 if chip_low or t in pull_until else 1
+            drive_pin(dut, 0, bus)
+            if start is not None and t == start + 17 + 104 * len(self.bits):
+                self.bits.append(bus)
+                if len(self.bits) == 11:
+                    b = self.bits
+                    byte = sum(b[1 + k] << k for k in range(8))
+                    if b[0] != 0 or sum(b[1:10]) % 2 or b[10] != 1:
+                        self.errors.append(("character", b))
+                    chars.append((start, byte))
+                    start = None
+            if start is None and prev == 1 and bus == 0 and (not chars or t >= chars[-1][0] + 11 * 104):
+                start, self.bits = t, []
+            if chars and start is None and t == chars[-1][0] + 13 * 104 + 1:
+                tel = [c for _, c in chars]
+                self.telegrams.append(tel)
+                if len(tel) > 1:
+                    good = tel[-1] == knx_checksum(tel[:-1]) and tel[5] & 0x80
+                    if not good:
+                        self.errors.append(("telegram", tel))
+                    elif (tel[3] << 8) | tel[4] == self.group:
+                        first = chars[-1][0] + 26 * 104
+                        bits = [0] + [(0xCC >> k) & 1 for k in range(8)] + [0, 1]
+                        for k, v in enumerate(bits):
+                            if v == 0:
+                                pull_until |= set(range(first + 104 * k, first + 104 * k + 35))
+                chars = []
+            prev = bus
+
+
+def knx_checksum(data):
+    x = 0
+    for b in data:
+        x ^= b
+    return ~x & 0xFF
+
+
+@cocotb.test(timeout_time=300, timeout_unit="ms")
+async def test_knx_tp1(dut):
+    """KNX TP1: a light switched on, A_GroupValue_Write of 1 from 1.1.1 to
+    the group 1/2/3. The chip at 1 MHz with a tick of 1 us (CLKDIV 1; 10
+    at 10 MHz, 50 at 50 MHz give the same ticks): 104 us bits, 35 us
+    pulses, 9615 bit/s. The chip makes the characters, the parity bits and
+    the checksum; a device written from the TP1 rules acknowledges, and
+    the host gets the ACK the chip read. Two KNX decoders for sigrok by
+    others read the bus. mwalle's (knx-tp1) reads every field; its
+    application row says "Invalid" for this telegram, because it looks the
+    APCI up with the value's 6 bits still in it (0x81 where its table has
+    0x80): a GroupValueWrite of 0 it names, one of 1 it does not. selfbus's
+    (knx) reads every byte and the telegram, and checks the checksum. Both
+    print group addresses as 4/4/8 bits, so 1/2/3 (0x0A03) shows as
+    0/10/3. On the real bus the levels are 30 V DC through a transceiver;
+    here the pin is the bus's wired AND, open-drain."""
+    await reset(dut, period_ps=1_000_000)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    device = KnxDevice(dut, rail.KnxTp1.group(1, 2, 3))
+    listening = cocotb.start_soon(device.run())
+    trace = sigrok.Trace(dut, {"knx": lambda: int(dut.uio_in.value) & 1}, clock_hz=1_000_000)
+    chip = pe.Chip(sim_port(dut))
+    k = rail.KnxTp1
+    telegram = k.group_write(k.individual(1, 1, 1), k.group(1, 2, 3), 1)
+
+    @bridge
+    def session():
+        return k(chip, firmware("knx_tx"), clock_hz=1_000_000).send(telegram)
+
+    got = await session()
+    await ClockCycles(dut.clk, 500)
+    trace.stop()
+    listening.cancel()
+    assert got == k.ACK, got
+    assert device.errors == [], device.errors
+    assert device.telegrams == [telegram + [knx_checksum(telegram)], [0xCC]], device.telegrams
+    # Every pulse on the bus 35 us long, and every one of the chip's on the
+    # 104 us grid of its character.
+    pulses = trace.low_pulses("knx")
+    assert all(b - a == 35 for a, b in pulses), pulses
+    starts = [a for a, _ in pulses]
+    assert all((a - starts[0]) % 104 == 0 for a in starts), starts
+    if sigrok.extra_available():
+        tp1 = "knx-tp1:knx=knx"
+        want = ["Data Standard Frame, Low Priority", "Source Address:1/1/1", "Destination Address:0/10/3",
+                "Group Address, Hop count:6, Length:1", "Invalid", "T_Data_Broadcast/T_Data_Group",
+                "FCS OK", "ACK"]
+        rows = "knx-tp1=link:transport:application:parity-err:stop-err"
+        assert texts(trace.decode(tp1, rows, extra=True)) == want, texts(trace.decode(tp1, rows, extra=True))
+        found = trace.decode("knx:rx=knx", extra=True, srzip=True)
+        want2 = ["bc", "11", "01", "0a", "03", "e1", "00", "81", "3a",
+                 "1.1.1 to 0/10/3: Group Value_Write: 1", "ACK", "cc"]
+        assert texts(found) == want2, texts(found)
+        # The bus held released through the pulse of the destination's
+        # bit 2 (0x03: a 0): 0x07, a parity error and a wrong checksum.
+        a = next(a for a, b, text in found if text == "03")
+        p = next((s, e) for s, e in pulses if s > a + 104 * 2)
+        forced = trace.forced("knx", p[0], p[1], 1)
+        wrong = texts(forced.decode(tp1, rows, extra=True))
+        assert "Destination Address:0/10/7" in wrong and "Parity error" in wrong and "FCS OK" not in wrong, wrong
+        wrong2 = texts(forced.decode("knx:rx=knx", extra=True, srzip=True))
+        assert "07" in wrong2 and "Parity Err" in wrong2 and "Checksum Err" in wrong2, wrong2
+
+
+@cocotb.test(timeout_time=20, timeout_unit="ms")
+async def test_mvb(dut):
+    """MVB (IEC 61375-3-1): a master frame asking for process data port
+    0x123, 4 bytes (function code 1), and a slave frame of 32 bits
+    answering it, back to back from the packet buffer. The chip at 48 MHz
+    (a period of 20.834 ns, the nearest the simulator's picoseconds give,
+    32 ppm slow), 16 clocks a half bit: 1.5 Mbit/s; at 50 MHz no whole
+    number of clocks makes an MVB bit. The chip makes the start
+    delimiters, the Manchester code, each check sequence (CRC-7, the
+    parity bit, inverted) and the end delimiter. The MVB decoder for sigrok
+    by Libor Tomsik reads both frames and finds both check sequences
+    right. The recording's VCD has whole nanoseconds, so it says 20 ns a
+    sample and sigrok takes 50 MHz: the decoder counts samples (16 to its
+    half-bit tick at 50 MHz), and 16 is what the chip gives. The real bus
+    is RS-485 or transformer coupled: pin 0 is the line driver's data,
+    pin 1 its enable. The decoder ends a frame at the first pair of half
+    bits that is not a bit, and needs it before the line goes quiet: the
+    chip's NH end delimiter, then the silent line, low, give it that. It
+    does not check a master frame's length."""
+    await reset(dut, period_ps=20_834)
+    trace = sigrok.Trace(dut, {"mvb": lambda: int(dut.uio_out.value) & int(dut.uio_oe.value) & 1},
+                         clock_hz=48_000_000)
+    enable = sigrok.Trace(dut, {"de": lambda: ((int(dut.uio_out.value) & int(dut.uio_oe.value)) >> 1) & 1},
+                          clock_hz=48_000_000)
+    chip = pe.Chip(sim_port(dut))
+    M = rail.Mvb
+
+    @bridge
+    def session():
+        M(chip, firmware("mvb")).send([M.master(0x123, 4), M.slave([0xCAFE, 0x0042])])
+
+    await session()
+    await ClockCycles(dut.clk, 6_000)
+    trace.stop()
+    enable.stop()
+    # Two frames, each with every edge on its 16-clock half bits, and the
+    # driver enabled from its start bit to the end of its end delimiter.
+    de = enable.level("de")
+    frames = [(a, b) for (a, v), (b, _) in zip(de, de[1:]) if v == 1]
+    assert len(frames) == 2, de
+    edges = [t for t, _ in trace.level("mvb")][1:]
+    for a, b in frames:
+        inside = [t for t in edges if a <= t <= b]
+        assert inside[0] == a and inside[-1] == b and all((t - a) % 16 == 0 for t in inside), (a, b, inside)
+    assert [b - a for a, b in frames] == [16 * (18 + 48 + 2), 16 * (18 + 80 + 2)], frames
+    if sigrok.extra_available():
+        found = trace.decode("mvb:mvb=mvb", extra=True)
+        fields = [t for t in texts(found) if t not in ("0", "1")]
+        assert fields == ["Master p", "0x31", "0x1", "0x123", "PD 4B", "291", "Slave p", "0x8c", "0xcafe0042"], fields
+        # The slave frame's last data bit (0x0042's bit 0, a 0) turned to a 1.
+        s = frames[1][0] + 16 * (18 + 2 * 31)
+        wrong = texts(trace.forced("mvb", s, s + 16, 1).forced("mvb", s + 16, s + 32, 0).decode("mvb:mvb=mvb", extra=True))
+        assert "CRC Error" in wrong and "0xcafe0042" not in wrong, [t for t in wrong if t not in ("0", "1")]
+
+
+@cocotb.test(timeout_time=500, timeout_unit="ms")
+async def test_ltc_timecode(dut):
+    """SMPTE linear timecode at 25 frames a second, three frames from
+    23:59:59:22 with user bits 1 2 3 4 A B C D, at the real rate: 2000
+    bit/s, the chip at 400 kHz with a tick of 2.5 us (CLKDIV 1; 25 at 10
+    MHz and 125 at 50 MHz give the same), so the 120 ms of timecode take
+    48,000 clocks. The chip makes the biphase mark code, the sync words
+    and each frame's polarity bit; the host sends each frame's time. The
+    LTC decoder for sigrok (an unmerged pull request) uses the first sync
+    word to lock and reads the next two frames' times and user bits. Here
+    every edge must be on the 100-clock half bits, and every frame start
+    at the same level, which is what the polarity bit is for. A real LTC
+    output is an audio level: the pin needs a level shifter."""
+    await reset(dut, period_ps=2_500_000)
+    trace = sigrok.Trace(dut, {"data": lambda: int(dut.uio_out.value) & 1}, clock_hz=400_000)
+    chip = pe.Chip(sim_port(dut))
+    user = (1, 2, 3, 4, 0xA, 0xB, 0xC, 0xD)
+
+    @bridge
+    def session():
+        rail.Ltc(chip, firmware("ltc"), clock_hz=400_000).send(
+            [((23, 59, 59, f), user) for f in (22, 23, 24)])
+
+    await session()
+    level = trace.level("data")
+    while len(level) < 100 or trace.n - level[-1][0] < 1_000:
+        await ClockCycles(dut.clk, 500)
+        level = trace.level("data")
+    trace.stop()
+    # The first change is the pin made an output, at its reset level
+    # (high); the program's first edge, low, is the next.
+    edges = [t for t, _ in level][2:]
+    assert all((t - edges[0]) % 100 == 0 for t in edges), edges
+    # The level after each sync word's last edge, and at the frames' starts.
+    gaps = [b - a for a, b in zip(edges, edges[1:])]
+    halves = [g // 100 for g in gaps]
+    bits, i = [], 0
+    while i < len(halves):
+        if halves[i] == 1:
+            bits.append(1)
+            i += 2
+        else:
+            bits.append(0)
+            i += 1
+    sync = [0, 0] + [1] * 12 + [0, 1]
+    ends = [k + 16 for k in range(len(bits) - 15) if bits[k:k + 16] == sync]
+    assert len(ends) == 3, ends
+    assert all(sum(bits[e - 80:e]) % 2 == 0 for e in ends), "a frame with an odd number of 1s"
+    if sigrok.extra_available():
+        found = trace.decode("ltc:data=data", "ltc=frame", extra=True)
+        assert texts(found) == ["23:59:59:23", "23:59:59:24"], texts(found)
+        users = texts(trace.decode("ltc:data=data", "ltc=userl:userh", extra=True))
+        assert users[-16:] == [": %X" % u for u in user] * 2, users
+        # The line held at its level through the last frame's first bit:
+        # that frame is lost, or read as another time.
+        start = next(t for t in edges if t >= found[0][1])
+        lv = [v for t, v in level if t < start][-1]
+        wrong = texts(trace.forced("data", start, start + 200, lv).decode("ltc:data=data", "ltc=frame", extra=True))
+        assert wrong != texts(found) and "23:59:59:24" not in wrong, wrong
+
+
 # --- Devices on the engines the chip already had ------------------------------
 #
 # A device's own protocol on top of a bus: no new firmware, only what the
@@ -8407,3 +8652,955 @@ async def test_sdq_bq2022a(dut):
         a, b = next((a, b) for a, b, text in found if text == "Byte: 0x09")
         wrong = fields(trace.forced("sdq", a, a + 400, 0).decode(decoder, extra=True))
         assert "Byte: 0x09" not in wrong and wrong != want, wrong
+
+
+# --- Aerospace: MIL-STD-1553B, ARINC 429, SpaceWire -----------------------------
+#
+# Judged by decoders the packaged sigrok-cli does not ship (see
+# extra_decoders.sh): two unmerged sigrok pull requests (MIL-STD-1553,
+# SpaceWire) and two ARINC 429 decoders published by others.
+
+
+def m1553_odd_parity(value):
+    return 1 - bin(value).count("1") % 2
+
+
+class Rt1553:
+    """A MIL-STD-1553B remote terminal at address 5, written from the
+    standard apart from the OCaml one in sim/test_mil1553.ml. It looks at
+    the bus once a cycle (10 cycles a bit, so a half bit is 5): the chip's
+    TX and TX-bar make it +1, -1 or 0. A word starts where the bus leaves 0;
+    each of its 40 half bits must be one level throughout: a sync of three
+    halves one way and three the other (positive first for a command or
+    status word), then 17 Manchester bits (+- for a 1, -+ for a 0), most
+    significant first, odd parity. A word that starts as the last ends is
+    the same message. When the bus has been quiet two bit times after the
+    BC's message, the terminal acts on it: a receive command's data words
+    are stored at the subaddress and answered with the status word; a
+    transmit command is answered with the status word and the stored
+    words; a broadcast (address 31) is not answered. The answer's mid sync
+    comes 6 us after the mid parity of the BC's last word (4 to 12 is the
+    standard's window). The bus, the chip's words and its own, is what the
+    chip reads on RX. Anything else wrong goes in [errors]."""
+
+    def __init__(self, address=5):
+        self.address = address
+        self.memory = {}
+        self.now = 0
+        self.bus = []  # +1, -1 or 0 a cycle
+        self.mine = []  # whether the RT drove it
+        self.start = None  # where the word being read began
+        self.message = []
+        self.quiet_since = None
+        self.sending, self.send_at = [], None
+        self.log, self.errors, self.words = [], [], []
+
+    def _word(self, s):
+        halves = []
+        for k in range(40):
+            cells = set(self.bus[s + 5 * k:s + 5 * k + 5])
+            if len(cells) != 1 or 0 in cells:
+                self.errors.append("%d: half bit %d is not one level" % (s, k))
+                return None
+            halves.append(cells.pop())
+        if halves[:6] == [1, 1, 1, -1, -1, -1]:
+            command = True
+        elif halves[:6] == [-1, -1, -1, 1, 1, 1]:
+            command = False
+        else:
+            self.errors.append("%d: no sync" % s)
+            return None
+        bits = []
+        for k in range(6, 40, 2):
+            pair = (halves[k], halves[k + 1])
+            if pair not in ((1, -1), (-1, 1)):
+                self.errors.append("%d: not Manchester" % s)
+                return None
+            bits.append(1 if pair == (1, -1) else 0)
+        value = int("".join(map(str, bits[:16])), 2)
+        return (value, command, sum(bits) % 2 == 1)
+
+    def _halves(self, command, value):
+        sync = [1, 1, 1, -1, -1, -1] if command else [-1, -1, -1, 1, 1, 1]
+        bits = [(value >> (15 - k)) & 1 for k in range(16)] + [m1553_odd_parity(value)]
+        return sync + [h for b in bits for h in ((1, -1) if b else (-1, 1))]
+
+    def _answer(self, ended, words):
+        self.send_at = ended + 40  # 6 us mid parity to mid sync: 4 us of quiet
+        self.sending = [h for c, v in words for h in self._halves(c, v) for _ in range(5)]
+
+    def _act(self, ended):
+        msg, self.message = self.message, []
+        if not msg:
+            return
+        (cmd, command, ok), data = msg[0], msg[1:]
+        rt, tx, sa, wc = cmd >> 11, (cmd >> 10) & 1, (cmd >> 5) & 31, cmd & 31
+        if rt not in (self.address, 31):
+            self.log.append(("not mine", cmd))
+            return
+        if not command or not ok or any(c or not p for _, c, p in data):
+            self.errors.append("a bad message: no answer")
+            return
+        status = self.address << 11
+        if sa in (0, 31):
+            self.log.append(("mode code", wc, [v for v, _, _ in data]))
+            if rt != 31:
+                self._answer(ended, [(True, status)] + ([(False, 0x0ABC)] if tx and wc >= 16 else []))
+        elif tx:
+            n = wc or 32
+            out = [self.memory.get((sa, k), 0) for k in range(n)]
+            self.log.append(("sent", sa, out))
+            self._answer(ended, [(True, status)] + [(False, v) for v in out])
+        else:
+            if len(data) != (wc or 32):
+                self.errors.append("%d data words for a count of %d" % (len(data), wc))
+                return
+            for k, (v, _, _) in enumerate(data):
+                self.memory[(sa, k)] = v
+            self.log.append(("received", sa, [v for v, _, _ in data]))
+            if rt != 31:
+                self._answer(ended, [(True, status)])
+
+    def step(self, bc):
+        """One cycle; [bc] the level the chip drives. Returns the bus."""
+        mine = 0
+        if self.send_at is not None and self.now >= self.send_at and self.sending:
+            mine = self.sending.pop(0)
+        if mine and bc:
+            self.errors.append("%d: the BC talks over the RT" % self.now)
+        level = mine or bc
+        self.bus.append(level)
+        self.mine.append(bool(mine))
+        t = self.now
+        if self.start is not None and t == self.start + 200:
+            w = self._word(self.start)
+            if w is not None:
+                self.words.append((self.start, self.mine[self.start]) + w)
+                if not self.mine[self.start]:
+                    self.message.append(w)
+            self.start = t if level else None
+            if not level and not self.mine[t - 1]:
+                self.quiet_since = t
+        elif self.start is None and level:
+            self.start = t
+        if self.quiet_since is not None and t == self.quiet_since + 20:
+            self._act(self.quiet_since)
+            self.quiet_since = None
+        self.now += 1
+        return level
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_mil1553(dut):
+    """MIL-STD-1553B, the chip as the bus controller at 1 Mbit/s (10 core
+    clocks a bit at 10 MHz; CLKDIV 5 at 50 MHz): a receive command with
+    three data words to RT 5's subaddress 2, then a transmit command for
+    them back. The chip makes each word's sync, Manchester code and odd
+    parity, works out from the command how many data words follow it, and
+    waits for the bus to be quiet for 14 us before the next command. A
+    remote terminal written here from MIL-STD-1553B checks every half bit
+    and answers; the chip's second thread hears the whole bus, its own
+    words and the terminal's, and the host gets them back. On a real bus
+    TX, TX-bar and RX go through a 1553 transceiver and a coupling
+    transformer.
+
+    The decoder (sigrok pull request 28) reads one line, the bus's
+    positive side. It tells a command or status sync from a data sync but
+    cannot tell a command from a status word, which share a sync: its
+    'device_type' option says which to call them, so the recording is
+    decoded once as from the BC ('master': each command's address, T/R and
+    word count) and once as from a terminal ('slave': each status word's
+    flags, OK when none is set). A word in the second view that is a
+    command, and in the first that is a status word, is read with the
+    other's fields (a status word 0x2800 as a mode command 'error code of
+    command'); those rows are not compared. Its data-word details row
+    (a numero sign and the word's place) is left out. It times each edge
+    from the one before, and from the start of the recording for the
+    first: a recording that starts 2 us before the first sync has it read
+    that quiet bus as half a data sync. So the recording handed to it
+    starts 10 us before. And as 'master' it stops on a mode command with
+    code 5 (pd.py line 189 names m_unlocktx, which it never defines): no
+    mode command is sent here, and sim/test_mil1553.ml runs them against
+    the terminal written from the standard."""
+    await reset(dut)
+    dut.uio_in.value = 0
+    rt = Rt1553()
+    state = {"bus": 0}
+
+    def bc_level():
+        out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+        tx = (out & 1) if oe & 1 else 0
+        txb = ((out >> 1) & 1) if (oe >> 1) & 1 else 0
+        if tx and txb:
+            rt.errors.append("TX and TX-bar both high")
+        return 1 if tx and not txb else -1 if txb and not tx else 0
+
+    async def wires():
+        while True:
+            await FallingEdge(dut.clk)
+            state["bus"] = rt.step(bc_level())
+            dut.uio_in.value = (4 if state["bus"] == 1 else 0) | (8 if state["bus"] == -1 else 0)
+
+    bus = cocotb.start_soon(wires())
+    trace = sigrok.Trace(dut, {"bus": lambda: int(state["bus"] == 1)})
+    chip = pe.Chip(sim_port(dut))
+    data = [0x1234, 0xABCD, 0x0001]
+
+    @bridge
+    def session():
+        bc = aero.Mil1553Bc(chip, firmware("mil1553_bc"), firmware("mil1553_mon"))
+        bc.receive(5, 2, data)
+        bc.transmit(5, 2, 3)
+        return bc.heard()
+
+    heard = await session()
+    trace.stop()
+    bus.cancel()
+    assert rt.errors == [], rt.errors
+    assert rt.log == [("received", 2, data), ("sent", 2, data)], rt.log
+    rx_cmd, tx_cmd, status = 0x2843, 0x2C43, 0x2800
+    on_bus = [(rx_cmd, True)] + [(v, False) for v in data] + [(status, True), (tx_cmd, True),
+                                                              (status, True)] + [(v, False) for v in data]
+    assert [(v, c) for _, _, v, c, _ in rt.words] == on_bus, rt.words
+    assert [m for _, m, _, _, _ in rt.words] == [False] * 4 + [True, False] + [True] * 4
+    # The words of each message follow each other with no gap; the answer
+    # comes 4 us after; the next command after 14 us or more of quiet.
+    starts = [s for s, _, _, _, _ in rt.words]
+    gaps = [b - a - 200 for a, b in zip(starts, starts[1:])]
+    assert gaps[:3] == [0, 0, 0] and gaps[3] == 40 and gaps[4] >= 140 and gaps[5] == 40 \
+        and gaps[6:] == [0, 0, 0], gaps
+    # What the host got back: every word on the bus, with its sync and parity.
+    assert heard == [(v, c, True) for v, c in on_bus], heard
+    if sigrok.extra_available():
+        rows = "mil-std-1553=cw:dw:warning:error:cw_details"
+        first = rt.words[0][0]
+
+        def decode(trace, device):
+            return texts(trace.decode(f"mil-std-1553:DP=bus:language=en:device_type={device}",
+                                      rows, start=first - 100, extra=True))
+
+        def view(words, cmd_text):
+            out = []
+            for v, c in words:
+                out += ["CW: 0x%04X" % v, cmd_text(v)] if c else ["DW: 0x%04X" % v]
+            return out
+
+        master = decode(trace, "master")
+        bc_says = {rx_cmd: "to TD5 for reception 3 DW", tx_cmd: "from TD5 for transmit 3 DW",
+                   status: "to TD5 error code of command"}
+        assert master == view(on_bus, bc_says.get), master
+        slave = decode(trace, "slave")
+        status_rows = [slave[k + 1] for k, t in enumerate(slave) if t == "CW: 0x%04X" % status]
+        assert status_rows == ["OK", "OK"], slave
+        # The second data word's last bit flipped on the wire (both halves):
+        # the decoder reports its parity.
+        bit = starts[2] + 30 + 15 * 10
+        wrong = trace.forced("bus", bit, bit + 5, 0).forced("bus", bit + 5, bit + 10, 1)
+        got = decode(wrong, "master")
+        assert got[:3] + got[5:] == master[:3] + master[4:] and got[3:5] == ["DW", "parity error"], got
+
+
+def arinc429_receive(trace, bit):
+    """ARINC 429 words from the HI and LO lines, written from ARINC
+    Specification 429: a word starts where the line leaves NULL; each of
+    its 32 bits starts a bit time after the last, HI (a 1) or LO (a 0) for
+    its first half and NULL for the second; bit 1 to 8 the label, most
+    significant first; 9 and 10 the SDI, 11 to 29 the data, 30 and 31 the
+    SSM, least significant first; odd parity. Returns [(start, label, sdi,
+    data, ssm)] and checks the rest between words is four bit times or
+    more."""
+    at = dict(trace.changes)
+    times = sorted(at)
+    hi, lo = trace.names.index("hi"), trace.names.index("lo")
+
+    def level(t):
+        v = at[max(k for k in times if k <= t)]
+        return v[hi], v[lo]
+
+    starts = [t for t, v in trace.changes if (v[hi] or v[lo]) and t > 0
+              and level(t - 1) == (0, 0)]
+    words, end = [], None
+    k = 0
+    while k < len(starts):
+        s = starts[k]
+        bits = []
+        for b in range(32):
+            a = s + b * bit
+            first = level(a)
+            assert first in ((1, 0), (0, 1)), (s, b, first)
+            # One level for the first half, NULL for the second, and nothing
+            # in between.
+            inside = [t for t in times if a < t < a + bit and t != a + bit // 2]
+            assert not inside and level(a + bit // 2) == (0, 0), (s, b, inside)
+            bits.append(first[0])
+        assert sum(bits) % 2 == 1, "parity"
+        if end is not None:
+            assert s - end >= 4 * bit, (s, end)
+        end = s + 32 * bit
+        field = lambda lo_, n: sum(b << i for i, b in enumerate(bits[lo_:lo_ + n]))
+        label = int("".join(map(str, bits[:8])), 2)
+        words.append((s, label, field(8, 2), field(10, 19), field(29, 2)))
+        k += 1
+        while k < len(starts) and starts[k] < end:
+            k += 1
+    return words
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_arinc429(dut):
+    """ARINC 429 at 100 kbit/s, high speed (20 ticks a bit: CLKDIV 5 at 10
+    MHz, 25 at 50 MHz; 12.5 kbit/s is CLKDIV 40 or 200): four words. The
+    host gives each word's label as its octal number, SDI, data and SSM;
+    the chip sends the label most significant bit first and the rest least
+    significant first, makes the odd parity and keeps four bit times of
+    NULL between words. The pins are HI and LO, the two logic inputs of an
+    ARINC 429 line driver, which makes the +-10 V line. A receiver written
+    here from the specification checks every half bit and reads the words.
+
+    Two decoders published by others read the two lines and must both
+    agree. FrancescoTalotta's (ARINC429) shows the label and SDI as the
+    standard numbers them, but its DATA and SSM with the first bit sent as
+    the most significant, the reverse of the standard (pd.py's
+    'data |= (1 << 19-counter)' and 'ssm |= (1 << 2-counter)'): the
+    expected rows are turned round to match; the wire is the standard's.
+    Aleksandr-Kai's (arinc429, written for DSView; it runs unchanged in
+    sigrok-cli) measures the bit rate from the first pulse and looks for a
+    rest of three bit times before it decodes, so it skips the first
+    word."""
+    await reset(dut)
+    trace = pin_trace(dut, hi=0, lo=1)
+    chip = pe.Chip(sim_port(dut))
+    words = [(0o205, 1, 0x12345, 3), (0o310, 2, 0x7FFFF, 0), (0o001, 0, 0x00001, 2),
+             (0o377, 3, 0x40000, 1)]
+
+    @bridge
+    def play():
+        tx = aero.Arinc429Tx(chip, firmware("arinc429_tx"))
+        for label, sdi, data, ssm in words:
+            tx.send(label, data, sdi=sdi, ssm=ssm)
+
+    await play()
+    await ClockCycles(dut.clk, 4 * 36 * 100)
+    trace.stop()
+    got = arinc429_receive(trace, 100)
+    assert [w[1:] for w in got] == words, got
+    starts = [w[0] for w in got]
+    assert [b - a for a, b in zip(starts, starts[1:])] == [3600] * 3, starts  # 32 bits and 4 of rest
+    if sigrok.extra_available():
+        rev = lambda v, n: int(format(v, "0%db" % n)[::-1], 2)
+        start = next(t for t, v in trace.changes if v == (0, 0))  # driven, at NULL
+
+        def francesco(trace):
+            return texts(trace.decode("ARINC429:A=hi:B=lo", "ARINC429=label:sdi:data:ssm:parity",
+                                      start=start, extra=True))
+
+        def aleksandr(trace):
+            return texts(trace.decode("arinc429:pos=hi:neg=lo",
+                                      "arinc429=ann_addr:ann_id:ann_data:ann_matrix:ann_parity",
+                                      start=start, extra=True))
+
+        want_f = []
+        for label, sdi, data, ssm in words:
+            want_f += ["LABEL: " + oct(label), "SDI: %d" % sdi, "DATA: " + hex(rev(data, 19)),
+                       "SSM: %d" % rev(ssm, 2), "PARITY OK"]
+        want_a = []
+        for label, sdi, data, ssm in words[1:]:
+            want_a += ["Addr: %o" % label, "ID: %d" % sdi, "Data: 0x%X" % data, "M: %d" % ssm, "P: Ok"]
+        assert francesco(trace) == want_f, francesco(trace)
+        assert aleksandr(trace) == want_a, aleksandr(trace)
+        # The second word's bit 11, a 1, sent as a 0 on the wire (HI held
+        # low, LO high for its first half): data bit 11 off, parity wrong.
+        a = starts[1] + 10 * 100
+        wrong = trace.forced("hi", a, a + 50, 0).forced("lo", a, a + 50, 1)
+        f, k = francesco(wrong), aleksandr(wrong)
+        assert f[7:10] == ["DATA: " + hex(rev(0x7FFFE, 19)), "SSM: 0", "PARITY ERR"], f
+        assert f[:7] + f[10:] == want_f[:7] + want_f[10:], f
+        assert k[2] == "Data: 0x7FFFE" and k[4] == "P: Er" and k[:2] + k[5:] == want_a[:2] + want_a[5:], k
+
+
+def spacewire_receive(trace):
+    """SpaceWire characters from D and S, written from ECSS-E-ST-50-12C:
+    a bit at each change of D or S, never both at once, the bit being D's
+    new level; then characters, each a parity bit, a flag and 8 data bits
+    least significant first (flag 0) or 2 control bits (flag 1: FCT 00,
+    EOP 01, EEP 10, ESC 11 as sent), the parity bit making the ones odd
+    over itself, the flag and the character before's data bits; ESC then
+    FCT is NULL. Both lines must be low before the first bit. Returns the
+    characters and the times of the bits."""
+    d, s = trace.names.index("d"), trace.names.index("s")
+    levels = [(t, (v[d], v[s])) for t, v in trace.changes]
+    first = next(k for k, (_, v) in enumerate(levels) if v == (0, 0))
+    bits, times = [], []
+    for (_, (d0, s0)), (t, (d1, s1)) in zip(levels[first:], levels[first + 1:]):
+        assert (d0 != d1) != (s0 != s1), ("D and S changed together", t)
+        bits.append(d1)
+        times.append(t)
+    chars, prev, k = [], [], 0
+    while k + 4 <= len(bits):
+        p, flag = bits[k], bits[k + 1]
+        n = 2 if flag else 8
+        if k + 2 + n > len(bits):
+            break
+        data = bits[k + 2:k + 2 + n]
+        assert (sum(prev) + p + flag) % 2 == 1, ("parity", len(chars))
+        if flag:
+            c = {(0, 0): "FCT", (0, 1): "EOP", (1, 0): "EEP", (1, 1): "ESC"}[tuple(data)]
+        else:
+            c = sum(b << i for i, b in enumerate(data))
+        if c == "FCT" and chars and chars[-1] == "ESC":
+            chars[-1] = "NULL"
+        else:
+            chars.append(c)
+        prev, k = data, k + 2 + n
+    return chars, times
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_spacewire(dut):
+    """SpaceWire, data-strobe encoded: three NULLs, a packet of five bytes
+    ended by EOP, and two NULLs, at 2 Mbit/s (5 ticks a bit at CLKDIV 1;
+    at 50 MHz the same program runs 10 Mbit/s, the rate a link starts at).
+    The host hands over the bytes; thread 0 makes the characters and each
+    parity bit, thread 1 puts the bits on D and S, CHAIN between them, the
+    words played from the packet buffer. A receiver written here from the
+    standard reads the characters; every bit must be 5 clocks. A real link
+    is LVDS pairs, so each pin would feed an LVDS driver; and this is a
+    transmitter alone, with no FCTs of its own.
+
+    The decoder (sigrok pull request 82) finds a NULL to start from and
+    then reads characters, reporting each when the first bit of the next
+    arrives, so the last NULL's FCT is not shown; it puts a parity error
+    ('PE') on the character after the one whose data bits it covers, as
+    the parity bit there is the one that covers them."""
+    await reset(dut)
+    trace = pin_trace(dut, d=0, s=1)
+    chip = pe.Chip(sim_port(dut))
+    packet = [0x00, 0x5B, 0xFF, 0x80, 0x42]
+
+    @bridge
+    def play():
+        tx = aero.SpaceWireTx(chip, firmware("spacewire_chars"), firmware("spacewire_ds"))
+        tx.send(packet, nulls_before=3, nulls_after=2)
+        tx.wait()
+        return tx.bitrate
+
+    assert await play() == 2_000_000
+    await ClockCycles(dut.clk, 500)
+    trace.stop()
+    chars, times = spacewire_receive(trace)
+    assert chars == ["NULL"] * 3 + packet + ["EOP"] + ["NULL"] * 2, chars
+    assert {b - a for a, b in zip(times, times[1:])} == {5}, sorted({b - a for a, b in zip(times, times[1:])})
+    assert len(times) == 3 * 8 + 5 * 10 + 4 + 2 * 8
+    if sigrok.extra_available():
+        decoder = "spacewire:data=d:strobe=s"
+        rows = "spacewire=ctrl-char:data-char:code:time:warning"
+        start = next(t for t, v in trace.changes if v == (0, 0))
+        found = trace.decode(decoder, rows, start=start, extra=True)
+        null = ["ESC", "FCT", "NULL"]
+        want = ["NULL"] + null * 2 + ["0x%02x" % b for b in packet] + ["EOP"] + null + ["ESC"]
+        assert texts(found) == want, texts(found)
+        # The third byte's bit 1 (0xFF's: D stays high and S changes for it
+        # and for the bit after) held low on D for that bit: both lines
+        # change at its start and again at the next bit's, so the decoder
+        # still counts every bit, reads the byte as 0xfd and the next
+        # character's parity bit no longer agrees.
+        k = 3 * 8 + 2 * 10 + 3  # the bit's place in the stream
+        a = times[k]
+        wrong = texts(trace.forced("d", a, a + 5, 0).decode(decoder, rows, start=start, extra=True))
+        at = want.index("0xff")
+        assert wrong[at:at + 3] == ["0xfd", "PE", "0x80"] and wrong[:at] == want[:at] \
+            and wrong[at + 3:] == want[at + 2:], wrong
+
+
+# --- ISO 7816-3 smart cards and a TPM 2.0 on SPI: each judged by two
+# decoders for sigrok that this project did not write, published by others
+# or in a pull request sigrok has not merged (test/extra_decoders.sh) ---
+
+
+class Iso7816Card:
+    """A smart card written from ISO/IEC 7816-3, T=0, direct convention: CLK
+    on pin 0, RST on pin 1, I/O on pin 2, open-drain on both sides and
+    pulled up. Its etu is 372 cycles of CLK: 744 core cycles, as the test
+    checks from the recording that CLK is 5 MHz throughout. A reset is RST
+    low for 400 clock cycles or more with CLK running; the answer to reset
+    starts 1,000 clock cycles after RST rises (400 to 40,000 are allowed),
+    a character every 12 etu. A character is a start bit, 8 data bits
+    least significant first, an even parity bit, then the line let go for
+    the guard time; the card looks at I/O at 11 etu for an error signal. A
+    character from the reader is read in the middle of each bit and must be
+    steady from 0.3 to 0.7 of it, have its parity right, and start 12 etu
+    or more after the reader's last and 16 or more after the card's. The
+    card answers half an etu after the 16 etu it must leave, procedure byte
+    first: SELECT (A4) takes its data and answers 90 00 for the master file
+    3F00, 6A 82 for any other; READ BINARY (B0) its bytes and 90 00;
+    anything else 6D 00."""
+
+    E = 744  # core cycles an etu
+
+    def __init__(self, dut, atr, memory=bytes(range(256))):
+        self.dut, self.atr, self.memory = dut, atr, memory
+        self.errors, self.commands = [], []
+        self.drive, self.n = 1, 0
+        self.last_card = self.last_reader = None
+
+    def pin(self, k):
+        """What the chip drives on pin k, or None while it is an input."""
+        out, oe = int(self.dut.uio_out.value), int(self.dut.uio_oe.value)
+        return (out >> k) & 1 if (oe >> k) & 1 else None
+
+    def wire(self):
+        return (0 if self.pin(2) == 0 else 1) & self.drive
+
+    def _set(self, level):
+        self.drive = level
+        drive_pin(self.dut, 2, level)
+
+    async def _wait(self, cycles):
+        if cycles > 0:
+            await ClockCycles(self.dut.clk, cycles)
+            self.n += cycles
+
+    async def _send(self, byte):
+        E = self.E
+        if self.last_reader is not None and (self.last_card is None or self.last_reader > self.last_card):
+            await self._wait(self.last_reader + 16 * E + E // 2 - self.n)
+        start = self.n
+        for b in [0] + [(byte >> k) & 1 for k in range(8)] + [bin(byte).count("1") % 2]:
+            self._set(b)
+            await self._wait(E)
+        self._set(1)
+        await self._wait(E)
+        if self.wire() == 0:
+            self.errors.append("an error signal on %02x" % byte)
+        await self._wait(E)
+        self.last_card = start
+
+    async def _receive(self):
+        E = self.E
+        for _ in range(400 * E // 4):
+            if self.wire() == 0:
+                break
+            await self._wait(4)
+        else:
+            self.errors.append("no character from the reader")
+            raise RuntimeError("no character")
+        start = self.n
+        if self.last_reader is not None and self.last_reader > (self.last_card or -1) \
+                and start - self.last_reader < 12 * E:
+            self.errors.append("reader characters %d cycles apart" % (start - self.last_reader))
+        if self.last_card is not None and self.last_card > (self.last_reader or -1) \
+                and start - self.last_card < 16 * E:
+            self.errors.append("the reader sent %d cycles after the card" % (start - self.last_card))
+        bits, t = [], 0
+        for k in range(10):
+            a, b = k * E + 3 * E // 10, k * E + 7 * E // 10
+            await self._wait(a - t)
+            early = self.wire()
+            await self._wait(b - a)
+            t = b
+            if self.wire() != early:
+                self.errors.append("bit %d of a character from the reader not steady" % k)
+            bits.append(early)
+        await self._wait(10 * E - t)
+        byte = sum(bits[1 + k] << k for k in range(8))
+        if bits[0] != 0 or sum(bits[1:]) % 2:
+            self.errors.append("a character from the reader with its start bit or parity wrong: %02x" % byte)
+        self.last_reader = start
+        return byte
+
+    async def run(self):
+        low = None
+        while True:  # RST low with CLK running, then high
+            rst = self.pin(1) == 1
+            if self.pin(0) is not None and not rst and low is None:
+                low = self.n
+            if rst and low is not None:
+                break
+            await self._wait(8)
+        if self.n - low < 800:
+            self.errors.append("RST low %d clock cycles with CLK running" % ((self.n - low) // 2))
+        await self._wait(2000)
+        for b in self.atr:
+            await self._send(b)
+        while True:
+            header = [await self._receive() for _ in range(5)]
+            ins, p1, p2, p3 = header[1:]
+            data = []
+            if ins == 0xA4 and p3:
+                await self._send(ins)
+                data = [await self._receive() for _ in range(p3)]
+                answer = [0x90, 0x00] if data == [0x3F, 0x00] else [0x6A, 0x82]
+            elif ins == 0xB0:
+                answer = [ins] + list(self.memory[(p1 << 8 | p2) & 0xFF:][:p3 or 256]) + [0x90, 0x00]
+            else:
+                answer = [0x6D, 0x00]
+            self.commands.append((bytes(header), bytes(data)))
+            for b in answer:
+                await self._send(b)
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_iso7816(dut):
+    """An ISO 7816-3 card reader: the clock, a cold reset, the card's
+    answer to reset 3B 90 11 00 (TA1 11: F 372, D 1; TD1: T=0), then
+    SELECT of the master file, 00 A4 00 00 02 with 3F 00, under T=0: the
+    procedure byte A4, the two data bytes after it, the status word 90 00.
+    The card is written here from ISO/IEC 7816-3. CLK is 5 MHz, the most a
+    card may be given during its answer to reset, on a 10 MHz core clock
+    (at 50 MHz the same 5 MHz); an etu is 372 cycles of it, 74.4 us, so a
+    character takes 893 us and this test 17.5 ms of simulated time: the
+    answer to reset alone is 3.6 ms, and ISO 7816-3 allows no faster clock
+    or shorter etu before a PPS exchange.
+
+    Two decoders judge the recording, both from test/extra_decoders.sh:
+    svenso's iso7816 reads CLK and I/O and counts 372 rising edges of CLK
+    to the etu; arthursimas1's arthur_iso7816 reads RST and I/O and takes
+    the etu from the length of the TS character's start bit. Each must read
+    the answer to reset and the whole command exactly, and each complains
+    when one bit of the status word is held low. Neither knows the error
+    signal: shown a character repeated after one, svenso's takes the
+    signal for a character and arthursimas1's reports an invalid stop bit
+    (checked here before trusting them), so the error signal and the
+    repetition, both ways, are tested on the reference model
+    (sim/test_iso7816.ml) and not shown to them. Both read the direct
+    convention; svenso's has no inverse one."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    atr = bytes.fromhex("3b901100")
+    card = Iso7816Card(dut, atr)
+    task = cocotb.start_soon(card.run())
+    trace = sigrok.Trace(dut, {"clk": lambda: card.pin(0) or 0, "rst": lambda: card.pin(1) or 0,
+                               "io": card.wire})
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        reader = card_proto.Iso7816(chip, firmware("iso7816"), firmware("iso7816_clk"))
+        return reader.reset(), reader.command(0x00, 0xA4, 0x00, 0x00, data=b"\x3f\x00")
+
+    got_atr, result = await session()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    task.cancel()
+    assert card.errors == [], card.errors
+    assert card.commands == [(bytes.fromhex("00a4000002"), bytes.fromhex("3f00"))], card.commands
+    assert got_atr == atr and result == (b"", 0x9000), (got_atr.hex(), result)
+    # CLK: 5 MHz from its first rise on, high half of each period.
+    clk = trace.level("clk")
+    first = next(k for k, (_, v) in enumerate(clk) if v == 1)
+    assert all(b - a == 1 for (a, _), (b, _) in zip(clk[first:], clk[first + 1:])), "CLK is not 5 MHz"
+    rst_rise = next(t for t, v in trace.level("rst") if v == 1)
+    assert (rst_rise - clk[first][0]) // 2 >= 400, "RST rose before 400 clock cycles"
+    if sigrok.extra_available():
+        svenso = "iso7816:clk=clk:data=io"
+        want = (["0x3b", "0x90", "0x11", "0x0", "ATR"]
+                + ["0x0", "0xa4", "0x0", "0x0", "0x2", "0xa4", "0x3f", "0x0", "0x90", "0x0", "T=0", "APDU"])
+        found = trace.decode(svenso, extra=True)
+        assert texts(found) == want, texts(found)
+        arthur = "arthur_iso7816:reset=rst:io=io"
+        fields = lambda found: [t for t in texts(found) if t not in ("0", "1", "S", "T", "P:0", "P:1")]
+        want_a = ["3B", "TS: 3B", "90", "T0: 90", "11", "TA1: 11", "00", "TD1: 00", "ATR",
+                  "00", "CLA: 00", "A4", "INS: A4", "00", "P1: 00", "00", "P2: 00", "02", "Lc/Le: 02",
+                  "A4", "ACK", "3F", "Data: 3F", "00", "Data: 00", "90", "SW1: 90", "00", "SW2: 00",
+                  "T=0 APDU"]
+        found_a = trace.decode(arthur, extra=True)
+        assert fields(found_a) == want_a, fields(found_a)
+        # I/O held low through bit 4 of SW1 (a 1): 90 becomes 80, its
+        # parity wrong. svenso's warns and reads 80; arthursimas1's warns,
+        # and 80 is no status byte to it.
+        start = next(s for s, _, text in found_a if text == "SW1: 90")  # its start bit's leading edge
+        held = trace.forced("io", start + 5 * 744, start + 6 * 744, 0)
+        wrong = texts(held.decode(svenso, extra=True))
+        assert (wrong[:13] == want[:13] and wrong.count("0x90") == 1 and "0x80" in wrong
+                and any(t.startswith("CHKSUM ERROR") for t in wrong)), wrong
+        wrong_a = fields(held.decode(arthur, extra=True))
+        assert (wrong_a[:25] == want_a[:25] and "SW1: 90" not in wrong_a
+                and "Invalid Parity Bit" in wrong_a), wrong_a
+
+
+class TpmDevice:
+    """A TPM 2.0 on SPI written from the TCG PC Client Platform TPM Profile
+    for TPM 2.0 (PTP), its FIFO interface (TIS) over SPI, mode 0, on the
+    SPI controller's pins. A transaction is CS_N low, a header of 4 bytes
+    (bit 7 of the first set for a read, bit 6 0, bits 5:0 the size less
+    one; then a 24-bit address, 0xD40000 plus the locality times 0x1000
+    plus the register), then the data. MISO is 0 through the header but its
+    last bit, which is 1 if the TPM is ready and 0 for a wait state,
+    decided from the 31 bits before it; each wait byte is 0 but its last
+    bit, 1 on the last. Then the bytes a read returns, or 0 while the host
+    writes. Every transaction must be exactly that long.
+
+    Registers, locality 0: TPM_ACCESS (81h: valid, the establishment bit;
+    a write of requestUse grants the locality, activeLocality relinquishes
+    it), TPM_STS (stsValid, commandReady, dataAvail, Expect; burstCount 64;
+    tpmFamily 01, TPM 2.0; a write may set one bit only: commandReady,
+    tpmGo), TPM_DATA_FIFO, TPM_DID_VID (an Infineon SLB 9670's, 001B15D1h).
+    Only TPM_ACCESS may be touched without the locality. The state machine
+    is the PTP's: Idle, Ready, Reception (Expect until the command's size is
+    in), Execution, Completion (dataAvail until the response is read).
+    TPM2_Startup answers TPM_RC_SUCCESS once, TPM_RC_INITIALIZE again, as
+    every other command does before it. The TPM inserts [waits] wait states
+    on a write to TPM_STS after a response has been read out, the one place
+    it is given to need time."""
+
+    def __init__(self, dut, waits=2):
+        self.dut, self.waits = dut, waits
+        self.errors, self.heard = [], []
+        self.access = 0x81
+        self.state, self.cmd, self.rsp, self.at, self.started = "idle", bytearray(), b"", 0, False
+
+    def _error(self, what):
+        if what not in self.errors:
+            self.errors.append(what)
+
+    def _expect(self):
+        return len(self.cmd) < 6 or len(self.cmd) < int.from_bytes(self.cmd[2:6], "big")
+
+    def sts(self):
+        v = 0x80 | (0x40 if self.state == "ready" else 0)
+        v |= 0x08 if self.state == "reception" and self._expect() else 0
+        v |= 0x10 if self.state == "completion" and self.at < len(self.rsp) else 0
+        return bytes([v, 64, 0, 0x04])
+
+    def waits_for(self, read, addr):
+        if (not read and addr >> 1 == 0xD40018 >> 1 and self.state == "completion"
+                and self.at >= len(self.rsp)):
+            return self.waits
+        return 0
+
+    def _check(self, reg):
+        if reg != 0 and not self.access & 0x20:
+            self._error("a register touched without the locality")
+
+    def read(self, addr, n):
+        reg = addr & 0xFFF
+        self._check(reg)
+        if addr & ~0xFFF != 0xD40000:
+            self._error("an address outside locality 0: %06x" % addr)
+        if reg == 0x000:
+            return bytes([self.access]) + bytes(n - 1)
+        if 0x18 <= reg < 0x1C:
+            return (self.sts()[reg - 0x18:] + bytes(4))[:n]
+        if reg == 0x024:
+            if self.state != "completion" or self.at + n > len(self.rsp):
+                self._error("a FIFO read with no response there")
+            out = (self.rsp[self.at:self.at + n] + b"\xff" * n)[:n]
+            self.at += n
+            return out
+        if 0xF00 <= reg < 0xF04:
+            return ((0x001B15D1).to_bytes(4, "little")[reg - 0xF00:] + bytes(4))[:n]
+        self._error("a read of register %03x" % reg)
+        return b"\xff" * n
+
+    def write(self, addr, data):
+        reg = addr & 0xFFF
+        self._check(reg)
+        if reg == 0x000 and data == b"\x02":
+            self.access |= 0x20
+        elif reg == 0x000 and data == b"\x20":
+            self.access &= ~0x20
+        elif reg == 0x018 and data == b"\x40":
+            if self.state in ("idle", "ready", "completion"):
+                self.state, self.cmd, self.rsp, self.at = "ready", bytearray(), b"", 0
+            else:
+                self._error("commandReady in state " + self.state)
+        elif reg == 0x018 and data == b"\x20":
+            if self.state != "reception" or self._expect():
+                self._error("tpmGo with no whole command")
+            else:
+                self._execute()
+        elif reg == 0x024 and self.state in ("ready", "reception"):
+            self.cmd += data
+            self.state = "reception"
+            if len(self.cmd) >= 6 and len(self.cmd) > int.from_bytes(self.cmd[2:6], "big"):
+                self._error("more command than its size says")
+        else:
+            self._error("a write of %s to register %03x in state %s" % (data.hex(), reg, self.state))
+
+    def _execute(self):
+        tag, size, code = int.from_bytes(self.cmd[0:2], "big"), len(self.cmd), int.from_bytes(self.cmd[6:10], "big")
+        if tag != 0x8001:
+            rc = 0x01E  # TPM_RC_BAD_TAG
+        elif code == 0x144 and not self.started and size == 12:
+            self.started, rc = True, 0
+        elif code == 0x144 or not self.started:
+            rc = 0x100  # TPM_RC_INITIALIZE
+        else:
+            rc = 0x143  # TPM_RC_COMMAND_CODE
+        self.heard.append((code, rc))
+        self.rsp = bytes([0x80, 0x01]) + (10).to_bytes(4, "big") + rc.to_bytes(4, "big")
+        self.state, self.at = "completion", 0
+
+    def _miso(self, p, bits):
+        if p < 31:
+            return 0
+        if p == 31:
+            read = bits[0]
+            addr = sum(b << (23 - k) for k, b in enumerate(bits[8:31]))
+            self.w = self.waits_for(read, addr)
+            return 0 if self.w else 1
+        q = p - 32
+        if q < 8 * self.w:
+            return int(q % 8 == 7 and q // 8 == self.w - 1)
+        q -= 8 * self.w
+        if q == 0 and bits[0]:
+            n = (sum(b << (5 - k) for k, b in enumerate(bits[2:8]))) + 1
+            self.data = self.read(sum(b << (23 - k) for k, b in enumerate(bits[8:32])), n)
+        if bits[0] and q // 8 < len(self.data):
+            return (self.data[q // 8] >> (7 - q % 8)) & 1
+        return 0
+
+    def _end(self, bits):
+        if len(bits) < 32:
+            self._error("a transaction of %d bits" % len(bits))
+            return
+        read = bits[0]
+        n = (sum(b << (5 - k) for k, b in enumerate(bits[2:8]))) + 1
+        addr = sum(b << (23 - k) for k, b in enumerate(bits[8:32]))
+        if bits[1]:
+            self._error("bit 6 of the header set")
+        if len(bits) != 32 + 8 * (self.w + n):
+            self._error("a transaction of %d bits, not %d" % (len(bits), 32 + 8 * (self.w + n)))
+            return
+        body = bits[32 + 8 * self.w:]
+        data = bytes(sum(b << (7 - k) for k, b in enumerate(body[8 * i:8 * i + 8])) for i in range(n))
+        if not read:
+            self.write(addr, data)
+        self.heard.append(("R" if read else "W", addr, self.data if read else data, self.w))
+
+    async def run(self):
+        dut = self.dut
+        was_cs, was_sck, bits, p = 1, 0, [], 0
+        while True:
+            await FallingEdge(dut.clk)  # mid-cycle: the chip's outputs have settled
+            out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+            sck, mosi = out & oe & 1, (out >> 1) & 1
+            cs = (out >> 3) & 1 if (oe >> 3) & 1 else 1
+            miso = None
+            if was_cs and not cs:
+                bits, p, self.w, self.data = [], 0, 0, b""
+                miso = self._miso(0, bits)
+            elif not cs and sck and not was_sck:
+                bits.append(mosi)
+                p += 1
+            elif not cs and was_sck and not sck:
+                miso = self._miso(p, bits)
+            elif cs and not was_cs:
+                self._end(bits)
+                miso = 1
+            if miso is not None:
+                drive_pin(dut, 2, miso)
+            was_cs, was_sck = cs, sck
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_tpm_tis_spi(dut):
+    """A TPM 2.0 on the SPI controller (spi_fast, 5 Mbit/s at 10 MHz, no
+    new firmware), started as a driver starts one: locality 0 requested
+    and granted through TPM_ACCESS, TPM_DID_VID read (an Infineon SLB
+    9670's), TPM_STS read, then TPM2_Startup(SU_CLEAR) through the FIFO:
+    commandReady, the burst count, the command, Expect clear, tpmGo,
+    dataAvail, the 10-byte response, and commandReady again, on which the
+    TPM inserts two wait states. The TPM is written here from the TCG PC
+    Client Platform TPM Profile. The SPI controller holds CS_N low while it
+    waits for the host's next byte, so the driver (TpmTis in
+    host/card_protocols.py) clocks the wait bytes one at a time inside the
+    one selection and reads MISO's last bit of each, as the PTP has a TPM
+    driver do; the firmware knows nothing of TPMs.
+
+    Two decoders judge it: ghecko's spi_tpm must read every transaction,
+    the wait states included; the TPM TIS pair from sigrok pull request
+    88 (tpm_tis_spi, then tpm_fifo_tis on it) must read every transaction,
+    name the registers and their fields, and read the command and the
+    response. That pair takes the bytes after a header as the data even
+    when the header ends in a wait state (it marks the wait and reads the
+    wait byte as the first data byte), so it is shown the recording up to
+    the transaction with the wait states, and shown that transaction too,
+    to check that this is what it does. The DID_VID read held low on MISO
+    must change both verdicts. 8 ms of simulated time: each byte is a
+    write and a read on the chip's host port, which this testbench clocks
+    at 833 kHz; on the SPI side a byte takes 1.6 us."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    trace = sigrok.Trace(dut, {
+        "sck": lambda: int(dut.uio_out.value) & 1,
+        "mosi": lambda: (int(dut.uio_out.value) >> 1) & 1,
+        "miso": lambda: (int(dut.uio_in.value) >> 2) & 1,
+        "cs": lambda: (int(dut.uio_out.value) >> 3) & 1 if (int(dut.uio_oe.value) >> 3) & 1 else 1,
+    })
+    tpm_dev = TpmDevice(dut)
+    task = cocotb.start_soon(tpm_dev.run())
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        tpm = card_proto.TpmTis(pe.SpiController(chip, firmware("spi_fast")))
+        access = tpm.request_locality()
+        ids = tpm.did_vid()
+        sts = tpm.status()
+        return access, ids, sts, tpm.command(card_proto.tpm2_startup()), tpm.waits
+
+    access, ids, sts, rsp, waits = await session()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    task.cancel()
+    startup = card_proto.tpm2_startup()
+    assert tpm_dev.errors == [], tpm_dev.errors
+    assert (access, ids, sts, waits) == (0xA1, (0x001B, 0x15D1), 0x80, 2), (access, ids, sts, waits)
+    assert rsp == bytes.fromhex("80010000000a00000000"), rsp.hex()
+    assert card_proto.tpm2_response_code(rsp) == 0 and (0x144, 0) in tpm_dev.heard, tpm_dev.heard
+    if sigrok.extra_available():
+        bus = "spi:clk=sck:mosi=mosi:miso=miso:cs=cs"
+        ghecko = bus + ",spi_tpm"
+        txs = [("Write", "TPM_ACCESS_0", "02"), ("Read", "TPM_ACCESS_0", "a1"),
+               ("Read", "TPM_DID_VID_0", "d1151b00"), ("Read", "TPM_STS_0", "80"),
+               ("Write", "TPM_STS_0", "40"), ("Read", "TPM_STS_0", "c0400004"),
+               ("Write", "TPM_DATA_FIFO_0", startup.hex()), ("Read", "TPM_STS_0", "80"),
+               ("Write", "TPM_STS_0", "20"), ("Read", "TPM_STS_0", "90"),
+               ("Read", "TPM_DATA_FIFO_0", rsp.hex()), ("Read", "TPM_STS_0", "80")]
+        want = [t for op, reg, data in txs for t in (op, "Register: " + reg, data)]
+        want += ["Write", "Register: TPM_STS_0", "Wait", "40"]
+        found = trace.decode(ghecko, "spi_tpm", extra=True)
+        assert texts(found) == want, texts(found)
+        pr88 = bus + ",tpm_tis_spi,tpm_fifo_tis"
+
+        def tis(read, addr, data, fields):
+            n, data = len(data) // 2, data.upper()
+            arrow = "%X -> %s" if read else "%X <- %s"
+            return ["%s %d" % ("R" if read else "W", n), "%X" % addr, data, arrow % (addr, data), fields]
+
+        want88 = (tis(0, 0xD40000, "02", "TPM_ACCESS_0={requestUse=1 (request)}(1b)")
+                  + tis(1, 0xD40000, "a1", "TPM_ACCESS_0={tpmRegValidSts=1,activeLocality=1,tpmEstablishment=1}(1b)")
+                  + tis(1, 0xD40F00, "d1151b00", "TPM_DID_VID_0={DID=27,VID=Infineon}(4b)")
+                  + tis(1, 0xD40018, "80", "TPM_STS_0={stsValid=1,selfTestDone=0}(1b)")
+                  + tis(0, 0xD40018, "40", "TPM_STS_0={commandReady=1}(1b)")
+                  + tis(1, 0xD40018, "c0400004", "TPM_STS_0={tpmFamily=TPM2_0,burstCount=64,stsValid=1,"
+                        "commandReady=1,selfTestDone=0}(4b)")
+                  + tis(0, 0xD40024, startup.hex(), "TPM_DATA_FIFO_0=" + startup.hex()) + ["TpmState.Ready"]
+                  + tis(1, 0xD40018, "80", "TPM_STS_0={stsValid=1,selfTestDone=0}(1b)")
+                  + tis(0, 0xD40018, "20", "TPM_STS_0={tpmGo=1}(1b)")
+                  + ["Startup (0144): " + startup.hex().upper(), "TpmState.Reception"]
+                  + tis(1, 0xD40018, "90", "TPM_STS_0={stsValid=1,dataAvail=1,selfTestDone=0}(1b)")
+                  + ["TpmState.Execution"]
+                  + tis(1, 0xD40024, rsp.hex(), "TPM_DATA_FIFO_0=" + rsp.hex())
+                  + tis(1, 0xD40018, "80", "TPM_STS_0={stsValid=1,selfTestDone=0}(1b)")
+                  + ["Success (0000): " + rsp.hex().upper(), "TpmState.Completion"])
+        last = [t for t, v in trace.level("cs") if v == 0][-1]  # the transaction with the wait states
+        found88 = trace.decode(pr88, "tpm_tis_spi,tpm_fifo_tis", end=last, extra=True)
+        assert texts(found88) == want88, texts(found88)
+        # Shown the last transaction, it marks the wait state, takes the
+        # wait byte (MOSI 00) for the data, then the real byte for a header.
+        whole = texts(trace.decode(pr88, "tpm_tis_spi,tpm_fifo_tis", extra=True))
+        assert whole[:len(want88)] == want88 and whole[len(want88):] == [
+            "W 1", "D40018", "wait state", "00", "D40018 <- 00", "TPM_STS_0={}(1b)",
+            "Only one field may be set at a time when writing to TPM_STS_X", "TpmState.Idle",
+            "unexpected duplex operation", "W 1"], whole[len(want88):]
+        # MISO held low through the DID_VID read's data: no device, no vendor.
+        a, b = next((a, b) for a, b, text in found if text == "d1151b00")
+        held = trace.forced("miso", a, b, 0)
+        wrong = texts(held.decode(ghecko, "spi_tpm", extra=True))
+        assert wrong == want[:8] + ["00000000"] + want[9:], wrong
+        wrong88 = texts(held.decode(pr88, "tpm_tis_spi,tpm_fifo_tis", end=last, extra=True))
+        assert wrong88[:12] + wrong88[15:] == want88[:12] + want88[15:] and wrong88[12:15] == [
+            "00000000", "D40F00 -> 00000000", "TPM_DID_VID_0={DID=0,VID=<unknown>}(4b)"], wrong88[10:16]

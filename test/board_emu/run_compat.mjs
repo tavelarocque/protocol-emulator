@@ -89,7 +89,7 @@ console.log(`extra_protocols.py: and they agree (${cpython3.length} characters o
 // helpers) and then that module alone: every later module needs only
 // protocol_emulator, and all of them together outgrow the memory
 // MicroPython has for compiling on one board.
-const LATER = ['i2c2', 'motion', 'i3c', 'auto', 'misc', 'link'];
+const LATER = ['i2c2', 'motion', 'i3c', 'auto', 'misc', 'link', 'aero', 'card', 'rail'];
 const alone = driver + '\n' + second + '\n' + extra + '\n' + compatExtra;
 const aloneOut = py(alone).trim();
 for (const name of LATER) {

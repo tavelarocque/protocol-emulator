@@ -426,3 +426,83 @@
   (with-stdout-to
    lfast.s
    (run %{dep:../bin/firmware_src.exe} lfast %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets mil1553_bc.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   mil1553_bc.s
+   (run %{dep:../bin/firmware_src.exe} mil1553_bc %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets mil1553_mon.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   mil1553_mon.s
+   (run %{dep:../bin/firmware_src.exe} mil1553_mon %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets arinc429_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   arinc429_tx.s
+   (run %{dep:../bin/firmware_src.exe} arinc429_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets spacewire_chars.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   spacewire_chars.s
+   (run %{dep:../bin/firmware_src.exe} spacewire_chars %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets spacewire_ds.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   spacewire_ds.s
+   (run %{dep:../bin/firmware_src.exe} spacewire_ds %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets iso7816.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   iso7816.s
+   (run %{dep:../bin/firmware_src.exe} iso7816 %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets iso7816_clk.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   iso7816_clk.s
+   (run %{dep:../bin/firmware_src.exe} iso7816_clk %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets knx_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   knx_tx.s
+   (run %{dep:../bin/firmware_src.exe} knx_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets mvb.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   mvb.s
+   (run %{dep:../bin/firmware_src.exe} mvb %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets ltc.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   ltc.s
+   (run %{dep:../bin/firmware_src.exe} ltc %{dep:../model/firmware.ml}))))
