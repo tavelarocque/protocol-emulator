@@ -43,6 +43,18 @@ them, so they cannot drift.
 | [`tlc5620.s`](tlc5620.s) | TLC5620 DAC writer | 12 |
 | [`pwm.s`](pwm.s) | PWM, RC servo pulses | 8 |
 | [`nes_pad.s`](nes_pad.s) | NES gamepad | 7 |
+| [`sbus_tx.s`](sbus_tx.s) | SBUS transmitter, inverted characters made on the chip | 22 |
+| [`dshot.s`](dshot.s) | DShot, the checksum made on the chip | 19 |
+| [`xy2_x.s`](xy2_x.s), [`xy2_y.s`](xy2_y.s) | XY2-100 galvanometer scanner, one axis on each thread | 17 + 20 |
+| [`caliper.s`](caliper.s) | A digital caliper's data port | 21 |
+| [`i3c.s`](i3c.s) | MIPI I3C controller, SDR, with ENTDAA | 63 |
+| [`sent_tx.s`](sent_tx.s) | SAE J2716 SENT transmitter | 59 |
+| [`j1850_tx.s`](j1850_tx.s) | SAE J1850 VPW transmitter | 55 |
+| [`sirc_tx.s`](sirc_tx.s) | Sony SIRC infrared transmitter, with carrier | 40 |
+| [`sle4442.s`](sle4442.s) | SLE 4442 memory card reader | 40 |
+| [`cjtag.s`](cjtag.s) | Compact JTAG (IEEE 1149.7), OScan1 | 55 |
+| [`pjdl.s`](pjdl.s) | PJON over PJDL, sending | 56 |
+| [`lfast.s`](lfast.s) | NXP LFAST with SIPI frames, sending | 33 |
 | [`echo.s`](echo.s) | TX FIFO to RX FIFO, for bring-up | 5 |
 | [`ws2812/`](ws2812) | WS2812 LEDs: the blind firmware test, with its task and hidden test | 16 |
 

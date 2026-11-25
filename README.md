@@ -5,7 +5,7 @@
 An open-source protocol emulator ASIC for the
 [Jane Street protocol emulator competition](https://blog.janestreet.com/protocol-emulator-asic-competition/):
 a tiny CPU whose instructions read pins, write pins and count cycles, so UART,
-SPI, I2C and 64 other protocols, 10 Mbit Ethernet among them, are
+SPI, I2C and 83 other protocols, 10 Mbit Ethernet among them, are
 implemented in firmware loaded after fabrication rather than in fixed
 logic. Written in Hardcaml, designed for tapeout through
 [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (8x4 tiles).
@@ -24,17 +24,21 @@ one-page summary for judges. This page is the map.
   protocol pins (input, push-pull or open-drain each), loaded over an SPI
   host port. LVS and the Tiny Tapeout precheck pass, and timing is met at
   50 MHz at every corner ([`docs/metrics.md`](docs/metrics.md)).
-- **67 protocols as firmware**, two running at a time. UART, SPI and I2C as
+- **86 protocols as firmware**, two running at a time. UART, SPI and I2C as
   required, in both roles for SPI and I2C; both stretch goals, low-speed
   USB as a host and 10 Mbit Ethernet, sending and receiving; JTAG, SWD,
   1-Wire, WS2812, PS/2 and CAN; I2S, DMX512, Wiegand, NEC and RC-5
   infrared, MDIO, DALI, PWM and a NES gamepad; Microwire, HDMI-CEC and
   RC-6 infrared; step and direction for stepper drivers, a DHT22 sensor
-  reader, TDM audio, a TLC5620 DAC, Qi packets, EM4100 tags and Morse.
-  Twenty-six have firmware of their own. Four are framed by the driver on
-  two senders that know no code (RC-6 on an infrared burst sender; Qi,
-  EM4100 and Morse on a sender of levels at a fixed rate), and thirty-seven
-  more (MIDI, LIN, Modbus RTU and thirty-four devices on I2C, SPI,
+  reader, TDM audio, a TLC5620 DAC, Qi packets, EM4100 tags and Morse;
+  then SAE J2716 SENT and J1850 VPW from cars, DShot and SBUS from drones
+  and radio control, XY2-100 laser scanners, a caliper's data port, MIPI
+  I3C with dynamic address assignment, compact JTAG, PJON over PJDL, NXP
+  LFAST with SIPI, Sony infrared and an SLE 4442 card reader.
+  Thirty-eight have firmware of their own. Four are framed by the driver
+  on two senders that know no code (RC-6 on an infrared burst sender; Qi,
+  EM4100 and Morse on a sender of levels at a fixed rate), and forty-four
+  more (MIDI, LIN, Modbus RTU and forty-one devices on I2C, SPI,
   Microwire, UART, 1-Wire, JTAG and MDIO) run on the other engines with
   framing in the host driver.
 - **Hardware that did not need to know the protocols.** Nine engines were
@@ -59,8 +63,8 @@ one-page summary for judges. This page is the map.
   the RTL; and the memories those proofs assume equal IHP's own models of
   the SRAM macros.
 - **Judged by tools this project did not write.** Device models by other
-  people where one exists; for 65 tests the recorded pins go to sigrok's
-  protocol decoders.
+  people where one exists; for 84 tests the recorded pins go to a protocol
+  decoder: sigrok's, or for SENT, DShot and I3C one published by others.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
 - **Not yet done:** no FPGA or silicon run; and an Ethernet receiver that
@@ -208,6 +212,21 @@ the largest engine, Ethernet transmit, uses 70.
 | ARM ITM trace over SWO, bare and inside TPIU frames | on the UART transmitter | no new firmware | a TPIU formatter written from ARM CoreSight; sigrok's ITM and TPIU decoders |
 | DS2408 switch, DS2432 EEPROM, DS28EA00 thermometer | on the 1-Wire controller | no new firmware | each part's commands written from its data sheet, on sockit_owm's slave model; sigrok's decoder for each |
 | An STM32's boundary-scan TAP and Cortex-M3 debug port, chained; a MIPS EJTAG session | on the JTAG controller | no new firmware | each TAP written from IEEE 1149.1 and the part's manual; sigrok's decoder for each (for EJTAG, its instruction and processor-access rows: its register rows label the scan before) |
+| nRF905 radio, AD5626 DAC, AD7920 ADC, LTC2422 ADC | on the SPI controllers | no new firmware | each part written from its data sheet; sigrok's newer decoder for each |
+| LTC2607 DAC (with its global address), MCP23017 port expander | on the I2C controller | no new firmware | each part written from its data sheet as a cocotbext-i2c device; sigrok's newer decoder for each |
+| TI SDQ: a BQ2022A's ROM and memory | on the 1-Wire controller, whose timing SDQ shares | no new firmware | the part scripted from TI's data sheet; sigrok's newer SDQ decoder |
+| SBUS (radio control receiver to flight controller) | transmitter, the line inverted | 22 | a receiver written from SBUS's rules; sigrok's newer SBUS decoder |
+| DShot (flight controller to ESC) | transmitter, DShot600 | 19 | a DShot decoder published by hyp0dermik |
+| XY2-100 (laser galvanometer scanners) | controller, both axes at 2 MHz | 17 + 20 | sigrok's newer XY2-100 decoder |
+| Digital caliper data port | the caliper | 21 | sigrok's newer caliper decoder |
+| MIPI I3C, SDR | controller with ENTDAA, SCL at 2 MHz, SDA open-drain throughout | 63 | four targets written from the I3C Basic specification; an I3C decoder published by xyphro |
+| SAE J2716 SENT (automotive sensors) | transmitter, 3 us tick | 59 | a SENT decoder published by enp6s0 |
+| SAE J1850 VPW (OBD-II) | transmitter, 10.4 kbit/s | 55 | sigrok's newer J1850 VPW decoder, and the CRC checked here |
+| Sony SIRC infrared | transmitter, with carrier | 40 | sigrok's newer SIRC decoder |
+| SLE 4442 memory card | reader | 40 | the card written from its data sheet; sigrok's newer SLE44xx decoder |
+| Compact JTAG (IEEE 1149.7) | probe, OScan1 | 55 | a target written from IEEE 1149.7; sigrok's newer cJTAG decoder |
+| PJON over PJDL | sender, any of PJDL's modes | 56 | sigrok's newer PJDL and PJON decoders |
+| NXP LFAST with SIPI | sender, 5 Mbit/s at 50 MHz | 33 | sigrok's newer LFAST and SIPI decoders |
 
 The "checked against" models are other people's wherever one exists. For
 SWD, PS/2 and CAN the device model is written here from the standard, so
@@ -215,8 +234,13 @@ the pins are also recorded and handed to sigrok's protocol decoders, which
 this project did not write ([`test/sigrok.py`](test/sigrok.py)). Every
 protocol from I2S down is judged the same way, by sigrok's decoder for it.
 The USB, 1-Wire and WS2812 recordings go to sigrok as well, beside the
-device models. In all but two of the 65 tests (DS1307 and PWM) one bit is
+device models. In all but two of the 84 tests (DS1307 and PWM) one bit is
 then forced on the recorded wire, and the decoder's verdict must change.
+Nineteen of those decoders are not in the packaged sigrok-cli 0.7.2:
+sixteen come from sigrok's own newer source, and three (SENT, DShot, I3C)
+were published by others.
+[`test/extra_decoders.sh`](test/extra_decoders.sh) fetches each at a fixed
+commit for the tests; none is copied into this repository.
 Ethernet has only the receiver and sender written here from the standard,
 with the CRC-32 from `zlib`.
 
@@ -241,7 +265,7 @@ a bug.
 | Is every instruction defined? | Yes, all 65,536 words | exhaustive round trips, and the spec's datapath matched on every word |
 | Do the protocols work? | Each judged by an independent oracle | third-party device models and sigrok's decoders in cocotb, on the RTL and the gate netlist |
 | Does the host driver work? | The same file, unchanged | in cocotb, then in MicroPython on an emulated board (rp2040js) wired to the RTL |
-| Would the tests notice a bug? | 207 planted bugs, all caught | kept in the repo; the suite fails if one survives |
+| Would the tests notice a bug? | 316 planted bugs, all caught | kept in the repo; the suite fails if one survives |
 | Did the random tests reach everything? | Coverage is counted | any instruction, stall or timeout never seen fails the build |
 
 Generated files cannot drift: CI regenerates the Verilog, the firmware

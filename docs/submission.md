@@ -101,6 +101,27 @@ and ARM ITM trace, bare and in TPIU frames; on 1-Wire a DS2408 switch, a
 DS2432 EEPROM and a DS28EA00 thermometer; and on JTAG an STM32's two
 chained TAPs and a MIPS EJTAG session. That makes 67.
 
+**Nineteen more, judged by decoders the packaged sigrok does not ship.**
+Sigrok's own newer source has decoders its 0.7.2 release lacks, and other
+people have published three more; `test/extra_decoders.sh` fetches each at
+a fixed commit. Twelve of the nineteen are new firmware, each with a model
+test and planted bugs: SAE J2716 SENT and SAE J1850 VPW from cars; DShot
+and SBUS from drones and radio control (SBUS's line inverted, with the
+firmware making each bit's opposite, since no instruction inverts a pin);
+XY2-100 for laser scanners, one axis on each thread; a caliper's data
+port; MIPI I3C as an SDR controller, dynamic address assignment included;
+compact JTAG in OScan1; PJON over PJDL; NXP LFAST carrying SIPI frames;
+Sony infrared; and an SLE 4442 card reader. In each the host sends only
+the payload, and the chip makes the framing, the timing and any parity or
+CRC. Seven are devices on engines the chip had: an nRF905 radio, AD5626,
+AD7920, LTC2422 and LTC2607 converters, an MCP23017 port expander, and
+TI's SDQ, which shares 1-Wire's timing. That makes 86.
+
+I3C showed a real limit of the instruction set. Its data line should be
+push-pull for data and open-drain for acknowledgements within one frame,
+but only the host sets a pin's mode, so the controller keeps SDA
+open-drain throughout, at I3C's open-drain timing: 2 MHz, not 12.5.
+
 **Then CAN, from a transmitter to a node.** The v1.4 engine sent frames
 the host had made and listened. On v2.1's CRC register the transmitter
 makes the whole frame itself: bit stuffing, CRC-15, arbitration. A node
@@ -187,6 +208,8 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 | 24Cxx EEPROM, DS1307 clock, LM75 sensor | on the I2C controller | no new firmware |
 | SPI NOR flash, WS2801 LEDs, MAX7219 | on the SPI controller | no new firmware |
 | 17 more devices, from an ATSHA204A to MIPS EJTAG | on the I2C, MDIO, SPI, Microwire, UART, 1-Wire and JTAG controllers | no new firmware |
+| SENT, J1850 VPW, DShot, SBUS, XY2-100, a caliper, I3C, cJTAG, PJON over PJDL, LFAST with SIPI, Sony SIRC, SLE 4442 | new engines, judged by decoders the packaged sigrok does not ship | 19 to 63 each |
+| nRF905, AD5626, AD7920, LTC2422, LTC2607, MCP23017, TI SDQ | on the SPI, I2C and 1-Wire controllers | no new firmware |
 
 ![SPI controller waveform from the reference model](img/spi.svg)
 
@@ -210,15 +233,16 @@ runs a program on the reference model and prints the pins.
    picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
    USB device, sockit_owm's 1-Wire slave. For USB, 1-Wire, WS2812, SWD, PS/2,
    CAN and every protocol added after them but Ethernet, the recorded pins
-   go to sigrok's protocol decoders, 65 tests in all, 63 of them with a
+   go to a protocol decoder (sigrok's, or for SENT, DShot and I3C one
+   published by others), 84 tests in all, 82 of them with a
    fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
    receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
    sender has its own clock, 100 ppm off, and jitter on every edge.
-4. **Tests that are themselves tested.** 207 bugs are planted in the RTL,
+4. **Tests that are themselves tested.** 316 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
-5. **The gates, not only the RTL.** All 93 chip-level tests pass on the
+5. **The gates, not only the RTL.** All 112 chip-level tests pass on the
    post-layout netlist, with IHP's models of the SRAMs in place of the
    macros. That includes Ethernet at a 40 MHz clock, both ways.
 6. **The software that will run on the board.** The MicroPython driver is
