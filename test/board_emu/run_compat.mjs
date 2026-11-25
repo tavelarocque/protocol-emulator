@@ -4,8 +4,10 @@
 // The driver under MicroPython and under CPython must compute the same
 // things: runs compat.py after host/protocol_emulator.py in both and
 // compares, then compat_more.py after host/more_protocols.py and
-// compat_extra.py after host/extra_protocols.py, with the modules before
-// still loaded as they are on a board. No chip is needed, so
+// compat_extra.py after host/extra_protocols.py, then each later group's
+// host/<group>_protocols.py with its compat_<group>.py (the list LATER),
+// with the modules before still loaded as they are on a board. No chip is
+// needed, so
 // this takes seconds of emulated time.
 //
 //   node run_compat.mjs [--driver FILE] [--cpu-slowdown K]
@@ -79,4 +81,29 @@ if (micropython3 !== cpython3) {
   process.exit(1);
 }
 console.log(`extra_protocols.py: and they agree (${cpython3.length} characters of results)`);
+
+// Each later module the same way, with every module before it still loaded,
+// in the order a board would import them.
+const LATER = ['i2c2', 'motion', 'i3c', 'auto', 'misc', 'link'];
+let before = driver + '\n' + second + '\n' + extra + '\n' + compatExtra;
+for (const name of LATER) {
+  const mod = readFileSync(join(HERE, '..', '..', 'host', `${name}_protocols.py`), 'latin1');
+  const comp = readFileSync(join(HERE, `compat_${name}.py`), 'latin1');
+  const base = execFileSync('python3', ['-c', before], { encoding: 'latin1' }).trim();
+  const cp = execFileSync('python3', ['-c', before + '\n' + mod + '\n' + comp],
+    { encoding: 'latin1' }).trim().slice(base.length).trim();
+  const [oa, ea] = board.exec(mod);
+  const [ob, eb] = board.exec(comp);
+  const mp = (oa + ob + ea + eb).replace(/\r\n/g, '\n').trim();
+  if (mp !== cp) {
+    let at = 0;
+    while (mp[at] === cp[at]) at++;
+    console.log(`${name}_protocols.py: MicroPython and CPython DIFFER, first at character ${at}`);
+    console.log('MicroPython:', JSON.stringify(mp.slice(Math.max(0, at - 200), at + 300)));
+    console.log('CPython:    ', JSON.stringify(cp.slice(Math.max(0, at - 200), at + 300)));
+    process.exit(1);
+  }
+  console.log(`${name}_protocols.py: and they agree (${cp.length} characters of results)`);
+  before += '\n' + mod + '\n' + comp;
+}
 process.exit(0);

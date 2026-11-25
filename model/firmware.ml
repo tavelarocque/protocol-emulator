@@ -3104,6 +3104,210 @@ let tlc5620_word ~dac ~double ~value ~update =
   (dac lsl 14) lor (Bool.to_int double lsl 13) lor (value lsl 5) lor (Bool.to_int update lsl 4)
 ;;
 
+(* Sony SIRC infrared transmitter, the 40 kHz carrier included, so the pin
+   drives an IR LED. The program does the whole frame from the bits: the
+   start burst, the code of every bit, and the frame period.
+
+   SIRC counts in units of 600 us (24 carrier periods). A frame is a start
+   burst of 4 units, then for each bit a unit dark and a burst, 2 units for
+   a 1 and 1 for a 0; the bits go least significant first: 7 of command,
+   then 5 of address (12-bit frames), 8 of address (15-bit) or 5 of address
+   and 8 extended (20-bit). A remote repeats a frame every 45 ms, start to
+   start, and so does this program: it counts the units each frame uses
+   and stays dark for the rest of 75, so frames from the FIFO start
+   exactly 45 ms apart (later, only if the host is late).
+
+   Pins: P0 = the LED, push-pull, high = lit (side-set). Config:
+   [sirc_tx_config]: sideset_base 0, sideset_count 1; threshold 16; in
+   most significant bit first (the ISR holds the period's count, built
+   with IN); CLKDIV makes a tick half a carrier period: 125 for 40 kHz at
+   10 MHz, 625 at 50 MHz. A unit is 48 ticks.
+
+   Host protocol, one frame at a time ([sirc_words]):
+     TX word 0 : the number of bits: 12, 15 or 20
+     TX word 1 : the frame's first 16 bits, the first in bit 0: the
+                 command in bits 6:0, the address from bit 7 up
+     TX word 2 : (20-bit frames) the last four bits, in bits 3:0
+   The data words are taken before the start burst begins, and the second
+   during the frame, so a 20-bit frame needs all three in the FIFO.
+
+   Registers: X counts carrier periods and holds each bit; Y counts the
+   bits; the ISR is the count of the period's units still to go. *)
+let sirc_tx =
+  {|
+        .side_set 1
+next:   pull                side 0      ; the number of bits
+        out y, 16           side 0
+        set x, 17           side 0      ; ISR = 17 x 4 + 3 = 71: the units of
+        mov isr, x          side 0      ;   the 75 (45 ms) left after the
+        set x, 3            side 0      ;   start burst
+        in x, 2             side 0
+        pull                side 0      ; the first 16 bits
+        set x, 23           side 0 [6]  ; the start burst: 4 units
+        jmp burst           side 0
+bit:    mov x, isr          side 0 [7]  ; a bit: first a unit dark, 48 ticks;
+        jmp x-- d1          side 0 [7]  ;   the period loses two units, this
+d1:     jmp x-- d2          side 0 [7]  ;   one and the burst's first
+d2:     mov isr, x          side 0 [7]
+        jmp !osre have      side 0
+        pull                side 0      ; a 20-bit frame's last four bits
+got:    out x, 1            side 0 [6]  ; the bit
+        jmp !x zero         side 0
+        mov x, isr          side 0      ; a 1: the burst's second unit
+        jmp x-- d3          side 0
+d3:     mov isr, x          side 0
+        set x, 11           side 0      ; a burst of 2 units
+        jmp burst           side 0
+zero:   set x, 5            side 0 [4]  ; a burst of 1 unit
+burst:  nop                 side 1      ; four carrier periods, lit a tick
+        nop                 side 0      ;   and dark a tick
+        nop                 side 1
+        nop                 side 0
+        nop                 side 1
+        nop                 side 0
+        nop                 side 1
+        jmp x-- burst       side 0
+        jmp y-- bit         side 0      ; the next bit, or the end of the frame:
+        mov x, isr          side 0 [7]  ;   dark for the units the period has
+        jmp x-- g0          side 0 [7]  ;   left, two of them as the ticks
+g0:     jmp x-- g           side 0 [7]  ;   around this loop
+g:      set y, 4            side 0 [3]  ; a unit
+g1:     jmp y-- g1          side 0 [7]
+        jmp x-- g           side 0 [3]
+        jmp next            side 0 [7]
+have:   jmp got             side 0      ; as long as the pull it stands for
+|}
+;;
+
+let sirc_tx_config ~clkdiv =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 1
+  ; threshold = 16
+  ; in_msb_first = true
+  ; clkdiv
+  }
+;;
+
+(* The TX words for a frame: [bits] is 12, 15 or 20. The address takes
+   the bits after the command's 7, and in a 20-bit frame [extended] the
+   last 8. *)
+let sirc_words ~bits ~command ~address ?(extended = 0) () =
+  let frame = command lor (address lsl 7) lor (extended lsl 12) in
+  bits :: (frame land 0xFFFF) :: (if bits > 16 then [ frame lsr 16 ] else [])
+;;
+
+(* SLE 4442 memory card reader (the Siemens / Infineon "SLE 4432/4442"
+   protected memory cards, and others with the same 3-wire protocol). The
+   program is the card reader's side of it: the reset and the card's
+   answer to it, a command with its START and STOP conditions, and the
+   card's output clocked in, with the extra clock that ends it.
+
+   The card's rules: I/O changes only on a falling edge of CLK (from the
+   card) or while CLK is low (from the reader), except for START (I/O
+   falling while CLK is high) and STOP (I/O rising while CLK is high). A
+   reset is RST high with one clock pulse during it; when RST falls the
+   card puts the first bit of its answer on I/O, and 31 more clocks give
+   the rest of 32 bits; the 33rd releases I/O. A command is START, three
+   bytes (control, address, data), each least significant bit first,
+   taken as CLK rises, then a 25th clock during which STOP comes. A read
+   command's output then starts on the next falling edge, one bit per
+   clock, and one clock after the last bit releases I/O.
+
+   Pins: P0 = RST, P1 = CLK, push-pull; P2 = I/O, open-drain (the card's
+   output is open-drain too, so the line needs its pull-up). Config:
+   [sle4442_config]: sideset_base 1, sideset_count 1; set_base 0,
+   set_count 3 (RST, CLK under side-set, I/O); out_base 2, out_count 1;
+   in_base 2; threshold 16; CLKDIV makes a tick 5 us (50 at 10 MHz, 250 at
+   50 MHz). CLK is then 40 kHz (25 us a clock, 15 low and 10 high; longer
+   between bytes), inside the card's 7 to 50 kHz and its 9 us minimum
+   high and low; I/O changes 5 us after CLK falls and 10 us before it
+   rises; RST is high for 30 us.
+
+   Host protocol, one operation at a time ([sle4442_words]):
+     TX word 0 : [8:0] the number of bytes to clock in at the end (0 to
+                 511), [9] reset first, [10] a command first
+     TX word 1 : (a command) control byte in bits 7:0, address in 15:8
+     TX word 2 : (a command) data byte in bits 15:8, and bit 0 set
+     RX        : one word per byte clocked in, the byte in bits 7:0
+   After the bytes comes one more clock, as the card asks to end its
+   output. The answer to reset is 4 bytes; Read Main Memory (0x30) from
+   address N is 256 - N.
+
+   A command starts only when both its words are in hand. Then the program
+   waits for no one but the RX FIFO: if the host lets it fill, CLK stays
+   low until there is room. *)
+let sle4442 =
+  {|
+        .side_set 1
+        set pins, 4         side 0      ; RST low, I/O released
+next:   pull                side 0      ; bytes, reset, command
+        out y, 9            side 0
+        out x, 1            side 0
+        jmp !x nr           side 0
+        set pins, 5         side 0 [1]  ; RST high, 10 us before CLK rises
+        nop                 side 1 [1]  ; a clock pulse while RST is high
+        nop                 side 0 [1]
+        set pins, 4         side 0 [1]  ; RST low: the answer's first bit is on I/O
+nr:     out x, 1            side 0
+        jmp !x data         side 0
+        pull                side 0      ; control and address
+        mov isr, osr        side 0
+        pull                side 0      ; data, then bit 0 set
+        mov x, osr          side 0
+        mov osr, isr        side 0
+        nop                 side 1 [1]  ; CLK high, I/O released
+        set pins, 0         side 1 [1]  ; I/O falls while CLK is high: START
+cbit:   nop                 side 0      ; CLK falls; I/O held a tick
+        out pins, 1         side 0 [1]  ; the next bit
+        jmp !osre cbit      side 1 [1]  ; the card takes it as CLK rises
+        jmp !x stop         side 1      ; both words sent?
+        mov osr, x          side 1      ; no: the data byte, as the last 8
+        out null, 8         side 1      ;   bits of the OSR
+        set x, 0            side 1
+        jmp cbit            side 1
+stop:   nop                 side 0      ; CLK falls
+        set pins, 0         side 0 [1]  ; I/O low
+        nop                 side 1 [1]  ; the 25th clock
+        set pins, 4         side 1 [1]  ; I/O rises while CLK is high: STOP
+data:   jmp y-- byte        side 0      ; Y bytes from the card,
+        nop                 side 0 [2]  ;   then one more clock
+        nop                 side 1 [1]
+        jmp next            side 0
+byte:   set x, 7            side 0
+bit:    nop                 side 0 [2]  ; CLK low 15 us: the card's next bit
+        in pins, 1          side 1      ; read as CLK rises
+        jmp x-- bit         side 1
+        push                side 0
+        jmp data            side 0
+|}
+;;
+
+let sle4442_config ~clkdiv =
+  { Isa.Thread_config.default with
+    sideset_base = 1
+  ; sideset_count = 1
+  ; set_base = 0
+  ; set_count = 3
+  ; out_base = 2
+  ; out_count = 1
+  ; in_base = 2
+  ; threshold = 16
+  ; clkdiv
+  }
+;;
+
+(* The TX words for an operation: a reset, or a command (control, address,
+   data), or neither, then [bytes] clocked in. *)
+let sle4442_words ?(reset = false) ?command ~bytes () =
+  let flags = (Bool.to_int reset lsl 9) lor (Bool.to_int (Option.is_some command) lsl 10) in
+  (bytes lor flags)
+  ::
+  (match command with
+   | None -> []
+   | Some (control, address, data) -> [ control lor (address lsl 8); (data lsl 8) lor 1 ])
+;;
+
 (* PWM, and so RC servo pulses: a pin high for one count and low for
    another, over and over.
 
@@ -3174,6 +3378,760 @@ let nes_pad_config =
   ; in_msb_first = true
   }
 ;;
+
+(* Futaba SBUS transmitter: the serial bus a radio control receiver sends
+   its channels on, to a flight controller or to servos. It is a UART
+   turned upside down: the line rests low, a start bit is high, then 8
+   data bits least significant first, each sent as its opposite, an even
+   parity bit sent as its opposite, and two stop bits low, at 100 kbit/s.
+
+   The firmware makes each character from a plain byte: the start bit, the
+   inversion of every bit, the parity and the stop bits are its work. No
+   instruction inverts a pin or a register, so a data bit goes to X and
+   [jmp x--] takes one from it: X's bit 0 is then the bit's opposite, and
+   [mov pins, x] puts that on the line. The parity is kept by the CRC
+   register, which takes every bit OUT shifts: with the polynomial 1 its
+   bit 0 is the parity of the bits so far, and read with [crc_invert] it
+   comes back as the level the line needs.
+
+   Pins: P0 = the line, push-pull, low while there is nothing to send.
+   Config: [sbus_tx_config]: threshold 8; crc_poly 1, crc_init 0,
+   crc_invert; the rest as reset.
+
+   Host protocol on the TX FIFO ([sbus_tx_words]):
+     word 0  : bit time - 6, in clock cycles: 94 for 100 kbit/s at 10 MHz,
+               494 at 50 MHz (both exact)
+     then    : one byte per word
+   An SBUS message is 25 bytes: 0x0F, the sixteen 11-bit channels packed
+   least significant bit first into 22 bytes, a byte of flags, 0x00. The
+   host packs them ([sbus_message]); the firmware does not count bytes.
+
+   Timing: every bit is exactly one bit time, and back-to-back bytes have
+   exactly two stop bits, so a message is 3 ms at 100 kbit/s. Between
+   bytes the line rests low for as long as the host takes. *)
+let sbus_tx =
+  {|
+        set pins, 0         ; the line rests low
+        pull                ; bit time - 6
+        mov y, osr
+next:   pull                ; wait for a byte; the line stays low
+        mov crc, null       ; the parity starts from 0
+        set pins, 1 [1]     ; start bit: high
+        mov x, y
+start:  jmp x-- start
+bit:    out x, 1            ; a data bit, LSB first; the CRC register takes it too
+        jmp x-- inv         ; X = bit - 1: its bit 0 is the bit's opposite
+inv:    mov pins, x         ; the bit, inverted
+        mov x, y
+hold:   jmp x-- hold
+        jmp !osre bit       ; until all 8 are out
+        mov x, crc [1]      ; the parity of the 8, read inverted
+        mov pins, x         ; the parity bit, even, inverted
+        mov x, y [3]
+par:    jmp x-- par
+        set pins, 0 [5]     ; two stop bits: low
+        mov x, y
+stop:   jmp x-- stop [1]
+        jmp next
+|}
+;;
+
+let sbus_tx_config = { Isa.Thread_config.default with crc_poly = 1; crc_init = 0; crc_invert = true }
+
+(* An SBUS message's 25 bytes. Flags: bit 0 channel 17, bit 1 channel 18,
+   bit 2 frame lost, bit 3 failsafe. *)
+let sbus_message ~channels ~ch17 ~ch18 ~frame_lost ~failsafe =
+  assert (List.length channels = 16 && List.for_all channels ~f:(fun v -> v >= 0 && v < 2048));
+  let bits = List.concat_map channels ~f:(fun v -> List.init 11 ~f:(fun k -> (v lsr k) land 1)) in
+  let packed =
+    List.chunks_of bits ~length:8
+    |> List.map ~f:(fun byte -> List.foldi byte ~init:0 ~f:(fun k acc b -> acc lor (b lsl k)))
+  in
+  let flag k b = Bool.to_int b lsl k in
+  [ 0x0F ] @ packed @ [ flag 0 ch17 lor flag 1 ch18 lor flag 2 frame_lost lor flag 3 failsafe; 0x00 ]
+;;
+
+let sbus_tx_words ~bit_time bytes = (bit_time - 6) :: bytes
+
+(* DShot, a flight controller's command to a motor's speed controller (ESC):
+   16-bit frames on one wire, most significant bit first. Bits 15:5 are the
+   value (0 disarms, 1 to 47 are commands, 48 to 2047 throttle), bit 4 asks
+   the ESC for telemetry, and bits 3:0 are the checksum: the exclusive or of
+   the three nibbles of the 12 bits before it. Every bit has the same
+   period and begins with the line rising; a 0 is high for 37.5% of it and
+   a 1 for 75%, the DShot600 numbers (625 ns and 1250 ns of 1670 ns).
+
+   Pins: P0 = the line, push-pull (side-set), low between frames. Config:
+   [dshot_config]: sideset_base 0, sideset_count 1; threshold 16; out most
+   significant bit first, in least significant first; the CRC register
+   with polynomial x^4 + 1 (0x8) from 0, whose remainder is that exclusive
+   or. A bit is 8 ticks, so CLKDIV is the clock over eight times the bit
+   rate, rounded: at 10 MHz, 2 is 625 kbit/s (DShot600, 4% fast), 4 is
+   DShot300 and 8 DShot150, both 4% fast; at 50 MHz, 10 is DShot600 (4%
+   fast) and 5 DShot1200, 21 and 42 DShot300 and DShot150 (1% slow).
+
+   Host protocol: one TX word a frame, the value shifted left once with the
+   telemetry bit below it, in bits 11:0 ([dshot_word]). The firmware makes
+   the checksum: the CRC register follows the 12 bits, OUT to nowhere, and
+   since it shifts right its remainder comes out reversed, so four OUTs
+   and INs turn it round in the ISR, under the 12 bits. That takes 44
+   ticks with the line low, so a frame's last fall and the next one's first
+   rise are 47 ticks (5.9 bit times) apart or more; with the FIFO empty the
+   line stays low. Bidirectional DShot is not made: see the cocotb test. *)
+let dshot =
+  {|
+        .side_set 1
+next:   pull                side 0      ; a frame: the 12 bits in 11:0
+        mov y, osr          side 0      ; kept to send
+        out null, 4         side 0      ; bits 15:12 are not sent
+        mov crc, null       side 0      ; the checksum from 0
+sum:    out null, 1         side 0      ; the CRC register follows the 12 bits
+        jmp !osre sum       side 0
+        mov osr, crc        side 0      ; the checksum, its first bit lowest
+        out null, 12        side 0
+rev:    out x, 1            side 0      ; turned round in the ISR, which
+        in x, 1             side 0      ; shifts right
+        jmp !osre rev       side 0
+        in y, 12            side 0      ; the 12 bits above it
+        mov osr, isr        side 0      ; the frame
+bit:    out x, 1            side 0 [1]  ; the end of the bit before: low
+        jmp !x zero         side 1 [2]  ; every bit is high for 3 ticks
+        jmp !osre bit       side 1 [2]  ; a 1 for 3 more
+        jmp next            side 0
+zero:   jmp !osre bit       side 0 [2]  ; a 0 is low
+        jmp next            side 0
+|}
+;;
+
+let dshot_config ~clkdiv =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 1
+  ; threshold = 16
+  ; out_msb_first = true
+  ; crc_poly = 0x8
+  ; crc_init = 0
+  ; clkdiv
+  }
+;;
+
+let dshot_word ~value ~telemetry = (value lsl 1) lor Bool.to_int telemetry
+
+(* XY2-100, the interface of laser galvanometer scanners: a clock at 2 MHz,
+   a sync line, and one data line for each axis, every line a differential
+   pair on the real cable and one pin here. Each axis's frame is 20 bits,
+   data changing as the clock rises and read as it falls: three control
+   bits, 001 for a 16-bit position; the position, most significant bit
+   first; and even parity over the 20. SYNC is high for the first 19 bits
+   and low for the parity bit, so a frame ends where SYNC is low. Frames
+   follow one another with no gap, 100,000 a second.
+
+   Two threads, one for each axis, since each makes its own parity on its
+   CRC register (polynomial x + 1, from 1 for the control bits' one 1). This
+   program, on thread 0, makes CLK and SYNC and sends X; [xy2_y], on thread
+   1, sends Y, following thread 0's clock. CHAIN carries Y's position to
+   it: the host sends both to thread 0.
+
+   Pins: P0 = CLK and P1 = SYNC (side-set), P2 = X, all push-pull; P3 = Y,
+   thread 1's. Config: [xy2_x_config] and [xy2_y_config], with the same
+   CLKDIV, both threads enabled by one CTRL write with CHAIN. A bit is 5
+   ticks, CLK high for 2 and low for 3, so CLKDIV 1 at 10 MHz and 5 at
+   50 MHz give the 2 MHz clock.
+
+   Host protocol: TX words to thread 0, two a frame, X's position and then
+   Y's. The next frame's words are taken in the low half of the parity
+   bit; when they are not there the clock waits there, low with SYNC low,
+   so frames run with no gap only while the host keeps two words ahead
+   (the packet buffer can). Y's word reaches thread 1 during bit 0. *)
+let xy2_x =
+  {|
+        .side_set 2                     ; CLK, SYNC
+frame:  pull             side 0         ; X's position, in the last bit's low half
+        mov y, osr       side 0
+        pull             side 0         ; Y's
+        set pins, 0      side 3         ; bit 0: CLK rises, SYNC high; control 0
+        mov x, osr       side 3
+        in x, 16         side 2         ; CLK falls
+        push             side 2         ; Y's position to thread 1, by the chain
+        mov osr, y       side 2         ; X's to send
+        set pins, 0      side 3         ; bit 1: control 0
+        mov crc, null    side 3         ; the parity starts again
+        nop              side 2 [2]
+        set pins, 1      side 3 [1]     ; bit 2: control 1
+        nop              side 2 [2]
+bit:    out pins, 1      side 3 [1]     ; bits 3 to 18, the position
+        jmp !osre bit    side 2 [2]
+        mov pins, crc    side 1         ; bit 19, the parity; SYNC low
+        jmp frame        side 1
+|}
+;;
+
+(* XY2-100's Y axis, on thread 1, beside [xy2_x] on thread 0 (see there).
+   It reads CLK on P0 and SYNC on P1, thread 0's outputs, which a thread
+   sees a tick after they are written, and drives Y on P3. A wait on CLK
+   low completes in the first low tick; one tick of delay and the next
+   instruction writes Y in the tick in which thread 0 raises CLK and writes
+   X, so all three change together. Each bit is four instructions in five
+   ticks: wait for CLK low, write, wait for CLK high, and one more. Before
+   bit 0 thread 0 may be waiting for the host with CLK low: Y is then 0, bit
+   0's value, until CLK rises.
+
+   Config: [xy2_y_config]: out_base 3, set_base 3; threshold 16; out most
+   significant bit first; the CRC register as thread 0's; CLKDIV as thread
+   0's. *)
+let xy2_y =
+  {|
+        wait 0 pin 1                    ; SYNC low: before the first frame
+frame:  wait 0 pin 0 [1]                ; CLK low in the last bit, or idle
+        set pins, 0                     ; bit 0, as CLK rises
+        wait 1 pin 0
+        wait 0 pin 0 [1]
+        set pins, 0                     ; bit 1
+        wait 1 pin 0
+        pull                            ; the position, from thread 0
+        wait 0 pin 0 [1]
+        set pins, 1                     ; bit 2
+        wait 1 pin 0
+        mov crc, null                   ; the parity starts again
+bit:    wait 0 pin 0 [1]
+        out pins, 1                     ; bits 3 to 18
+        wait 1 pin 0
+        jmp !osre bit
+        wait 0 pin 0 [1]
+        mov pins, crc                   ; bit 19, the parity
+        wait 1 pin 0
+        jmp frame
+|}
+;;
+
+let xy2_x_config ~clkdiv =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 2
+  ; out_base = 2
+  ; out_count = 1
+  ; set_base = 2
+  ; set_count = 1
+  ; threshold = 16
+  ; out_msb_first = true
+  ; crc_poly = 1
+  ; crc_init = 1
+  ; clkdiv
+  }
+;;
+
+let xy2_y_config ~clkdiv =
+  { (xy2_x_config ~clkdiv) with sideset_base = 0; sideset_count = 0; out_base = 3; set_base = 3 }
+;;
+
+(* The two programs, each at address 0 of its own thread's memory. *)
+module Xy2 = struct
+  let x = Asm.assemble xy2_x
+  let y = Asm.assemble xy2_y
+
+  (* X's and Y's positions, as signed 16-bit numbers, as TX words. *)
+  let words points = List.concat_map points ~f:(fun (x, y) -> [ x land 0xFFFF; y land 0xFFFF ])
+end
+
+(* A digital caliper's data port, as cheap calipers send it: the chip is
+   the caliper, sending a reading the host gives. A packet is 24 bits, least
+   significant first, each read as CLK rises: the reading in bits 15:0 (bits
+   19:16 are 0 here: no reading above 655.35 mm), the sign in bit 20 (1 for
+   negative), 0 in bits 21 and 22, and the unit in bit 23 (1 for inches).
+   The reading counts hundredths of a millimetre, or halves of a
+   thousandth of an inch. CLK rests high between packets.
+
+   Pins: P0 = CLK (side-set), P1 = DATA, push-pull. Config:
+   [caliper_config]: sideset_base 0, sideset_count 1; out_base 1;
+   threshold 16; shifts least significant bit first. A bit is 8 ticks, CLK
+   low for 4 with DATA changed as it falls, and high for 4; calipers clock
+   at about 77 kHz, a bit of 13 us: CLKDIV 16 at 10 MHz (12.8 us), 81 at
+   50 MHz (12.96 us).
+
+   Host protocol: two TX words a packet: the reading, then a word with
+   bit 0 set for a negative reading and bit 1 for inches. The firmware
+   places those two bits in the packet's top byte in the ISR, and sends
+   that byte from the ISR's bottom bit, shifting it down. After each
+   packet CLK stays high for 64 bit times or more (0.8 ms at 13 us), so
+   that a reader can tell where the next one starts. *)
+let caliper =
+  {|
+        .side_set 1
+next:   pull               side 1       ; the reading
+        mov y, osr         side 1
+        pull               side 1       ; bit 0 negative, bit 1 inches
+        in null, 4         side 1       ; the packet's bits 16 to 19: 0
+        out x, 1           side 1
+        in x, 1            side 1       ; bit 20: the sign
+        in null, 2         side 1       ; 21 and 22: 0
+        out x, 1           side 1
+        in x, 1            side 1       ; bit 23: inches
+        in null, 8         side 1       ; those eight at the ISR's bottom
+        mov osr, y         side 1
+        set y, 7           side 1
+bit:    out pins, 1        side 0 [3]   ; bits 0 to 15: DATA as CLK falls,
+        jmp !osre bit      side 1 [3]   ; read as it rises
+top:    mov pins, isr      side 0 [3]   ; bits 16 to 23
+        in null, 1         side 1 [2]
+        jmp y-- top        side 1
+        set x, 31          side 1
+rest:   nop                side 1 [7]   ; 64 bit times
+        jmp x-- rest       side 1 [7]
+        jmp next           side 1
+|}
+;;
+
+let caliper_config ~clkdiv =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 1
+  ; out_base = 1
+  ; out_count = 1
+  ; threshold = 16
+  ; clkdiv
+  }
+;;
+
+(* The two TX words for a reading of [counts] (0 to 65535). *)
+let caliper_words ~counts ~negative ~inches =
+  [ counts; Bool.to_int negative lor (Bool.to_int inches lsl 1) ]
+;;
+
+(* MIPI I3C controller, SDR mode: START, the broadcast address 0x7E and
+   the CCCs sent after it, ENTDAA to give targets their dynamic
+   addresses, private writes and reads to a target at its dynamic address,
+   repeated START and STOP. What I3C has and I2C does not is done here: the
+   ninth bit after a byte the controller writes is T, odd parity over the
+   byte, computed by the CRC register; after a byte a target returns it is
+   the target's end-of-data bit, and the controller ends a read the target
+   would go on with by pulling SDA low while SCL is high in that bit; and
+   ENTDAA reads each target's 48-bit provisioned ID, BCR and DCR as 64
+   bits that the targets arbitrate for, then sends the dynamic address with
+   its parity bit.
+
+   Pins: P0 = SDA, open-drain; P1 = SCL, push-pull, driven by side-set.
+   SDA stays open-drain for the whole frame. The specification wants a
+   controller to drive SDA push-pull for data and switch to open drain for
+   the address arbitration and the ACK, but a pin's drive mode here is set
+   by the host and no instruction can change it, so a frame on this chip
+   is open-drain throughout. The levels on the wire are the same; what
+   changes is that a rising SDA edge comes from the pull-up, so every bit
+   is timed to the specification's open-drain limits, not its push-pull
+   ones (below).
+
+   Config: [i3c_config]: out_base 0, out_count 1, set_base 0, set_count 1,
+   in_base 0 (SDA); sideset_base 1, sideset_count 1 (SCL); threshold 16;
+   out and in most significant bit first; CRC polynomial 1 from 0, read
+   inverted, so the register is the parity of the bits OUT shifted and a
+   read of it is the odd parity bit; start [i3c_idle]; TIMEOUT 0 and
+   timeout_vector [i3c_ended], which makes [wait ... timeout] a branch on
+   SDA. CLKDIV makes a tick 100 ns or more: 1 at 10 MHz, 5 at 50 MHz.
+
+   Timing. A bit is SCL low for 3 ticks and high for 2 (the ninth bits and
+   those around a START longer), so 2 MHz with a 100 ns tick, at 10 MHz or
+   50 MHz alike. That is the fastest the open-drain timing allows: SCL low
+   at least 200 ns (tLOW_OD) and, in the address after a START, high at
+   least 200 ns (tHIGH_INIT). It is not I3C's 12.5 MHz, which needs
+   push-pull SDA, and at 50 MHz a 5-tick bit could not reach it anyway
+   (10 MHz at CLKDIV 1). SDA changes one tick after SCL falls and two
+   before it rises. START and repeated START hold SDA low two ticks before
+   SCL falls (tCAS, under ENTAS0's 1 us); SCL is high two ticks or more
+   before STOP and repeated START. A bus with I2C devices on it is not
+   supported: their spike filters need SCL high under 50 ns.
+
+   Host protocol: a frame is a segment word, then that segment's data
+   words if it writes, then further segments, each after a repeated START,
+   and finally the STOP word. The first word after STOP must be a segment.
+     segment : bit 15 = 1; bits 14:7 the address byte (address << 1 |
+               R/W); bit 6 = R/W again; bits 5:0 for a read the most bytes
+               to read (1 to 63), 0 for an ENTDAA round (address 0x7E,
+               read). [i3c_segment]
+     data    : bits 15:14 = 00, bits 13:6 a byte to write; the firmware
+               adds its T bit. [i3c_data]
+     STOP    : 0x4000. [i3c_stop]
+     address : in an ENTDAA round, once the round's 0x7E has been
+               ACKed: the dynamic address in bits 15:9, bit 8 clear; the
+               firmware adds its parity bit. [i3c_address_word]
+   RX words:
+     after every address : 0 ACK, 1 NACK. A segment NACKed has its data
+               words taken from the FIFO unsent, up to the next segment or
+               STOP, which is then done as usual.
+     after a byte read   : byte << 1 | T. T = 1 the target had more;
+               T = 0 it ended the read there, and no more words come for
+               that segment. The last byte asked for has T as the target
+               sent it, and the controller ends the read whatever it was.
+     an ENTDAA round ACKed : four words of 16 bits, the 64 bits the target
+               won the arbitration with (provisioned ID 47:32, 31:16, 15:0,
+               then BCR << 8 | DCR), then the ACK of the dynamic address.
+   A round NACKed means no target wants an address: the host sends STOP.
+
+   Where it waits. Every PULL and PUSH comes with SCL low, just after a
+   ninth bit (an ACK, a T bit) or, in ENTDAA, after the round's ACK, so a
+   host that falls behind stretches the low half of the clock at a place
+   the specification lets a controller stall it. The 64 bits of an ENTDAA
+   round are pushed as they come; a host that pops the round's ACK before
+   it sends the address leaves the FIFO room for all four.
+
+   Not supported: in-band interrupts and hot-join (an address a target
+   wins in the arbitrable header is reported as an ACK or NACK, no more),
+   HDR modes, and I2C devices on the bus. *)
+let i3c =
+  {|
+        .side_set 1
+stop:   set pins, 0         side 0 [1] ; STOP: SDA low while SCL is low,
+        nop                 side 1 [1] ; SCL high,
+        set pins, 1         side 1     ; then SDA rises while SCL is high
+idle:   pull                side 1     ; bus free: a frame's first segment
+        out null, 1         side 1     ; (its kind bit)
+start:  set pins, 0         side 1 [1] ; START: SDA falls while SCL is high
+        set y, 7            side 0     ; SCL falls; the address and R/W bit
+abit:   out pins, 1         side 0 [1] ; SDA = the next bit while SCL is low
+        nop                 side 1 [1] ; SCL high
+        jmp y-- abit        side 0     ; SCL falls
+ack:    set pins, 1         side 0 [1] ; ACK slot: SDA released
+        nop                 side 1     ; SCL rises
+        in pins, 1          side 1     ; the ACK (0) or NACK (1), for the host
+        wait 0 pin 0 timeout side 1    ; NACK: on to [ended]
+        push                side 0     ; SCL falls
+        out x, 1            side 0     ; the segment's R/W bit
+        jmp !x next         side 0     ; a write: its data words follow
+        out x, 6            side 0     ; a read: the bytes to read; 0 is ENTDAA
+        jmp !x entdaa       side 0
+        jmp x-- rbyte       side 0     ; X = bytes to read after this one
+entdaa: pull                side 0     ; the dynamic address to give
+        set x, 3            side 0     ; first 64 bits from the targets,
+pword:  set y, 15           side 0     ; four words of 16
+        jmp rbit            side 0
+rbyte:  set y, 7            side 0     ; a byte from the target
+rbit:   nop                 side 0 [1] ; SCL low: the target drives SDA
+        nop                 side 1     ; SCL rises
+        in pins, 1          side 1     ; the bit
+        jmp y-- rbit        side 0     ; SCL falls
+        jmp !osre pid       side 0     ; ENTDAA (the OSR holds the address): 16 bits in
+        nop                 side 0     ; T bit: the target drives it
+        nop                 side 1     ; SCL rises
+        in pins, 1          side 1     ; T: 1 the target has more, 0 it is done
+        jmp x-- more        side 1     ; another byte wanted?
+        set pins, 0         side 1 [1] ; no: SDA low while SCL is high ends the read
+ended:  push                side 0     ; SCL falls: the byte and T, or a NACK
+        set y, 0            side 0     ; drop data words up to a segment or STOP
+next:   pull                side 0     ; SCL low: the next word
+        out x, 1            side 0     ; a segment: repeated START
+        jmp x-- sr          side 0
+        out x, 1            side 0     ; STOP
+        jmp x-- stop        side 0
+        jmp !y next         side 0     ; a data word after a NACK or a read: dropped
+        set y, 7            side 0     ; a data byte (X = 0xFFFF)
+par:    mov crc, null       side 0     ; the parity starts here
+dbit:   out pins, 1         side 0 [1] ; SDA = the next bit while SCL is low
+        nop                 side 1 [1] ; SCL high
+        jmp y-- dbit        side 0     ; SCL falls
+        mov pins, crc       side 0 [1] ; T: odd parity, from the CRC register
+        nop                 side 1 [1]
+        jmp !x ack          side 0     ; ENTDAA's address (X = 0): the target ACKs it
+        jmp next            side 0
+sr:     set pins, 1         side 0 [1] ; repeated START: SDA released while SCL is low,
+        nop                 side 1 [1] ; SCL high,
+        jmp start           side 1     ; then SDA falls
+more:   wait 1 pin 0 timeout side 1    ; T = 0: on to [ended]
+        push                side 0     ; SCL falls: the byte and T
+        jmp rbyte           side 0
+pid:    push                side 0     ; 16 of the 64 bits
+        jmp x-- pword       side 0
+        set y, 6            side 0     ; then the dynamic address, 7 bits,
+        set x, 0            side 0     ; its parity and the target's ACK
+        jmp par             side 0
+|}
+;;
+
+(* Addresses in [i3c]: where the thread starts, and the timeout vector,
+   which [wait 0/1 pin 0 timeout] with TIMEOUT 0 jumps to when SDA is not
+   the level waited for. The tests check they still point there. *)
+let i3c_idle = 3
+let i3c_ended = 35
+
+let i3c_config ~clkdiv =
+  { Isa.Thread_config.default with
+    start = i3c_idle
+  ; out_base = 0
+  ; out_count = 1
+  ; set_base = 0
+  ; set_count = 1
+  ; in_base = 0
+  ; sideset_base = 1
+  ; sideset_count = 1
+  ; threshold = 16
+  ; out_msb_first = true
+  ; in_msb_first = true
+  ; timeout = 0
+  ; timeout_vector = i3c_ended
+  ; crc_poly = 1
+  ; crc_init = 0
+  ; crc_invert = true
+  ; clkdiv
+  }
+;;
+
+(* Host words for [i3c]. [count] is for a read: the most bytes to read,
+   1 to 63; 0 makes the segment an ENTDAA round, at 0x7E. *)
+let i3c_segment ~address ~read ~count =
+  0x8000 lor (((address lsl 1) lor Bool.to_int read) lsl 7) lor (Bool.to_int read lsl 6) lor count
+;;
+
+let i3c_data byte = (byte land 0xFF) lsl 6
+let i3c_stop = 0x4000
+let i3c_address_word address = (address land 0x7F) lsl 9
+let i3c_broadcast = 0x7E
+
+(* Odd parity: the T bit after a byte written, and ENTDAA's parity bit
+   after a dynamic address, make the count of ones odd. *)
+let i3c_odd_parity ~bits value =
+  1 lxor (List.init bits ~f:(fun k -> (value lsr k) land 1) |> List.fold ~init:0 ~f:( lxor ))
+;;
+
+(* SAE J2716 SENT, a sensor's transmitter: one line, frames of nibbles
+   each told by the time from one falling edge to the next. A frame is a
+   calibration pulse of 56 ticks, a status nibble, the data nibbles and a
+   CRC-4 nibble, then a pause pulse; a nibble of value v lasts 12 + v
+   ticks. Every pulse is low for 5 ticks and high for the rest.
+
+   Pins: P0 = the SENT line, push-pull; it idles high. Config:
+   [sent_tx_config]: set_base 0, set_count 1; threshold 16; out most
+   significant bit first; the CRC register at x^4 + x^3 + x^2 + 1
+   ([sent_crc_poly]), from [sent_crc_init]. A thread tick is half a SENT
+   tick: CLKDIV 15 for the nominal 3 us tick at 10 MHz, 75 at 50 MHz; 450
+   at 10 MHz for the longest the standard has, 90 us.
+
+   Host protocol:
+     TX : once, N - 1, where N is the number of data nibbles in a frame (1
+          to 6 in the standard). Then for each frame its status nibble and
+          its N data nibbles, four to a word, the first in bits 15:12
+          ([sent_words]); what is left of a frame's last word is not sent.
+     RX : nothing.
+
+   The CRC is the chip's: SAE J2716's recommended CRC-4, seed 0101, over
+   the data nibbles but not the status, with a nibble of zeros after them.
+   The CRC register follows each bit OUT shifts, most significant first.
+   It takes each bit in at the top, as if a nibble of zeros followed, so
+   it starts from the seed times x^4, 0011, and needs no zeros at the end.
+   It shifts right, so it holds the CRC with its bits reversed, and starts
+   from 0011 reversed. The status nibble is taken with one OUT of four bits, whose first bit the
+   register takes before the next instruction starts it again. A data
+   nibble's high time is its four bits one at a time: 8, 4, 2 and 1 ticks
+   for those that are 1. The CRC's bits come out of the register least
+   significant first, so its nibble waits 1, 2, 4 and 8.
+
+   The pause pulse makes the frame 120 ticks longer: the standard allows
+   12 to 768, and sigrok's decoder finds the end of a frame only at a pulse
+   of more than 100. While the host has no frame the line stays high, so a
+   pause lasts until the next frame. Within a frame a word is needed every
+   four nibbles; one that comes late stretches the low time of the nibble
+   that waits for it. *)
+let sent_tx =
+  {|
+        set pins, 1             ; the line idles high
+        pull                    ; N - 1, once
+        mov isr, osr            ; kept in the ISR
+frame:  pull                    ; a frame: the status nibble first
+        set pins, 0 [9]         ; 0: calibration pulse, low for 5 ticks
+        set pins, 1             ; 10
+        set y, 22               ; 11
+cal:    jmp y-- cal [3]         ; 12..103
+        nop [7]                 ; 104..111: 56 ticks in all
+        set pins, 0             ; 0: the status nibble
+        out x, 4                ; 1: its value; the CRC takes its first bit
+        mov crc, null           ; 2: and starts again
+        nop [6]                 ; 3..9
+        set pins, 1             ; 10
+st:     jmp x-- st [1]          ; 11..12+2s
+        mov x, isr [10]         ; ..23+2s: N - 1 data nibbles after the next
+data:   set pins, 0             ; 0: a data nibble
+        jmp !osre have          ; 1
+        pull                    ; 2: four nibbles to a word
+        jmp low                 ; 3
+have:   nop [1]                 ; 2..3
+low:    nop [5]                 ; 4..9
+        set pins, 1             ; 10
+        out y, 1                ; 11: its bits, most significant first;
+        jmp !y d4               ; 12  the CRC takes each
+        nop [15]                ; 8 ticks for an 8
+d4:     out y, 1
+        jmp !y d2
+        nop [7]
+d2:     out y, 1
+        jmp !y d1
+        nop [3]
+d1:     out y, 1
+        jmp !y dend
+        nop [1]
+dend:   jmp x-- data [4]        ; ..23+2v
+        set pins, 0             ; 0: the CRC nibble
+        mov osr, crc            ; 1: in bits 3:0, reversed; the CRC stops
+        out null, 12            ; 2
+        nop [6]                 ; 3..9
+        set pins, 1             ; 10
+        out y, 1                ; 11: its least significant bit,
+        jmp !y c2               ; 12
+        nop [1]                 ; 1 tick
+c2:     out y, 1
+        jmp !y c4
+        nop [3]
+c4:     out y, 1
+        jmp !y c8
+        nop [7]
+c8:     out y, 1
+        jmp !y cend
+        nop [15]
+cend:   nop [4]                 ; ..23+2c
+        set pins, 0 [9]         ; 0: the pause pulse
+        set pins, 1             ; 10
+        set y, 13               ; 11
+pause:  jmp y-- pause [15]      ; 12..235
+        jmp frame [2]           ; 236..238; the next frame's pull, 239
+|}
+;;
+
+(* The CRC register for SENT's CRC-4: x^4 + x^3 + x^2 + 1 (1101 below the
+   x^4), and the seed 0101 with the nibble of zeros folded in (0011), both
+   reversed because the register shifts right. *)
+let sent_crc_poly = 0b1011
+let sent_crc_init = 0b1100
+
+let sent_tx_config ~clkdiv =
+  { Isa.Thread_config.default with
+    set_base = 0
+  ; set_count = 1
+  ; threshold = 16
+  ; out_msb_first = true
+  ; crc_poly = sent_crc_poly
+  ; crc_init = sent_crc_init
+  ; clkdiv
+  }
+;;
+
+(* A frame's TX words: the status nibble and the data nibbles, four to a
+   word, the first in bits 15:12. *)
+let sent_words ~status data =
+  let nibbles = status :: data in
+  List.chunks_of nibbles ~length:4
+  |> List.map ~f:(fun chunk ->
+    List.foldi chunk ~init:0 ~f:(fun i acc n -> acc lor ((n land 0xF) lsl (12 - (4 * i)))))
+;;
+
+(* SAE J1850 VPW, the GM and Chrysler OBD-II bus, a transmitting node at
+   10.4 kbit/s: start of frame, the bytes as symbols that alternate between
+   active and passive, each 64 or 128 us, the CRC-8 byte, end of data.
+
+   Pins: P0 = the bus driver's input, push-pull, high = active. The bus
+   idles passive (low); a transceiver turns this into the bus's 7 V. A
+   passive symbol is a 0 when short and a 1 when long, an active one the
+   other way round, so a byte (eight symbols, the first passive) always
+   ends active. Config: [j1850_tx_config]: set_base 0, set_count 1;
+   threshold 8; out most significant bit first; the CRC register at
+   SAE J1850's 0x1D reversed ([j1850_crc_poly]) from 0xFF, read inverted.
+   A thread tick is 1 us: CLKDIV 10 at 10 MHz, 50 at 50 MHz.
+
+   Host protocol, for each frame:
+     TX : N, the number of bytes before the CRC (1 to 11), then the bytes,
+          one to a word in bits 15:8 ([j1850_words]): the header (priority,
+          target, source), the mode and the data.
+     RX : one word, 0, once the frame's last symbol has ended.
+
+   Ticks are counted from the instruction that drives a symbol, tick 0.
+   Start of frame: active for 200. Then each symbol runs to the next's
+   tick 0, at 64 or 128. The end of each active symbol is spent on the
+   bookkeeping, 35 ticks on every path: whether the byte has bits left,
+   whether there is another byte, and fetching it. The CRC register
+   follows every bit OUT shifts. After the last data byte it is read into
+   the OSR, where its bits are in the reverse of the order they go out in,
+   so the same 35 ticks turn them round: each goes through Y into the ISR,
+   which shifts the other way, and back to the OSR. Then the CRC goes out
+   like any byte. End of data: passive. The next frame's start comes 312
+   us or more later, past the 300 of the interframe space; so does the
+   first, after the thread starts.
+
+   It sends only: it does not watch the bus for an idle one before it
+   starts, or give way to a node that wins arbitration. A word the host
+   is late with stretches the active symbol that ends a byte. *)
+let j1850_tx =
+  {|
+        set pins, 0             ; passive
+        jmp quiet               ; and quiet for as long as between frames
+next:   pull                    ; N
+        mov isr, osr            ; bytes after this one, the CRC counted
+        pull                    ; the first byte
+        mov crc, null           ; the CRC from 0xFF
+        set pins, 1             ; 0: start of frame, active
+        set x, 23               ; 1
+sof:    jmp x-- sof [7]         ; 2..193
+        nop [5]                 ; 194..199
+pas:    set pins, 0             ; 0: a passive symbol
+        out y, 1                ; 1: its bit; the CRC takes it
+        jmp !y p0               ; 2
+        set x, 14               ; 3: a 1 is long, 64 ticks more
+p1:     jmp x-- p1 [3]          ; 4..63
+        nop [2]                 ; 64..66
+p0:     set x, 14               ; 3
+pw:     jmp x-- pw [3]          ; 4..63
+act:    set pins, 1             ; 0: an active symbol
+        out y, 1                ; 1
+        jmp !y a0               ; 2
+a1:     set x, 5                ; 3: a 1 is short
+aw:     jmp x-- aw [3]          ; 4..27
+        nop                     ; 28
+        jmp !osre bits          ; 29: the 35 ticks before the next symbol
+        mov x, isr              ; 30
+        jmp x-- byte            ; 31
+        nop [15]                ; 32..47: the CRC has gone
+        nop [15]                ; 48..63
+        set pins, 0             ; 0: end of data, passive
+        push                    ; 1: the frame is sent
+quiet:  set x, 18               ; 2
+ifs:    jmp x-- ifs [15]        ; 3..306
+        jmp next                ; 307: the next start of frame at 312
+byte:   mov isr, x              ; 32
+        jmp !x crc8             ; 33: the CRC is next
+        pull                    ; 34: the next byte
+        nop [15]                ; 35..50
+        nop [11]                ; 51..62
+        jmp pas                 ; 63
+crc8:   mov osr, crc            ; 34: inverted; the CRC stops
+        out null, 8             ; 35: the top half, all ones
+        set x, 7                ; 36
+rev:    out y, 1                ; 37..60: eight bits from the OSR's top,
+        in y, 1                 ;   each into the ISR's top
+        jmp x-- rev
+        mov osr, isr            ; 61: the CRC, first bit topmost
+        mov isr, null           ; 62: no byte after it
+        jmp pas                 ; 63
+bits:   nop [15]                ; 30..45
+        nop [15]                ; 46..61
+        jmp pas [1]             ; 62..63
+a0:     set x, 14               ; 3: a 0 is long, 64 ticks more
+al:     jmp x-- al [3]          ; 4..63
+        jmp a1 [2]              ; 64..66
+|}
+;;
+
+(* SAE J1850's CRC-8: 0x1D written low power first, reversed because the
+   register shifts right; from 0xFF, sent inverted. *)
+let j1850_crc_poly = 0xB8
+
+let j1850_tx_config ~clkdiv =
+  { Isa.Thread_config.default with
+    set_base = 0
+  ; set_count = 1
+  ; threshold = 8
+  ; out_msb_first = true
+  ; crc_poly = j1850_crc_poly
+  ; crc_init = 0xFF
+  ; crc_invert = true
+  ; clkdiv
+  }
+;;
+
+(* A frame's TX words: its bytes before the CRC. *)
+let j1850_words bytes = List.length bytes :: List.map bytes ~f:(fun b -> (b land 0xFF) lsl 8)
 
 (* 10BASE-T Ethernet transmitter: a whole frame on the wire from firmware.
    Preamble, start-of-frame delimiter, the frame Manchester coded at
@@ -3448,6 +4406,386 @@ let eth_rx_frame (words : int list) =
   | _ -> Error "fewer than three words"
 ;;
 
+(* Compact JTAG (IEEE 1149.7) as the debug probe: two pins, TCKC and TMSC,
+   in the OScan1 format. The chip brings a TAP.7 online with escape
+   sequences and the online activation code, then runs JTAG scans the way
+   [jtag] does, each JTAG clock as an OScan1 packet of three TCKC clocks on
+   the one data line: the inverse of TDI, then TMS, both from the chip, then
+   TDO from the target.
+
+   An escape is TMSC toggled while TCKC is high: eight edges reset the
+   TAP.7, six select it. The activation is OpenOCD's for its cJTAG
+   adapters: the reset escape, three clocks, the selection escape and
+   twelve bits, the online activation code for OScan1 (0, 0, 1, 1, first
+   bit first), the extension code (0, 0, 0, 1) and the check packet (0, 0,
+   0, 0). J-Link's short activation sends the same twelve bits.
+
+   TMSC changes only while TCKC is low, a tick after it fell: never in a
+   tick where TCKC moves, except at the start of the TDO bit, where the
+   chip lets go of TMSC as TCKC falls and the target takes it over, as the
+   standard has the two sides change over at that edge.
+
+   Pins: P0 = TCKC (side-set, push-pull); P1 = TMSC (open-drain, with a
+   pull-up: a 1 releases it, which is how the target gets the line for
+   TDO). Config: [cjtag_config]: sideset_base 0, sideset_count 1; set_base
+   1, set_count 1; out_base 1, out_count 1; in_base 1; threshold 16.
+
+   Host protocol:
+     TX word 0x8000 : bring the target online in OScan1 (no RX word).
+     TX word N - 1  : a scan of N JTAG clocks (1 to 32768), then ceil(N /
+                      8) words of (TDI, TMS) pairs, LSB first: bits 2k and
+                      2k + 1 are TDI and TMS for the k-th clock of the
+                      word ([cjtag_words] builds them).
+     RX             : ceil(N / 8) words of TDO, one bit per clock, LSB
+                      first, as [jtag] returns them.
+
+   Timing: an OScan1 packet is 13 ticks, TCKC high for one tick in each of
+   its three clocks: 770 kHz of JTAG clocks (2.3 MHz TCKC) at 10 MHz with
+   CLKDIV 1, five times that at 50 MHz. TDO is sampled three ticks after
+   TCKC falls, just before it rises; it passes the input synchroniser, so
+   the target must drive it within one core clock of TCKC falling at
+   CLKDIV 1 (CLKDIV 2 gives it three). *)
+let cjtag =
+  {|
+        .side_set 1
+next:   pull                side 0     ; a command
+        out x, 15           side 0     ; clocks - 1
+        out y, 1            side 0     ; bit 15: bring the target online
+        jmp !y word         side 0
+        set pins, 0         side 0     ; TMSC low while TCKC is low
+        set y, 3            side 1     ; TCKC rises
+reset:  set pins, 1         side 1     ; reset escape: eight edges while TCKC is high
+        set pins, 0         side 1
+        jmp y-- reset       side 1
+        set y, 2            side 0     ; TCKC falls
+pad:    nop                 side 1     ; three clocks with TMSC low
+        jmp y-- pad         side 0
+        set y, 2            side 1     ; TCKC rises
+select: set pins, 1         side 1     ; selection escape: six edges
+        set pins, 0         side 1
+        jmp y-- select      side 1
+        set y, 1            side 0     ; TCKC falls
+oac0:   nop                 side 1     ; OAC bits 0 and 1: 0
+        jmp y-- oac0        side 0
+        set pins, 1         side 0
+        set y, 1            side 0
+oac1:   nop                 side 1     ; OAC bits 2 and 3: 1
+        jmp y-- oac1        side 0
+        set pins, 0         side 0
+        set y, 2            side 0
+ec0:    nop                 side 1     ; EC bits 0 to 2: 0
+        jmp y-- ec0         side 0
+        set pins, 1         side 0
+        nop                 side 1     ; EC bit 3: 1
+        nop                 side 0
+        set pins, 0         side 0
+        set y, 3            side 0
+cp:     nop                 side 1     ; the check packet: four 0s
+        jmp y-- cp          side 0
+        set pins, 1         side 0     ; TMSC released: online, in OScan1
+        jmp next            side 0
+word:   pull                side 0     ; up to 8 clocks of (TDI, TMS)
+bit:    out y, 1            side 0     ; TDI
+        jmp !y tdi0         side 0
+        set pins, 0         side 0     ; nTDI: TMSC low for a 1
+        jmp ntdi            side 1     ; TCKC rises: the target takes it
+tdi0:   set pins, 1         side 0     ; and high for a 0
+        nop                 side 1
+ntdi:   nop                 side 0     ; TCKC falls
+        out pins, 1         side 0     ; TMS
+        nop                 side 1     ; TCKC rises: the target takes it
+        set pins, 1         side 0     ; TCKC falls, TMSC released: the target drives TDO
+        nop                 side 0 [1] ; through the input synchroniser
+        in pins, 1          side 1     ; TCKC rises: TDO sampled just before
+        jmp x-- more        side 0     ; TCKC falls: the target lets go
+        push                side 0     ; the scan is done: its last TDO bits
+        jmp next            side 0
+more:   jmp !osre bit       side 0
+        push                side 0     ; 8 TDO bits
+        jmp word            side 0
+|}
+;;
+
+let cjtag_config =
+  { Isa.Thread_config.default with
+    sideset_base = 0
+  ; sideset_count = 1
+  ; set_base = 1
+  ; set_count = 1
+  ; out_base = 1
+  ; out_count = 1
+  ; in_base = 1
+  ; threshold = 16
+  }
+;;
+
+let cjtag_activate = 0x8000
+
+(* Host-side words for a scan: [tms] and [tdi] give one bit per clock. *)
+let cjtag_words ~tms ~tdi =
+  let n = List.length tms in
+  assert (n = List.length tdi && n >= 1 && n <= 32768);
+  let pairs = List.zip_exn tdi tms |> List.chunks_of ~length:8 in
+  (n - 1)
+  :: List.map pairs ~f:(fun chunk ->
+    List.foldi chunk ~init:0 ~f:(fun k acc (d, m) ->
+      acc lor (Bool.to_int d lsl (2 * k)) lor (Bool.to_int m lsl ((2 * k) + 1))))
+;;
+
+(* PJDL timing: (tick in us, data bit in ticks, pad bit in ticks) for each
+   of the specification's four communication modes. Modes 1 to 3 count in
+   4 us ticks, mode 4 in 2 us: data bits of 44, 40, 28 and 26 us, pads of
+   116, 92, 88 and 60 us. *)
+let pjdl_timing ~mode =
+  match mode with
+  | 1 -> 4, 11, 29
+  | 2 -> 4, 10, 23
+  | 3 -> 4, 7, 22
+  | 4 -> 2, 13, 30
+  | _ -> invalid_arg "PJDL modes are 1 to 4"
+;;
+
+(* A PJON node sending packets over PJDL (Padded Jittering Data Link), the
+   one-wire link of the PJON protocol, in one of PJDL's four modes. The
+   line idles low. A packet is a frame initializer, three synchronization
+   pads (a pad bit high, then a data bit low), then its bytes, each a
+   synchronization pad and eight data bits, least significant first. Every
+   time is exact to the tick: the pad bit 116, 92, 88 or 60 us and the data
+   bit 44, 40, 28 or 26 us in modes 1 to 4 ([pjdl_timing]). test/pjdl.hex
+   is mode 4.
+
+   The PJON packet: receiver ID, header configuration, length, the meta CRC
+   (a CRC8 of the three bytes before it), then sender ID, port, packet ID
+   and payload as the configuration has them, then the end CRC. The
+   program puts in both CRCs, with PJON's CRC8 (polynomial 0x97, written
+   low power first, from 0), which is the one PJON uses for packets of 15
+   bytes or less; above that PJON asks for CRC32, which this program does
+   not send. The CRC register follows each data bit as it goes out, and
+   not the pads. After the meta CRC it starts again from 0, which is what
+   it would hold anyway: a CRC from 0 with no final inversion, run over
+   bytes and then their own CRC, comes back to 0. So the end CRC covers the
+   whole packet, as PJON's does.
+
+   The length byte is the host's, as CAN's DLC is: the program counts the
+   bytes it sends by it. Before every packet the line is low for longer
+   than a byte (a pad and ten data bits), the time PJDL asks a free line to
+   have been quiet, and the time after which a receiver takes a frame to
+   have ended. The program does not listen for a free line first, ask for
+   or wait for an acknowledgement, or receive: its pin drives both levels,
+   and PJDL's other nodes need the line released to a pull-down, which no
+   pin mode of the chip does.
+
+   Pins: P0 = the line, push-pull. Config: [pjdl_config]: set_base 0,
+   set_count 1; out_base 0, out_count 1; threshold 8; crc_poly 0x97,
+   crc_init 0; CLKDIV makes a tick 4 us (2 us in mode 4): 40 (20) at 10
+   MHz, 200 (100) at 50 MHz.
+
+   Host protocol: one TX word for each byte of the packet except the two
+   CRCs, in order: receiver ID, header configuration, length (the whole
+   packet's, CRCs included, 5 to 15), and the rest. Each byte must be in
+   the FIFO by the time its pad begins. RX: one word for each packet when
+   it has gone out, its end CRC. *)
+let pjdl ~mode =
+  let _, d, p = pjdl_timing ~mode in
+  (* Instructions taking [n] ticks in all. *)
+  let fill n =
+    List.init ((n + 15) / 16) ~f:(fun i ->
+      sprintf "        nop [%d]\n" (min 16 (n - (16 * i)) - 1))
+    |> String.concat
+  in
+  sprintf
+    {|
+start:  set pins, 0             ; the line low: idle
+idle:   set y, %d
+gap:    jmp y-- gap [15]        ; for longer than a byte before a packet
+        pull                    ; the receiver ID: a packet begins
+        mov crc, null           ; the CRC register from 0
+        set y, 2
+init:   set pins, 1 [%d]        ; the frame initializer: three pads
+%s        set pins, 0 [%d]        ; each with its low data bit
+        jmp y-- init
+        set pins, 1             ; tick 0 of a byte: its pad begins
+        set y, 2                ; three bytes before the meta CRC
+        jmp first
+hdr:    pull
+first:  mov x, osr              ; tick 3; the last of them is the length
+%s        set pins, 0 [%d]        ; the sync pad's low data bit
+hbit:   out pins, 1 [%d]        ; a data bit
+        jmp !osre hbit
+        set pins, 1             ; tick 0 of the next pad
+        jmp y-- hdr
+        mov osr, crc            ; tick 2: the meta CRC; the register stops
+        jmp x-- m1              ; X: the length less 5, the bytes
+m1:     jmp x-- m2              ; still to come from the host
+m2:     jmp x-- m3
+m3:     jmp x-- m4
+m4:     jmp x-- m5
+m5:
+%s        set pins, 0 [%d]
+mbit:   out pins, 1 [%d]
+        jmp !osre mbit
+        set pins, 1
+        mov crc, null           ; tick 1: from 0 again, as it is over the bytes so far
+pnext:  jmp !x end              ; tick 2: no more bytes from the host
+        pull
+        jmp x-- p1
+p1:
+%s        set pins, 0 [%d]
+pbit:   out pins, 1 [%d]
+        jmp !osre pbit
+        set pins, 1
+        jmp pnext
+end:    mov osr, crc            ; tick 3: the end CRC
+        mov x, osr
+        in x, 8                 ; for the host too
+%s        set pins, 0 [%d]
+ebit:   out pins, 1 [%d]
+        jmp !osre ebit
+        set pins, 0             ; the line low again: the packet has gone
+        push
+        jmp idle
+|}
+    ((((p + (10 * d)) + 15) / 16) - 1)
+    (min 15 (p - 1))
+    (fill (p - 1 - min 15 (p - 1)))
+    (d - 2)
+    (fill (p - 4))
+    (d - 1)
+    (d - 2)
+    (fill (p - 8))
+    (d - 1)
+    (d - 2)
+    (fill (p - 5))
+    (d - 1)
+    (d - 2)
+    (fill (p - 6))
+    (d - 1)
+    (d - 2)
+;;
+
+let pjdl_config ~mode ~clock_hz =
+  let tick_us, _, _ = pjdl_timing ~mode in
+  { Isa.Thread_config.default with
+    set_base = 0
+  ; set_count = 1
+  ; out_base = 0
+  ; out_count = 1
+  ; threshold = 8
+  ; crc_poly = 0x97
+  ; crc_init = 0
+  ; clkdiv = clock_hz / 1_000_000 * tick_us
+  }
+;;
+
+(* The TX words for a PJON packet to [receiver] with [payload], from
+   [sender] if there is one (header configuration bit 1, sender info). *)
+let pjdl_words ?sender ~receiver payload =
+  let info = Option.to_list sender in
+  [ receiver; (if Option.is_some sender then 0x02 else 0x00); 5 + List.length info + List.length payload ]
+  @ info
+  @ payload
+;;
+
+(* NXP's LFAST link sending SIPI frames (SIPI, also called Zipwire: reads
+   and writes of another chip's memory over LFAST), at LFAST's low speed,
+   5 Mbit/s. An LFAST frame is NRZ, most significant bit first: the sync
+   pattern 0xA84B, a header byte (the payload's size, the logical channel,
+   CTS), the payload, and a sleep bit. Here the payload is a SIPI frame: a
+   header word (tag, command, channel), the address and data the command
+   has, and a CRC-16 over all of them: CCITT's polynomial, from all ones,
+   most significant bit first, as SIPI has it.
+
+   The program makes the sync pattern, the timing, the CRC and the sleep
+   bit (0: no request for the LVDS sleep mode), after which the line is
+   low for twelve bit times or more before the next frame. LFAST puts no
+   number on that time; twelve is for sigrok's decoder, which ends a frame
+   that ends without an edge by a timeout of up to eight bit times, and
+   takes an edge before then into the frame.
+
+   The CRC register works least significant bit first, so it runs with
+   the polynomial reversed (0x8408) and holds the CRC reversed: its bit 0
+   is the CRC's top bit, the first to go out. The ISR turns it round:
+   [mov isr, crc], then for each bit the ISR's bit 0 goes to the pin and
+   [in null, 1] shifts the ISR right by one.
+
+   LFAST is a differential LVDS pair: the pin is TXP's level, for an LVDS
+   driver. A real link also shares a reference clock between the two chips,
+   which the chip does not provide, and answers on a second pair, which
+   this program does not read: it sends.
+
+   Pins: P0 = the line, push-pull, low when idle. Config: [lfast_config]:
+   out_base 0, out_count 1; set_base 0, set_count 1; threshold 16; out
+   most significant bit first; crc_poly 0x8408, crc_init 0xFFFF.
+   A bit is 5 ticks: CLKDIV 2 at 50 MHz for 5 Mbit/s.
+
+   Host protocol, per frame:
+     TX word 0 : the LFAST header byte in bits 15:8 (payload size code,
+                 logical channel, CTS, as the frame has them), and in bits
+                 4:0 the number of words that follow, less one
+     then      : the SIPI frame without its CRC, 16 bits a word, most
+                 significant first: its header, then the address and the
+                 data.
+   The payload size in the header must be the SIPI frame's bytes, CRC
+   included: 2 x (words + 1), so 1, 3, 5, 7, 15, 17 or 31 words for LFAST's
+   sizes of 4 to 64 bytes. A word is taken as the one before it ends,
+   one every 80 ticks, faster than the host port can push them: the
+   driver fills the packet buffer and plays it into the FIFO. *)
+let lfast =
+  {|
+next:   set pins, 0             ; the line low: idle
+        pull                    ; the LFAST header, and the SIPI frame's words less one
+        set pins, 1 [4]         ; the sync pattern, 1010 1000 0100 1011, 5 ticks a bit
+        set pins, 0 [4]
+        set pins, 1 [4]
+        set pins, 0 [4]
+        set pins, 1 [4]
+        set pins, 0 [15]
+        set y, 6 [3]
+        set pins, 1 [4]
+        set pins, 0 [9]
+        set pins, 1 [4]
+        set pins, 0 [4]
+        set pins, 1 [9]
+hb:     out pins, 1 [3]         ; the header byte
+        jmp y-- hb
+        out pins, 1             ; its last bit, 5 ticks with the next four
+        out x, 8                ; X: the SIPI frame's words less one
+        mov crc, null           ; the CRC covers the SIPI frame alone
+        nop
+word:   pull                    ; a word of the SIPI frame
+bit:    out pins, 1 [1]         ; its bits
+        jmp !osre more
+        jmp x-- word
+        mov isr, crc            ; the last bit has gone: the CRC, its top bit in bit 0
+crc:    mov pins, isr [2]
+        in null, 1
+        jmp !isrf crc
+        set pins, 0 [4]         ; the sleep bit: 0
+        set y, 3
+gap:    jmp y-- gap [14]        ; and the line idle for twelve bits
+        jmp next
+more:   jmp bit [1]
+|}
+;;
+
+let lfast_config ~clkdiv =
+  { Isa.Thread_config.default with
+    out_base = 0
+  ; out_count = 1
+  ; set_base = 0
+  ; set_count = 1
+  ; threshold = 16
+  ; out_msb_first = true
+  ; crc_poly = 0x8408
+  ; crc_init = 0xFFFF
+  ; clkdiv
+  }
+;;
+
+(* The TX words for an LFAST frame with [header] carrying the SIPI frame
+   [words] (its CRC left out). *)
+let lfast_words ~header (words : int list) = ((header lsl 8) lor (List.length words - 1)) :: words
+
 let all =
   [ "uart_tx", uart_tx
   ; "echo", echo
@@ -3485,6 +4823,19 @@ let all =
   ; "bitstream", bitstream
   ; "tdm_tx", tdm_tx
   ; "tlc5620", tlc5620
+  ; "sirc_tx", sirc_tx
+  ; "sle4442", sle4442
   ; "pwm", pwm
   ; "nes_pad", nes_pad
+  ; "sbus_tx", sbus_tx
+  ; "dshot", dshot
+  ; "xy2_x", xy2_x
+  ; "xy2_y", xy2_y
+  ; "caliper", caliper
+  ; "i3c", i3c
+  ; "sent_tx", sent_tx
+  ; "j1850_tx", j1850_tx
+  ; "cjtag", cjtag
+  ; "pjdl", pjdl ~mode:4
+  ; "lfast", lfast
   ]

@@ -140,14 +140,25 @@ class Trace:
                 last[k] = v
 
     def decode(self, decoder, annotations=None, start=0, end=None, invert=(),
-               then_fall=None, extra=False):
+               then_fall=None, extra=False, srzip=False):
         """decoder: sigrok-cli's -P argument, e.g. 'can:can_rx=rxd'. Returns
         [(start, end, text)] in the decoder's order, in this trace's sample
-        numbers. extra=True decodes with the decoders in EXTRA_DIR."""
+        numbers. extra=True decodes with the decoders in EXTRA_DIR.
+
+        srzip=True converts the VCD to sigrok's own session format first.
+        From a VCD file sigrok-cli starts a decoder before it tells it the
+        sample rate; a decoder that needs the rate in start() (DShot's)
+        fails there, and from a session file it has it."""
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "trace.vcd")
             self.vcd(path, start, end, invert, then_fall)
-            cmd = ["sigrok-cli", "-i", path, "-I", "vcd", "-P", decoder,
+            source = ["-i", path, "-I", "vcd"]
+            if srzip:
+                sr = os.path.join(d, "trace.sr")
+                subprocess.run(["sigrok-cli"] + source + ["-o", sr, "-O", "srzip"],
+                               check=True, capture_output=True)
+                source = ["-i", sr]
+            cmd = ["sigrok-cli"] + source + ["-P", decoder,
                    "--protocol-decoder-samplenum"]
             if annotations:
                 cmd += ["-A", annotations]

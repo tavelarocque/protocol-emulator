@@ -39,8 +39,10 @@ fetch i3c https://github.com/xyphro/Sigrok-I3C-decoder 0b43721ec0e52f79bdacb6453
 rm -rf "$OUT"
 mkdir -p "$OUT"
 cp -r "$SRC/libsigrokdecode/decoders/." "$OUT/"
-mkdir "$OUT/sent_ext" "$OUT/dshot_ext"
-cp "$SRC/sent/__init__.py" "$SRC/sent/pd.py" "$SRC/sent/crc4.py" "$OUT/sent_ext/"
-cp "$SRC/dshot/__init__.py" "$SRC/dshot/pd.py" "$OUT/dshot_ext/"
-cp -r "$SRC/i3c/i3c" "$OUT/i3c_ext"
+# sigrok-cli loads a decoder by importing the folder named as the id it is
+# given, so a folder must have its decoder's id for its name.
+mkdir "$OUT/sae_j2716_sent" "$OUT/dshot"
+cp "$SRC/sent/__init__.py" "$SRC/sent/pd.py" "$SRC/sent/crc4.py" "$OUT/sae_j2716_sent/"
+cp "$SRC/dshot/__init__.py" "$SRC/dshot/pd.py" "$OUT/dshot/"
+cp -r "$SRC/i3c/i3c" "$OUT/i3c"
 echo "extra decoders in $OUT"

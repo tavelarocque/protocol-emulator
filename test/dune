@@ -346,3 +346,107 @@
   (with-stdout-to
    tlc5620.hex
    (run %{dep:../bin/firmware_hex.exe} tlc5620))))
+
+(rule
+ (targets sbus_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   sbus_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} sbus_tx))))
+
+(rule
+ (targets dshot.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dshot.hex
+   (run %{dep:../bin/firmware_hex.exe} dshot))))
+
+(rule
+ (targets xy2_x.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   xy2_x.hex
+   (run %{dep:../bin/firmware_hex.exe} xy2_x))))
+
+(rule
+ (targets xy2_y.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   xy2_y.hex
+   (run %{dep:../bin/firmware_hex.exe} xy2_y))))
+
+(rule
+ (targets caliper.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   caliper.hex
+   (run %{dep:../bin/firmware_hex.exe} caliper))))
+
+(rule
+ (targets i3c.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i3c.hex
+   (run %{dep:../bin/firmware_hex.exe} i3c))))
+
+(rule
+ (targets sent_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   sent_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} sent_tx))))
+
+(rule
+ (targets j1850_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   j1850_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} j1850_tx))))
+
+(rule
+ (targets sirc_tx.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   sirc_tx.hex
+   (run %{dep:../bin/firmware_hex.exe} sirc_tx))))
+
+(rule
+ (targets sle4442.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   sle4442.hex
+   (run %{dep:../bin/firmware_hex.exe} sle4442))))
+
+(rule
+ (targets cjtag.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   cjtag.hex
+   (run %{dep:../bin/firmware_hex.exe} cjtag))))
+
+(rule
+ (targets pjdl.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   pjdl.hex
+   (run %{dep:../bin/firmware_hex.exe} pjdl))))
+
+(rule
+ (targets lfast.hex)
+ (mode promote)
+ (action
+  (with-stdout-to
+   lfast.hex
+   (run %{dep:../bin/firmware_hex.exe} lfast))))

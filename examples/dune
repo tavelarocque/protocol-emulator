@@ -322,3 +322,107 @@
   (with-stdout-to
    tlc5620.s
    (run %{dep:../bin/firmware_src.exe} tlc5620 %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets sbus_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   sbus_tx.s
+   (run %{dep:../bin/firmware_src.exe} sbus_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets dshot.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   dshot.s
+   (run %{dep:../bin/firmware_src.exe} dshot %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets xy2_x.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   xy2_x.s
+   (run %{dep:../bin/firmware_src.exe} xy2_x %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets xy2_y.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   xy2_y.s
+   (run %{dep:../bin/firmware_src.exe} xy2_y %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets caliper.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   caliper.s
+   (run %{dep:../bin/firmware_src.exe} caliper %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets i3c.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   i3c.s
+   (run %{dep:../bin/firmware_src.exe} i3c %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets sent_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   sent_tx.s
+   (run %{dep:../bin/firmware_src.exe} sent_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets j1850_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   j1850_tx.s
+   (run %{dep:../bin/firmware_src.exe} j1850_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets sirc_tx.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   sirc_tx.s
+   (run %{dep:../bin/firmware_src.exe} sirc_tx %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets sle4442.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   sle4442.s
+   (run %{dep:../bin/firmware_src.exe} sle4442 %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets cjtag.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   cjtag.s
+   (run %{dep:../bin/firmware_src.exe} cjtag %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets pjdl.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   pjdl.s
+   (run %{dep:../bin/firmware_src.exe} pjdl %{dep:../model/firmware.ml}))))
+
+(rule
+ (targets lfast.s)
+ (mode promote)
+ (action
+  (with-stdout-to
+   lfast.s
+   (run %{dep:../bin/firmware_src.exe} lfast %{dep:../model/firmware.ml}))))

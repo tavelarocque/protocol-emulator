@@ -1051,6 +1051,12 @@ sys.path.insert(0, os.path.join(HERE, "..", "host"))
 import protocol_emulator as pe
 import more_protocols as more
 import extra_protocols as extra
+import i2c2_protocols as i2c2
+import motion_protocols as motion
+import i3c_protocols
+import auto_protocols as auto
+import misc_protocols as misc
+import link_protocols as link
 import sigrok  # noqa: E402
 
 try:
@@ -1527,6 +1533,153 @@ async def test_jtag_ejtag(dut):
         wrong = texts(jtag_tdo_bit(trace, a, b, 9, 0).decode(stack, rows))
         assert wrong == want[:-1] + ["PrAcc: Load/Fetch, A: 0xFF200000, D: 0x4200001F"], wrong
 
+
+# --- Compact JTAG: the chip as an IEEE 1149.7 probe, two pins -------------------
+
+CJTAG_IDCODE = 0x15A0E83D  # made up for this test; bit 0 is 1, as 1149.1 requires
+
+
+class Tap7:
+    """A TAP.7 on two pins, written from IEEE 1149.7's rules for escapes,
+    online activation and the OScan1 format, with [tap] (a JtagTap, from
+    1149.1) behind it. TMSC edges are counted while TCKC is high and acted
+    on when it falls: eight or more reset the TAP.7 (and its TAP), six or
+    seven select it, four or five deselect it. After a selection the next
+    twelve bits on rising edges are the activation code, extension code and
+    check packet; 0011 0001 0000 (first bit first) brings it online in
+    OScan1. Online, each JTAG clock is three TCKC clocks: nTDI and TMS are
+    taken as TCKC rises, and the target drives TDO from the falling edge
+    that starts the third to the one that ends it. Any TMSC change in the
+    sample TCKC rises, and one to three edges while it is high (no escape
+    this target has), are errors."""
+
+    def __init__(self, tap):
+        self.tap = tap
+        self.mode, self.code = "offline", []
+        self.tckc, self.tmsc, self.edges = 0, 1, 0
+        self.slot, self.ntdi, self.tms, self.drive, self.clocked = 0, 0, 0, None, False
+        self.events, self.errors = [], []
+
+    def _rise(self):
+        if self.mode == "activating":
+            self.code.append(self.tmsc)
+            if len(self.code) == 12:
+                if self.code == [0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0]:
+                    self.mode, self.slot = "online", 0
+                    self.events.append("online in OScan1")
+                else:
+                    self.mode = "offline"
+                    self.events.append(f"activation code {self.code} refused")
+        elif self.mode == "online":
+            if self.slot == 0:
+                self.ntdi, self.slot = self.tmsc, 1
+            elif self.slot == 1:
+                self.tms, self.slot = self.tmsc, 2
+            else:  # the probe has taken TDO: the JTAG clock rises
+                self.tap.rise(self.tms, 1 - self.ntdi)
+                self.clocked, self.slot = True, 0
+
+    def _fall(self):
+        e = self.edges
+        if 1 <= e <= 3:
+            self.errors.append(f"{e} TMSC edges while TCKC was high")
+        elif e in (4, 5):
+            self.mode = "offline"
+            self.events.append("deselection escape")
+        elif e in (6, 7):
+            self.mode, self.code = "activating", []
+            self.events.append("selection escape")
+        elif e >= 8:
+            self.mode = "offline"
+            for _ in range(5):
+                self.tap.rise(1, 0)
+                self.tap.fall()
+            self.events.append("reset escape")
+        if e:
+            self.slot = 0
+        self.edges = 0
+        self.drive = self.tap.tdo if self.mode == "online" and self.slot == 2 else None
+        if self.clocked:
+            self.tap.fall()
+            self.clocked = False
+
+    def step(self, tckc, tmsc):
+        if tckc and not self.tckc:
+            if tmsc != self.tmsc:
+                self.errors.append("TMSC changed as TCKC rose")
+            self.tmsc = tmsc
+            self._rise()
+        elif self.tckc and not tckc:
+            self._fall()
+        elif tckc and tmsc != self.tmsc:
+            self.edges += 1
+        self.tckc, self.tmsc = tckc, tmsc
+
+
+async def tap7_wires(dut, tap7):
+    """[tap7] on the cJTAG probe's pins: TCKC from pin 0; TMSC on pin 1,
+    pulled up, low when the chip or the target drives it low. Looked at
+    mid-cycle; the target answers a falling edge of TCKC at once, half a
+    core clock after it."""
+    while True:
+        await FallingEdge(dut.clk)
+        out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+        chip_low = (oe >> 1) & 1 and not (out >> 1) & 1
+        tap7.step(out & oe & 1, 0 if chip_low or tap7.drive == 0 else 1)
+        drive_pin(dut, 1, 0 if chip_low or tap7.drive == 0 else 1)
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_cjtag(dut):
+    """Compact JTAG: the chip brings a TAP.7 online in OScan1 with escape
+    sequences and the activation code, then reads its IDCODE, selects
+    BYPASS and shifts through it, every JTAG clock three TCKC clocks on
+    one data line. TCKC at about 2.3 MHz (13 ticks a JTAG clock at 10 MHz,
+    CLKDIV 1). The TAP.7 is written here from IEEE 1149.7 with an 1149.1
+    TAP behind it; sigrok's cJTAG decoder reads TCKC and TMSC and must
+    follow the activation into OScan1 and read the same scans."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    tap7 = Tap7(JtagTap(4, 0b0101, 0b0001, {0b0001: (32, lambda: CJTAG_IDCODE, None)}))
+    wires = cocotb.start_soon(tap7_wires(dut, tap7))
+    trace = sigrok.Trace(dut, {"tckc": lambda: int(dut.uio_out.value) & int(dut.uio_oe.value) & 1,
+                               "tmsc": lambda: (int(dut.uio_in.value) >> 1) & 1})
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        probe = link.CJtagController(chip, firmware("cjtag"))
+        probe.activate()
+        probe.reset()
+        return (probe.shift_dr(0, 32), probe.shift_ir(0b1111, 4), probe.shift_dr(0b1011, 4))
+
+    idcode, ir, bypass = await session()
+    await ClockCycles(dut.clk, 20)
+    trace.stop()
+    wires.cancel()
+    assert tap7.events == ["reset escape", "selection escape", "online in OScan1"], tap7.events
+    assert tap7.errors == [], tap7.errors
+    assert (idcode, ir, bypass) == (CJTAG_IDCODE, 0b0101, 0b0110), (hex(idcode), ir, bypass)
+    if sigrok.extra_available():
+        decoder = "cjtag:tckc=tckc:tmsc=tmsc"
+        modes = ("FOUR_WIRE", "CJTAG_OAC", "CJTAG_EC", "CJTAG_CP", "OSCAN1")
+        steps = lambda found: [t for i, t in enumerate(texts(found)) if t in modes
+                               and t not in texts(found)[:i]]
+        scans = lambda found: [t for t in texts(found) if re.match(r"(IR|DR) TD[IO]: ", t)]
+        found = trace.decode(decoder, extra=True)
+        assert steps(found) == list(modes), steps(found)
+        want = ["DR TDI: %s (0x0), 32 bits" % ("0" * 32),
+                "DR TDO: {0:032b} (0x{0:x}), 32 bits".format(CJTAG_IDCODE),
+                "IR TDI: 1111 (0xf), 4 bits", "IR TDO: 0101 (0x5), 4 bits",
+                "DR TDI: 1011 (0xb), 4 bits", "DR TDO: 0110 (0x6), 4 bits"]
+        assert scans(found) == want, scans(found)
+        # TMSC held high as the target sends IDCODE bit 1, a 0: the decoder
+        # must read a different IDCODE.
+        a, b = next((a, b) for a, b, text in found if text.startswith("DR TDO: 0001"))
+        bits = [s for s, e, _ in trace.decode(decoder, "cjtag=bit-tdo", extra=True) if a <= s < b]
+        wrong = scans(trace.forced("tmsc", bits[1] - 1, bits[1] + 1, 1).decode(decoder, extra=True))
+        assert wrong[1] == "DR TDO: {0:032b} (0x{0:x}), 32 bits".format(CJTAG_IDCODE | 2), wrong
 
 
 # --- SWD: the chip as an Arm Serial Wire Debug host ---------------------------
@@ -4523,6 +4676,105 @@ async def test_hdmi_cec(dut):
         assert "14:04" not in wrong, wrong
 
 
+def pjon_crc8(data):
+    """PJON's CRC8, written here from its reference code: each byte into
+    the low bits, then eight shifts right, adding 0x97 when a 1 falls out."""
+    crc = 0
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = (crc >> 1) ^ (0x97 if crc & 1 else 0)
+    return crc
+
+
+@cocotb.test(timeout_time=100, timeout_unit="ms")
+async def test_pjon_pjdl(dut):
+    """A PJON packet over PJDL in mode 4 (pads 60 us, data bits 26 us): the
+    chip sends the frame initializer, a synchronization pad before every
+    byte, and the meta and end CRC8s; the host sends the receiver ID, the
+    header configuration, the length, the sender ID and the payload.
+    sigrok's PJDL decoder, with its PJON decoder on top, must read every
+    field, find both CRCs right and warn about nothing."""
+    await reset(dut)
+    # The line has a pull-down: low while the chip does not drive it.
+    trace = sigrok.Trace(dut, {"data": lambda: int(dut.uio_out.value) & int(dut.uio_oe.value) & 1})
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        return link.PjonPjdl(chip, firmware("pjdl")).send(42, [0x68], sender=1)
+
+    got = await session()
+    await ClockCycles(dut.clk, 3_200)  # a byte's time of idle line ends the frame
+    trace.stop()
+    header = [42, 0x02, 7]
+    packet = header + [pjon_crc8(header), 1, 0x68]
+    assert got == pjon_crc8(packet), (hex(got), hex(pjon_crc8(packet)))
+    if sigrok.extra_available():
+        decoder = "pjdl:data=data:mode=4,pjon"
+        found = trace.decode(decoder, "pjon", extra=True)
+        want = ["RX_ID 42", "CFG - - - - - - tx_info -", "LENGTH 7 (PAYLOAD 1)",
+                "META_CRC %02x" % pjon_crc8(header), "TX_ID 1", "PAYLOAD 68",
+                "END_CRC %02x" % pjon_crc8(packet), "RX 42 - TX 1 - DATA 68"]
+        assert texts(found) == want, texts(found)
+        # The line held high for bit 0 of the payload byte (a 0): the
+        # decoders must read 69 and find the end CRC wrong.
+        a = next(a for a, b, text in found if text == "PAYLOAD 68")
+        s, e = next((s, e) for s, e, _ in trace.decode(decoder, "pjdl=bit_data", extra=True) if s >= a)
+        wrong = texts(trace.forced("data", s, e, 1).decode(decoder, "pjon", extra=True))
+        assert "PAYLOAD 69" in wrong and any("CRC mismatch" in t for t in wrong), wrong
+
+
+@cocotb.test(timeout_time=20, timeout_unit="ms")
+async def test_lfast_sipi(dut):
+    """SIPI frames over LFAST at its low speed, 5 Mbit/s: the chip at 50 MHz,
+    10 clocks a bit (CLKDIV 2). A write, a read and a request for the JTAG
+    ID, back to back from the packet buffer. The chip makes each frame's
+    sync pattern, the SIPI CRC-16 and the sleep bit. sigrok's LFAST decoder
+    times the bits from the first one and its SIPI decoder on top must read
+    every field and find every CRC right."""
+    await reset(dut, period_ps=20_000)
+    trace = sigrok.Trace(dut, {"data": lambda: int(dut.uio_out.value) & int(dut.uio_oe.value) & 1},
+                         clock_hz=50_000_000)
+    chip = pe.Chip(sim_port(dut))
+    L = link.LfastSipi
+    frames = [L.write_frame(0x40001000, 0xDEADBEEF, tag=1, channel=1),
+              L.read_frame(0x40001000, tag=2, channel=1), L.id_frame(tag=3)]
+
+    @bridge
+    def session():
+        L(chip, firmware("lfast")).send(frames)
+
+    await session()
+    await ClockCycles(dut.clk, 4_000)
+    trace.stop()
+    # Every level lasts a whole number of 10-clock bits, but for the idle
+    # line between two frames.
+    edges = [t for t, _ in trace.level("data")][1:]
+    odd = [b - a for a, b in zip(edges, edges[1:]) if (b - a) % 10]
+    assert len(odd) == 2 and all(d > 40 for d in odd), odd
+    if sigrok.extra_available():
+        fields = "lfast=sync:header_pl_size:header_ch_type:header_cts:sleep:warning"
+        found = trace.decode("lfast:data=data,sipi", fields, extra=True)
+        lfast = ["Sync OK", "96 bit / 12 byte", "Data Channel A", "0", "No LVDS sleep mode request",
+                 "Sync OK", "64 bit / 8 byte", "Data Channel A", "0", "No LVDS sleep mode request",
+                 "Sync OK", "32 bit / 4 byte", "Data Channel A", "0", "No LVDS sleep mode request"]
+        assert texts(found) == lfast, texts(found)
+        found = trace.decode("lfast:data=data,sipi", "sipi", extra=True)
+        sipi = ["01", "Write 4 byte with ACK", "1", "40", "00", "10", "00", "DE", "AD", "BE", "EF", "CRC OK",
+                "02", "Read 4 byte", "1", "40", "00", "10", "00", "CRC OK",
+                "03", "Read 4-byte JTAG ID", "0", "CRC OK"]
+        assert texts(found) == sipi, texts(found)
+        # The line held high through the first data byte's top bit (DE's,
+        # a 1, then its next, a 1, then a 0): the third bit held high makes
+        # FE, and the CRC no longer fits.
+        a, b = next((a, b) for a, b, text in found if text == "DE")
+        bit = (b - a) // 8
+        wrong = texts(trace.forced("data", a + 2 * bit, a + 3 * bit, 1).decode("lfast:data=data,sipi", "sipi",
+                                                                              extra=True))
+        assert "FE" in wrong and "DE" not in wrong and "CRC OK" not in wrong[:12], wrong
+
+
 # --- Devices on the engines the chip already had ------------------------------
 #
 # A device's own protocol on top of a bus: no new firmware, only what the
@@ -5054,6 +5306,183 @@ async def test_hdcp(dut):
         a, b = i2c_bit(trace, at, 4)
         wrong = texts(trace.forced("sda", a, b, 0).decode(decoder, "hdcp"))
         assert wrong == want[:-1] + ["1.4 Bksv - Receiver KSV"], wrong
+
+
+class AnyOf(frozenset):
+    """Equal to each of its members: a device model's address when the
+    part answers more than one (cocotbext-i2c compares with ==)."""
+
+    def __eq__(self, other):
+        return other in set(self)
+
+    __hash__ = frozenset.__hash__
+
+
+class Ltc2607(I2cDevice):
+    """An LTC2607 dual 16-bit DAC's I2C side, written from its data sheet.
+    It only receives: it answers its own address and the global address
+    0x73, and takes three bytes, a command and DAC address (C3-C0, A3-A0)
+    and the code, most significant byte first. Commands: 0 writes input
+    register n, 1 updates DAC register n from it and powers it up, 3 does
+    both, 4 powers n down, 15 does nothing. n is 0 for DAC A, 1 for B, 15
+    for both. At power-on both DACs are at zero scale."""
+
+    def __init__(self, address, **pins):
+        self.addr = AnyOf({address, 0x73})
+        self.input, self.dac, self.powered, self.word = [0, 0], [0, 0], [False, False], []
+        super().__init__(**pins)
+
+    def handle_start(self):
+        self.word = []
+
+    async def handle_write(self, data):
+        self.word.append(data)
+        if len(self.word) != 3:
+            return
+        command, n, code = self.word[0] >> 4, self.word[0] & 15, (self.word[1] << 8) | self.word[2]
+        for k in ([0, 1] if n == 15 else [n] if n < 2 else []):
+            if command in (0, 3):
+                self.input[k] = code
+            if command in (1, 3):
+                self.dac[k], self.powered[k] = self.input[k], True
+            if command == 4:
+                self.powered[k] = False
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_ltc2607_dac(dut):
+    """A Linear Technology LTC2607 dual 16-bit DAC on the I2C controller,
+    written from its data sheet, with its address pins set GND, VCC, GND
+    (0x22). As Linear's own driver does, the host writes and updates DAC A
+    in one command, writes DAC B's input register alone (its output must
+    not move), then sends Update to both DACs at the global address, as a
+    board with several of the parts does to change their outputs at once.
+    sigrok's LTC26x7 decoder, on its I2C decoder, must name the address
+    pins, each command and DAC, and the voltage of each code."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    chip, transfer, write_bytes, _ = await i2c_session(
+        dut, 0x22, device=lambda **pins: Ltc2607(0x22, **pins))
+    reports = await transfer(write_bytes([0x30, 0xC0, 0x00]))  # write and update DAC A
+    assert chip.dac == [0xC000, 0] and chip.powered == [True, False]
+    await ClockCycles(dut.clk, 200)
+    reports += await transfer(write_bytes([0x01, 0x40, 0x00]))  # DAC B's input register
+    assert chip.input[1] == 0x4000 and chip.dac == [0xC000, 0]
+    await ClockCycles(dut.clk, 200)
+    # Update, both DACs; the data bytes are sent and not used.
+    reports += await transfer([i2c_write_word(0x73 << 1, False)] + [
+        i2c_write_word(b, k == 2) for k, b in enumerate([0x1F, 0x00, 0x00])])
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert chip.dac == [0xC000, 0x4000] and chip.powered == [True, True]
+    assert len(reports) == 12 and not any(r & 0x100 for r in reports), reports  # every byte acknowledged
+    if sigrok.extra_available():
+        decoder = "i2c,ltc26x7:vref=4.096"
+        # The decoder reads the Update's unused data as a code for both DACs.
+        want = ["CA2=GND CA1=VCC CA0=GND", "Write and Power Up DAC", "DAC A", "3.072047V",
+                "CA2=GND CA1=VCC CA0=GND", "Write Input Register", "DAC B", "1.024016V",
+                "Global address", "Update DAC", "All DACs", "0.000000V", "0.000000V"]
+        found = trace.decode(decoder, "ltc26x7", extra=True)
+        assert texts(found) == want, texts(found)
+        # The first command's bit 5 held low: 0x10, Update, not Write and Update.
+        at = next(a for a, _, text in found if text == "Write and Power Up DAC")
+        a, b = i2c_bit(trace, at, 2)
+        wrong = texts(trace.forced("sda", a, b, 0).decode(decoder, "ltc26x7", extra=True))
+        assert wrong == want[:1] + ["Update DAC"] + want[2:], wrong
+
+
+class Mcp23017(I2cDevice):
+    """A Microchip MCP23017 16-bit port expander, written from its data
+    sheet, in its power-on register map (IOCON.BANK = 0, A and B registers
+    paired, 0x00 to 0x15). The register pointer is the first byte written
+    and moves on after every byte, wrapping after 0x15 (IOCON.SEQOP = 0).
+    A write to GPIO sets OLAT; INTF and INTCAP cannot be written. GPIO
+    reads an output pin's latch, and an input pin's level, inverted where
+    IPOL says: [pressed] are the pins a switch pulls low, and every other
+    input reads its pull-up if GPPU turns it on, else low. IODIR is all
+    inputs at power-on."""
+
+    NAMES = ["IODIR", "IPOL", "GPINTEN", "DEFVAL", "INTCON", "IOCON", "GPPU", "INTF", "INTCAP",
+             "GPIO", "OLAT"]
+
+    def __init__(self, address, pressed, **pins):
+        self.addr, self.pressed = address, pressed
+        self.regs = [0] * 22
+        self.regs[0] = self.regs[1] = 0xFF  # IODIRA, IODIRB
+        self.pointer, self.first = 0, False
+        super().__init__(**pins)
+
+    def reg(self, name, port):
+        return self.regs[2 * self.NAMES.index(name) + port]
+
+    def pins(self, port):
+        """The levels on port A (0) or B (1)."""
+        inputs = (self.reg("GPPU", port) & ~self.pressed[port]) & 0xFF
+        iodir = self.reg("IODIR", port)
+        return (self.reg("OLAT", port) & ~iodir) | (inputs & iodir)
+
+    def handle_start(self):
+        self.first = True
+
+    async def handle_write(self, data):
+        if self.first:
+            self.pointer, self.first = data, False
+            return
+        name, port = self.NAMES[self.pointer // 2], self.pointer % 2
+        assert name != "IOCON" or not data & 0x80, "BANK = 1 is not modelled"
+        if name == "GPIO":
+            self.regs[self.pointer + 2] = data  # OLAT
+        elif name not in ("INTF", "INTCAP"):
+            self.regs[self.pointer] = data
+        if name == "IOCON":
+            self.regs[self.pointer ^ 1] = data  # one register at two addresses
+        self.pointer = (self.pointer + 1) % 22
+
+    async def handle_read(self):
+        name, port = self.NAMES[self.pointer // 2], self.pointer % 2
+        if name == "GPIO":
+            data = self.pins(port) ^ (self.reg("IPOL", port) & self.reg("IODIR", port))
+        else:
+            data = self.regs[self.pointer]
+        self.pointer = (self.pointer + 1) % 22
+        return data
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_mcp23017_expander(dut):
+    """A Microchip MCP23017 16-bit port expander on the I2C controller,
+    written from its data sheet, at 0x20, as a driver sets it up: port A
+    made outputs and port B inputs in one write (the register pointer moves
+    on by itself), port B's pull-ups on, a value written to port A, then
+    both ports read from GPIOA through a repeated START, with switches
+    pulling four of port B's pins low. sigrok's MCP230XX decoder must name
+    each register written and read, and its value."""
+    await reset(dut)
+    trace = i2c_trace(dut)
+    chip, transfer, write_bytes, read_bytes = await i2c_session(
+        dut, 0x20, device=lambda **pins: Mcp23017(0x20, [0x00, 0x3C], **pins))
+    await transfer(write_bytes([0x00, 0x00, 0xFF]))  # IODIRA, IODIRB
+    await ClockCycles(dut.clk, 200)
+    await transfer(write_bytes([0x0D, 0xFF]))  # GPPUB
+    await ClockCycles(dut.clk, 200)
+    await transfer(write_bytes([0x12, 0x5A]))  # GPIOA
+    await ClockCycles(dut.clk, 200)
+    reports = await transfer(read_bytes(0x12, 2))  # GPIOA, GPIOB
+    await ClockCycles(dut.clk, 2000)
+    trace.stop()
+    assert chip.pins(0) == 0x5A and chip.reg("OLAT", 0) == 0x5A
+    assert [rev8(r & 0xFF) for r in reports[3:]] == [0x5A, 0xC3], reports
+    if sigrok.extra_available():
+        decoder = "i2c,mcp230xx"
+        want = ["Write IODIRA: 00", "Write IODIRB: FF", "Write GPPUB: FF", "Write GPIOA: 5A",
+                "Read GPIOA: 5A", "Read GPIOB: C3"]
+        found = trace.decode(decoder, "mcp230xx", extra=True)
+        assert texts(found) == want, texts(found)
+        # The pointer of the port A write with its bit 1 held low: 0x10, INTCAPA.
+        at = [a for a, _, text in trace.decode("i2c") if text == "Data write: 12"][0]
+        a, b = i2c_bit(trace, at, 6)
+        wrong = texts(trace.forced("sda", a, b, 0).decode(decoder, "mcp230xx", extra=True))
+        assert wrong == want[:3] + ["Write INTCAPA: 5A"] + want[4:], wrong
 
 
 @cocotb.test(timeout_time=60, timeout_unit="ms")
@@ -6084,6 +6513,444 @@ async def test_avr_isp(dut):
         assert "Read fuse bits: 0x62" not in wrong and "Read fuse bits: 0xff" in wrong, wrong
 
 
+class Nrf905:
+    """An nRF905 radio's SPI side, from its product specification. As CSN
+    falls the status register goes out (AM in bit 7, DR in bit 5), and the
+    first byte is the instruction: W_CONFIG and R_CONFIG (0000AAAA,
+    0001AAAA) on the ten-byte RF configuration register from byte AAAA,
+    its reset values as listed; W_TX_PAYLOAD, R_TX_PAYLOAD, W_TX_ADDRESS,
+    R_TX_ADDRESS and R_RX_PAYLOAD (20h to 24h) from byte 0; CHANNEL_CONFIG
+    (1000pphc cccccccc), which sets PA_PWR, HFREQ_PLL and the 9-bit
+    channel in one go. A packet received for this node sets AM and DR,
+    and both fall once its payload has been clocked out. What the part
+    shifts out after the status byte of a write is not specified: high
+    here. transfer() takes one selection's bytes and returns its answer."""
+
+    def __init__(self):
+        self.config = bytearray(H("6c00442020e7e7e7e7e7"))
+        self.tx_address = bytearray(H("e7e7e7e7"))
+        self.tx_payload, self.rx_payload = bytearray(32), bytearray(32)
+        self.am = self.dr = 0
+
+    def received(self, payload):
+        self.rx_payload[:len(payload)] = payload
+        self.am = self.dr = 1
+
+    def transfer(self, sent):
+        cmd, data = sent[0], bytes(sent[1:])
+        out = bytes([self.am << 7 | self.dr << 5])
+        at = cmd & 0x0F
+        if cmd >> 4 == 0x0:
+            self.config[at:at + len(data)] = data[:10 - at]
+        elif cmd >> 4 == 0x1:
+            out += self.config[at:at + len(data)]
+        elif cmd == 0x20:
+            self.tx_payload[:len(data)] = data
+        elif cmd == 0x21:
+            out += self.tx_payload[:len(data)]
+        elif cmd == 0x22:
+            self.tx_address[:len(data)] = data
+        elif cmd == 0x23:
+            out += self.tx_address[:len(data)]
+        elif cmd == 0x24:
+            out += self.rx_payload[:len(data)]
+            if len(data) >= self.config[3] & 0x3F:  # RX_PW bytes clocked out
+                self.am = self.dr = 0
+        elif cmd >> 4 == 0x8:
+            self.config[0] = data[0]
+            self.config[1] = (self.config[1] & 0xF0) | (cmd & 0x0F)
+        return out
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_nrf905(dut):
+    """An nRF905 radio on the SPI controller, set up as a driver does in
+    standby: the whole RF configuration written (channel 108 at 433 MHz,
+    +10 dBm, 4-byte addresses and payloads, its own address, 16-bit CRC,
+    16 MHz crystal) and its first two bytes read back, the TX address and
+    a payload written; then a packet that has arrived is read out, and the
+    TX payload read back. The part is written from its product
+    specification. sigrok's nRF905 decoder must read every instruction,
+    the status byte the part sends with each, and every register field.
+    (CHANNEL_CONFIG is left out: the decoder's handler for it adds a tuple
+    to an integer and stops.)"""
+    radio = Nrf905()
+    sent = [H("00") + H("6c0c440404c0ffee02d8"), H("10") + bytes(2), H("22c0ffee01"), H("2048692100")]
+    transfers = [(s, radio.transfer(s)) for s in sent]
+    radio.received(b"ACK!")
+    for s in [H("24") + bytes(4), H("21") + bytes(4)]:
+        transfers.append((s, radio.transfer(s)))
+    # Read back: the two configuration bytes, the packet with AM and DR
+    # set, and the payload with both clear again.
+    assert [reply for _, reply in transfers] == [
+        H("00"), H("006c0c"), H("00"), H("00"), H("a0") + b"ACK!", H("0048692100")]
+    trace = await spi_device_session(dut, transfers)
+    if sigrok.extra_available():
+        stack = SPI_BUS + ",nrf905"
+        found = trace.decode(stack, "nrf905", extra=True)
+        no_change = "STAT = AM = 0 | DR = 0"
+        band = ("CFG_REG[0x1] -> AUTO_RETRAN = 0 (No retransmission) | RX_RED_PWR = 0 (Normal operation)"
+                " | PA_PWR = 3 (+10 dBm) | HFREQ_PLL = 0 (433 MHz) | CH_NO_8 = 0")
+        want = ["CMD: W_CONFIG (WC)", no_change, "CFG_REG[0x0] -> CH_NO = 108", band,
+                "CFG_REG[0x2] -> TX_AFW (TX addr width) = 4 | RX_AFW (RX addr width) = 4",
+                "CFG_REG[0x3] -> RW_PW (RX payload width) = 4", "CFG_REG[0x4] -> TX_PW (TX payload width) = 4",
+                "CFG_REG[0x5] -> RX_ADDR_0 = 192", "CFG_REG[0x6] -> RX_ADDR_1 = 255",
+                "CFG_REG[0x7] -> RX_ADDR_2 = 238", "CFG_REG[0x8] -> RX_ADDR_3 = 2",
+                "CFG_REG[0x9] -> CRC_MODE = 1 (16 CRC check bit) | CRC_EN = 1 (Enabled) | XOR = 3 (16 MHz)"
+                " | UP_CLK_EN = 0 (No external clock signal avail.) | UP_CLK_FREQ = 0 (4 MHz)",
+                "CMD: R_CONFIG (RC)", no_change, "CFG_REG[0x0] -> CH_NO = 108", band,
+                "CMD: W_TX_ADDRESS (WTA)", no_change, "Write TX addr: C0 FF EE 01",
+                "CMD: W_TX_PAYLOAD (WTP)", no_change, "Write TX payload.: 48 69 21 00",
+                "CMD: R_RX_PAYLOAD (RRP)", "STAT = AM = 1 | DR = 1", "Read RX payload: 41 43 4B 21",
+                "CMD: R_TX_PAYLOAD (RTP)", no_change, "Read TX payload: 48 69 21 00"]
+        assert texts(found) == want, texts(found)
+        # MISO held high through the packet: not what the part sent.
+        a, b = next((a, b) for a, b, text in found if text == "Read RX payload: 41 43 4B 21")
+        wrong = texts(trace.forced("miso", a, b, 1).decode(stack, "nrf905", extra=True))
+        assert wrong == [t.replace("41 43 4B 21", "FF FF FF FF") for t in want], wrong
+
+
+class SpiPart:
+    """A part on the SPI controller's pins (P0 SCK, P1 MOSI, P2 MISO, P3
+    CS_N with a pull-up) that takes MOSI as SCK rises and shifts MISO out
+    as SCK falls, most significant bit first, its first bit as CS_N falls.
+    A subclass says what it does: selected() gives the bytes it shifts out
+    from the fall of CS_N, rose(mosi) and fell() are told each edge of
+    SCK, deselected() the rise of CS_N, and pins() every cycle. MISO is high when it has nothing
+    to send. It counts SCK's edges in a selection, notes SCK's level as
+    CS_N falls, and keeps SCK's high and low times and its period, in ns.
+    Nothing is lost if it is stopped while the pins stand still."""
+
+    def __init__(self, dut):
+        self.dut, self.highs, self.lows, self.periods = dut, [], [], []
+        self.was_cs, self.was_sck, self.miso = 1, 0, 1
+
+    def selected(self):
+        return b""
+
+    def rose(self, mosi):
+        pass
+
+    def fell(self):
+        pass
+
+    def deselected(self):
+        pass
+
+    def pins(self, out, oe, cs):
+        pass
+
+    async def run(self):
+        dut = self.dut
+        while True:
+            await FallingEdge(dut.clk)  # mid-cycle: chip outputs have settled
+            self.now = get_sim_time("ns")
+            out, oe = int(dut.uio_out.value), int(dut.uio_oe.value)
+            sck, mosi = out & oe & 1, (out >> 1) & 1
+            cs = (out >> 3) & 1 if (oe >> 3) & 1 else 1
+            self.pins(out, oe, cs)
+            if self.was_cs and not cs:
+                self.sck_at_select, self.rises, self.falls = sck, 0, 0
+                self.edge = self.rise = None
+                self.bits = [(b >> k) & 1 for b in self.selected() for k in range(7, -1, -1)]
+                self.miso = self.bits.pop(0) if self.bits else 1
+            elif not cs and sck != self.was_sck:
+                if self.edge is not None:
+                    (self.highs if self.was_sck else self.lows).append(self.now - self.edge)
+                self.edge = self.now
+                if sck:
+                    if self.rise is not None:
+                        self.periods.append(self.now - self.rise)
+                    self.rise, self.rises = self.now, self.rises + 1
+                    self.rose(mosi)
+                else:
+                    self.falls += 1
+                    self.fell()
+                    self.miso = self.bits.pop(0) if self.bits else 1
+            elif cs and not self.was_cs:
+                self.deselected()
+            if cs:
+                self.miso = 1
+            dut.uio_in.value = (int(dut.uio_in.value) & ~4) | (self.miso << 2)
+            self.was_cs, self.was_sck = cs, sck
+
+
+def spi_slow_start(chip, half, out_count=3):
+    """The SPI controller of spi_controller.hex, mode 0, a bit taking
+    2 * half + 9 cycles. With out_count 4, every MOV of the firmware also
+    drives pin 4 low, which it does only while the host makes that pin an
+    output."""
+    chip.stop()
+    chip.load(firmware("spi_controller"))
+    chip.configure(set_base=0, set_count=1, out_base=1, out_count=out_count, in_base=2)
+    chip.set_pin_modes({0: pe.PUSH_PULL, 1: pe.PUSH_PULL, 3: pe.PUSH_PULL})
+    chip.run()
+    chip.push(half)
+
+
+def spi_slow_transfer(chip, data):
+    """One selection on spi_slow_start's controller: [data] out, the bytes
+    read back in."""
+    words = []
+    for i, b in enumerate(data):
+        chip.push(pe.rev8(b) | (int(i == len(data) - 1) << 8))
+        if i >= FIFO_DEPTH - 1:
+            words.append(chip.pop())
+    while len(words) < len(data):
+        words.append(chip.pop())
+    return bytes(pe.rev8(w & 0xFF) for w in words)
+
+
+def spi_part_trace(dut):
+    """The SPI controller's pins as SpiPart sees them, for sigrok."""
+    return sigrok.Trace(dut, {
+        "sck": lambda: int(dut.uio_out.value) & int(dut.uio_oe.value) & 1,
+        "mosi": lambda: (int(dut.uio_out.value) >> 1) & 1,
+        "miso": lambda: (int(dut.uio_in.value) >> 2) & 1,
+        "cs": lambda: (int(dut.uio_out.value) >> 3) & 1 if (int(dut.uio_oe.value) >> 3) & 1 else 1,
+    })
+
+
+def selection_rises(trace, n):
+    """The samples at which SCK rises in the [n]th selection, from 0."""
+    a, b = trace.low_pulses("cs")[n]
+    return [t for t, v in trace.level("sck") if v == 1 and a < t < b]
+
+
+class Ad5626(SpiPart):
+    """An AD5626 12-bit DAC, from its data sheet: while CS is low each
+    rising SCLK edge shifts SDIN into a 12-bit input register, MSB first,
+    so the first four bits of a 16-bit word are pushed out the far end. A
+    falling edge of LDAC (pin 4, pulled up) while CS is high copies the
+    input register to the DAC register; the output is 1 mV a code, 0 to
+    4.095 V. Data must not be clocked in while LDAC is low. CLR is tied
+    high."""
+
+    def __init__(self, dut):
+        super().__init__(dut)
+        self.input, self.dac, self.ldac, self.loads, self.clocked_in_load = 0, 0, 1, [], False
+
+    def rose(self, mosi):
+        self.input = ((self.input << 1) | mosi) & 0xFFF
+        self.clocked_in_load |= not self.ldac
+
+    def pins(self, out, oe, cs):
+        ldac = (out >> 4) & 1 if (oe >> 4) & 1 else 1
+        if self.ldac and not ldac:
+            assert cs, "LDAC fell while CS was low"
+            self.dac = self.input
+            self.loads.append(self.dac)
+        self.ldac = ldac
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_ad5626(dut):
+    """An AD5626 DAC on the SPI controller: two codes written as 16-bit
+    words, each moved to the output by a pulse on LDAC once CS is high, as
+    the data sheet's microcontroller example does. LDAC is pin 4, which
+    every MOV of the firmware holds low once OUT spans four pins: the host
+    makes it an output for the pulse and lets it go, and a pull-up holds it
+    high meanwhile. The part is written from its data sheet. sigrok's
+    AD5626 decoder must read each voltage."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dac = Ad5626(dut)
+    cocotb.start_soon(dac.run())
+    trace = spi_part_trace(dut)
+    chip = pe.Chip(sim_port(dut))
+    codes, outputs = [0x7D0, 0xABC], []
+    spi_pins = {0: pe.PUSH_PULL, 1: pe.PUSH_PULL, 3: pe.PUSH_PULL}
+
+    @bridge
+    def start():
+        spi_slow_start(chip, 0, out_count=4)
+
+    @bridge
+    def write(code):
+        spi_slow_transfer(chip, code.to_bytes(2, "big"))
+        chip.set_pin_modes({**spi_pins, 4: pe.PUSH_PULL})  # LDAC low
+        chip.set_pin_modes(spi_pins)  # and high again
+
+    await start()
+    for code in codes:
+        await write(code)
+        outputs.append(dac.dac)
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    assert dac.loads == codes and outputs == codes and not dac.clocked_in_load, (dac.loads, outputs)
+    assert min(dac.highs + dac.lows) >= 30, (min(dac.highs), min(dac.lows))  # ns, tCH and tCL
+    if sigrok.extra_available():
+        stack = SPI_BUS + ",ad5626"
+        found = trace.decode(stack, "ad5626", extra=True)
+        assert texts(found) == ["2.000V", "2.748V"], texts(found)
+        # MOSI held high for the first word's bit 11, its 5th clock: 2.000 V
+        # becomes 4.048 V.
+        at = selection_rises(trace, 0)[4]
+        wrong = texts(trace.forced("mosi", at - 2, at + 2, 1).decode(stack, "ad5626", extra=True))
+        assert wrong == ["4.048V", "2.748V"], wrong
+
+
+class Ad7920(SpiPart):
+    """An AD7920 12-bit ADC, from its data sheet: the input is sampled as
+    CS falls, which also puts out the first of four leading zeros; the
+    rest, then the 12 bits MSB first, follow on SCLK's falling edges, and
+    a conversion needs 16 of them. CS taken high after the second falling
+    edge and before the tenth puts the part in power-down. The input range
+    is 0 V to VDD, straight binary, VDD / 4096 a code. A conversion begun
+    in power-down is a dummy one, not modelled here."""
+
+    VDD = 3.3
+
+    def __init__(self, dut, inputs):
+        super().__init__(dut)
+        self.inputs, self.mode, self.log = list(inputs), "normal", []
+
+    def selected(self):
+        assert self.mode == "normal", "a conversion begun in power-down"
+        self.code = min(4095, int(self.inputs.pop(0) / self.VDD * 4096 + 1e-9))
+        return self.code.to_bytes(2, "big")
+
+    def deselected(self):
+        if 2 <= self.falls < 10:
+            self.mode = "power-down"
+            self.log.append("power-down")
+        elif self.falls >= 16:
+            self.log.append(self.code)
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_ad7920(dut):
+    """An AD7920 ADC on the SPI controller at 78 kHz: two conversions,
+    16 clocks each, read as two bytes; then a selection of one byte, whose
+    CS rising between the second and tenth falling clock edges puts the
+    part in power-down. The part is written from its data sheet, VDD 3.3 V.
+    sigrok's AD79x0 decoder must read each conversion as complete, with
+    its voltage, and the power-down. (The decoder counts the clocks from
+    the time CS is low over the first bit's length, so SCK must not pause
+    between the bytes: a byte must outlast the host's next push, which a
+    half-period word of 60 gives with room to spare.)"""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    adc = Ad7920(dut, [1.65, 0.825, 2.0])
+    cocotb.start_soon(adc.run())
+    trace = spi_part_trace(dut)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def convert():
+        spi_slow_start(chip, 60)
+        return [spi_slow_transfer(chip, bytes(n)) for n in (2, 2, 1)]
+
+    read = await convert()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    assert read == [H("0800"), H("0400"), H("09")], [r.hex() for r in read]
+    assert adc.log == [2048, 1024, "power-down"], adc.log
+    # 10 kHz to 5 MHz, high and low each 40% of the period or more.
+    period = min(adc.periods)
+    assert 200 <= period and max(adc.periods) <= 100_000, adc.periods
+    assert max(adc.periods) - period <= 500, adc.periods  # SCK never waited on the host
+    assert min(adc.highs + adc.lows) >= 0.4 * period, (min(adc.highs), min(adc.lows), period)
+    if sigrok.extra_available():
+        stack = SPI_BUS + ",ad79x0:vref=3.3"
+        found = trace.decode(stack, "ad79x0", extra=True)
+        conversion = ["Normal Mode", "Complete conversion"]
+        want = conversion + ["1.650403V"] + conversion + ["0.825201V"] + ["Power Down Mode", "Invalid data"]
+        assert texts(found) == want, texts(found)
+        # MISO held high for the first result's bit 10, its 6th clock: code
+        # 2048 becomes 3072.
+        at = selection_rises(trace, 0)[5]
+        wrong = texts(trace.forced("miso", at - 2, at + 2, 1).decode(stack, "ad79x0", extra=True))
+        assert wrong == conversion + ["2.475604V"] + want[3:], wrong
+
+
+class Ltc2422(SpiPart):
+    """An LTC2422 two-channel 20-bit ADC, from its data sheet, in external
+    serial clock mode (SCK low as CS falls) and single-cycle operation.
+    Its conversions alternate between CH0 and CH1, the first after power-up
+    on CH0. While CS is low SDO gives EOC, low once the conversion is done,
+    and the rest of the 24-bit word follows on SCK's falling edges: the
+    channel, SIG, EXR and 20 bits, VREF / 2^20 a code, offset so that 0 V
+    is 0x200000 with SIG high (two's complement below 0 V). The 24th
+    falling edge starts the next conversion and SDO goes high, until the
+    conversion is done, at most 163.44 ms later with the internal
+    oscillator. SCK may run to 2 MHz, high and low 250 ns or more."""
+
+    VREF, T_CONV = 2.5, 163_440_000  # V, ns
+
+    def __init__(self, dut, inputs):
+        super().__init__(dut)
+        self.inputs, self.channel, self.done_at, self.log = inputs, 0, 0, []
+        self.result = self.convert(0)  # powered up long ago
+
+    def convert(self, channel):
+        code = round(self.inputs[channel] / self.VREF * 2**20)
+        return max(-(2**17), min(code, 2**20 + 2**17))  # -0.125 to 1.125 VREF
+
+    def selected(self):
+        assert self.sck_at_select == 0, "SCK high as CS fell: internal SCK mode"
+        self.busy = self.now < self.done_at
+        if self.busy:
+            return b""  # EOC high
+        return ((self.channel << 22) | ((self.result + 2**21) & 0x3FFFFF)).to_bytes(3, "big")
+
+    def fell(self):
+        if self.falls == 24 and not self.busy:
+            self.log.append((self.channel, self.result))
+            self.channel ^= 1
+            self.result, self.done_at = self.convert(self.channel), self.now + self.T_CONV
+
+
+@cocotb.test(timeout_time=400, timeout_unit="ms")
+async def test_ltc2422(dut):
+    """An LTC2422 ADC on the SPI controller at 1.1 MHz: the result of
+    CH0 read, the next conversion (CH1) waited for, and read. The part is
+    written from its data sheet, VREF 2.5 V, CH0 at half of it and CH1 at
+    -VREF / 16. sigrok's LTC242x decoder must read each voltage on its
+    channel's row. (Nothing moves on the pins for the 164 ms of the second
+    conversion: the chip's clock is stopped meanwhile, which only spares
+    the simulator.)"""
+    clock = await reset(dut)
+    dut.dev_mode.value = 0
+    adc = Ltc2422(dut, {0: 1.25, 1: -0.15625})
+    cocotb.start_soon(adc.run())
+    trace = spi_part_trace(dut)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def start():
+        spi_slow_start(chip, 0)
+
+    @bridge
+    def read():
+        return spi_slow_transfer(chip, bytes(3))
+
+    await start()
+    first = await read()
+    await ClockCycles(dut.clk, 20)
+    clock.stop()
+    await Timer(164, unit="ms")
+    clock.start()
+    second = await read()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    assert [first, second] == [H("280000"), H("5f0000")], (first.hex(), second.hex())
+    assert adc.log == [(0, 2**19), (1, -(2**16))], adc.log
+    assert min(adc.highs + adc.lows) >= 250 and min(adc.periods) >= 500, (adc.highs, adc.lows)
+    if sigrok.extra_available():
+        stack = SPI_BUS + ",ltc242x:vref=2.5"
+
+        def rows(t):  # what the decoder puts on each channel's row
+            return [texts(t.decode(stack, "ltc242x=" + row, extra=True)) for row in ("ch0_voltage", "ch1_voltage")]
+
+        assert texts(trace.decode(stack, "ltc242x", extra=True)) == ["1.250001V", "-0.156250V"]
+        assert rows(trace) == [["1.250001V"], ["-0.156250V"]], rows(trace)
+        # MISO held high for the first word's channel bit, its 2nd clock:
+        # the CH0 reading moves to CH1's row.
+        at = selection_rises(trace, 0)[1]
+        assert rows(trace.forced("miso", at - 2, at + 2, 1)) == [[], ["1.250001V", "-0.156250V"]]
+
+
 @cocotb.test(timeout_time=60, timeout_unit="ms")
 async def test_ws2812(dut):
     """The WS2812 driver that was written blind (examples/ws2812), on the
@@ -6417,6 +7284,89 @@ async def test_morse(dut):
         assert wrong and wrong[0] != "sos", wrong
 
 
+def sbus_receive(changes, bit):
+    """An SBUS input as a flight controller has one, written here from the
+    protocol's rules: the line inverted, each byte read at the middle of
+    its bits, its even parity and both stop bits checked; a message is the
+    bytes between idle gaps longer than a byte, and must be 25 bytes long
+    and start with 0x0F and end with 0x00. Returns each message as (the 16
+    channels, channel 17, channel 18, frame lost, failsafe)."""
+    def logic(t):
+        return 1 - [v for at, v in changes if at <= t][-1]
+    rises = [t for (t, v), (_, before) in zip(changes[1:], changes) if v == 1 and before == 0]
+    messages, current, free_from = [], [], 0
+    for t in rises:
+        if t < free_from:
+            continue  # an edge inside a byte
+        if current and t - free_from > 12 * bit:
+            messages.append(current)
+            current = []
+        frame = [logic(t + bit // 2 + k * bit) for k in range(12)]
+        data = frame[1:9]
+        assert frame[0] == 0 and (sum(data) + frame[9]) % 2 == 0 and frame[10:] == [1, 1], frame
+        current.append(sum(b << k for k, b in enumerate(data)))
+        free_from = t + 12 * bit
+    messages.append(current)
+    out = []
+    for m in messages:
+        assert len(m) == 25 and m[0] == 0x0F and m[24] == 0x00, m
+        bits = [(b >> k) & 1 for b in m[1:23] for k in range(8)]
+        channels = [sum(bits[11 * c + k] << k for k in range(11)) for c in range(16)]
+        out.append((channels,) + tuple((m[23] >> k) & 1 for k in range(4)))
+    return out
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_sbus(dut):
+    """Futaba SBUS, the serial bus from a radio control receiver to a
+    flight controller or servos: one message of sixteen proportional
+    channels and the two digital ones. The host hands over the message's
+    25 bytes; the firmware makes every character on the wire: the line
+    resting low, a start bit high, the 8 bits inverted, the even parity it
+    works out itself, inverted, and two stop bits low. Run here at 100
+    kbit/s on the 10 MHz clock, 100 clocks a bit (500 at 50 MHz). Every
+    change of the line must fall on a bit boundary and the message last
+    3 ms, exactly. An SBUS input written here from the protocol's rules
+    must read every channel and flag, and sigrok's SBUS decoder, on its
+    UART decoder set to invert the line, must read the same."""
+    await reset(dut)
+    trace = pin_trace(dut, sbus=0)
+    chip = pe.Chip(sim_port(dut))
+    channels = [992, 1500, 172, 992, 1811, 172, 992, 992, 1200, 800, 992, 992, 992, 992, 992, 2047]
+
+    @bridge
+    def play():
+        i2c2.SbusTx(chip, firmware("sbus_tx")).send(channels, ch17=True)
+
+    await play()
+    await ClockCycles(dut.clk, 3000)  # the last byte, and a rest longer than a character
+    trace.stop()
+    level = trace.level("sbus")[1:]  # [0]: before the pin drives
+    assert level[0][1] == 0 and level[-1][1] == 0  # the line rests low before and after
+    first = level[1][0]  # the first start bit
+    assert all((t - first) % 100 == 0 for t, _ in level[1:]), [t - first for t, _ in level[1:]]
+    # The last change is the fall into the footer's stop bits.
+    assert level[-1][0] - first == 298 * 100, level[-1][0] - first
+    assert sbus_receive(level, 100) == [(channels, 1, 0, 0, 0)]
+    if sigrok.extra_available():
+        decoder = ("uart:rx=sbus:baudrate=100000:parity=even:stop_bits=2.0:invert_rx=yes,"
+                   "sbus_futaba")
+        want = ["0x0f"] + [str(v) for v in channels] + ["1", "0", "0", "0", "0x00"]
+        found = trace.decode(decoder, "sbus_futaba", start=level[0][0], extra=True)
+        assert texts(found) == want, texts(found)
+        # Read as a line that is not inverted, the wire carries no message.
+        upright = texts(trace.decode(decoder.replace("invert_rx=yes", "invert_rx=no"),
+                                     "sbus_futaba", start=level[0][0], extra=True))
+        assert "0x0f" not in upright and not set(want[1:17]) & set(upright), upright
+        # Channel 2's first bit (1500's lowest, a 0, so high on the wire)
+        # held low, a 1: that byte's parity fails and the decoder gives up
+        # the message.
+        a = next(a for a, _, text in found if text == "1500")
+        wrong = texts(trace.forced("sbus", a, a + 100, 0).decode(
+            decoder, "sbus_futaba", start=level[0][0], extra=True))
+        assert wrong != want and "Invalid data" in wrong, wrong
+
+
 @cocotb.test(timeout_time=60, timeout_unit="ms")
 async def test_tdm_audio(dut):
     """TDM audio: frames of four 16-bit samples on one data line, with a
@@ -6505,3 +7455,955 @@ async def test_tlc5620_dac(dut):
         a = next(a for a, b, text in found if text == "DAC select: DACA")
         wrong = fields(trace.forced("data", a - 50, a + 200, 1).decode(decoder))
         assert wrong[:3] != want_fields[:3], wrong[:3]
+
+
+# --- Motion: DShot to an ESC, XY2-100 to a galvo scanner, a caliper's port -------
+#
+# Judged by decoders the packaged sigrok-cli does not ship (see
+# extra_decoders.sh): DShot by one published by hyp0dermik, XY2-100 and the
+# caliper by sigrok's own newer source.
+
+
+def dshot_checksum(value, telemetry):
+    """The exclusive or of the nibbles of the 12 bits, from the protocol."""
+    v = (value << 1) | int(telemetry)
+    return (v ^ (v >> 4) ^ (v >> 8)) & 0xF
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_dshot(dut):
+    """DShot600 to an ESC: the handbook's example (throttle 1046), a command
+    with the telemetry bit, full throttle and disarm. The host sends 12 bits
+    a frame and the chip makes the checksum. A bit is 8 ticks of 2 clocks:
+    625 kbit/s at this 10 MHz clock, 4% fast of DShot600, with a 0 high for
+    37.5% and a 1 for 75%; at 50 MHz the divider gives DShot600 (10, 4%
+    fast) and DShot1200 (5, 4% fast). The decoder (DShot for sigrok, by
+    hyp0dermik) calls a bit a 1 past half its period, ends a frame after
+    three nominal bit times of low line and checks the checksum. It reads
+    the sample rate in start(), which sigrok-cli gives it only from a
+    session file, so the trace is converted to one first.
+
+    Bidirectional DShot is left out: the request half is levels inverted
+    and the checksum inverted, both within reach, but the ESC answers on
+    the same wire 30 us later with 21 bits of GCR at 5/4 the rate, a
+    receiver this firmware does not have."""
+    await reset(dut)
+    trace = pin_trace(dut, din=0)
+    chip = pe.Chip(sim_port(dut))
+    frames = [(1046, False), (13, True), (2047, False), (0, False)]
+
+    @bridge
+    def play():
+        esc = motion.Dshot(chip, firmware("dshot"), rate=600)
+        for value, telemetry in frames:
+            esc.send(value, telemetry)
+        return esc.bitrate
+
+    assert await play() == 625_000
+    await ClockCycles(dut.clk, 600)
+    trace.stop()
+    level = trace.level("din")
+    rises = [t for t, v in level if v == 1][1:]  # [0]: before the pin drives
+    falls = [t for t, v in level if v == 0][1:]
+    assert len(rises) == 16 * len(frames), len(rises)
+    highs = [f - r for r, f in zip(rises, falls)]
+    assert set(highs) == {6, 12}, sorted(set(highs))
+    periods = {b - a for k, (a, b) in enumerate(zip(rises, rises[1:])) if k % 16 != 15}
+    assert periods == {16}, periods
+    # The bits on the wire: the 12 the host sent, then the chip's checksum.
+    got = [int("".join("1" if h == 12 else "0" for h in highs[16 * k:16 * k + 16]), 2)
+           for k in range(len(frames))]
+    want = [(v << 5) | (t << 4) | dshot_checksum(v, t) for v, t in frames]
+    assert got == want, [hex(w) for w in got]
+    if sigrok.extra_available():
+        decoder = "dshot:din=din:dshot_rate=600"
+        fields = "dshot=cmd:throttle:checksum:errors"
+        frame_texts = texts
+        found = trace.decode(decoder, fields, extra=True, srzip=True)
+        want_texts = []
+        for v, t in frames:
+            c = dshot_checksum(v, t)
+            want_texts += ["%04d" % v, "Calc CRC: %04d TXed CRC:%04d" % (c, c)]
+        assert frame_texts(found) == want_texts, texts(found)
+        # The first frame's second bit, a 0, held high to three quarters:
+        # a 1, another value, and the checksum no longer agrees.
+        a = rises[1]
+        wrong = frame_texts(trace.forced("din", a + 6, a + 12, 1).decode(decoder, fields, extra=True, srzip=True))
+        assert wrong[0] == "%04d" % (1046 | 0x200) and "CRC INVALID" in wrong[:3], wrong
+        assert wrong[-6:] == want_texts[-6:], wrong
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_xy2_100(dut):
+    """XY2-100 to a galvanometer scanner: four X and Y positions at the
+    standard 2 MHz clock (5 core clocks a bit at 10 MHz; at 50 MHz the
+    divider is 5), played from the packet buffer so frames follow with no
+    gap. Thread 0 makes CLK, SYNC and X, thread 1 Y, each axis's parity on
+    its thread's CRC register. One pin per line here; a real cable is four
+    RS-422 pairs (the scanner's status line is not driven or read).
+    sigrok's XY2-100 decoder reads one data line at a time: it is run for X
+    and for Y. It reports a bit at the rising edge after it, so the last
+    frame shows only when another begins: one more point is sent than is
+    checked."""
+    await reset(dut)
+    trace = pin_trace(dut, clk=0, sync=1, x=2, y=3)
+    chip = pe.Chip(sim_port(dut))
+    points = [(0, 0), (32767, -32768), (-1, 1), (0x1234, -0x5A5A)]
+
+    @bridge
+    def play():
+        scanner = motion.Xy2100(chip, firmware("xy2_x"), firmware("xy2_y"), clkdiv=1)
+        scanner.play(points + [(0, 0)])
+        scanner.wait()
+
+    await play()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    rises = [t for t, v in trace.level("clk") if v == 1][1:]  # [0]: before the pin drives
+    assert len(rises) >= 20 * len(points), len(rises)
+    periods = {b - a for a, b in zip(rises, rises[1:])}
+    assert periods == {5}, f"2 MHz from the first bit to the last: {sorted(periods)}"
+    # X, Y and SYNC change only as CLK rises.
+    at = dict(trace.changes)
+    first = rises[0]
+    names = trace.names
+    for t, levels in trace.changes:
+        if t > rises[-1] + 4:
+            break  # after the last frame Y is set to bit 0's level, waiting
+        prev = at[max(k for k in at if k < t)] if t > first else None
+        if prev is None:
+            continue
+        moved = [n for n, a, b in zip(names, prev, levels) if a != b and n != "clk"]
+        assert not moved or t in rises, (t, moved)
+    if sigrok.extra_available():
+        def frames(trace, axis):
+            found = trace.decode(f"xy2-100:clk=clk:sync=sync:data={axis}",
+                                 "xy2-100=type:parity:position:warning", extra=True)
+            return texts(found)
+
+        for k, axis in enumerate(("x", "y")):
+            want = []
+            for p in points:
+                want += ["16 bit Position Frame", "OK", "%d" % p[k]]
+            assert frames(trace, axis) == want, (axis, frames(trace, axis))
+        # X held high through bit 4 of the first frame: position 0x4000
+        # with the parity wrong, and Y untouched.
+        a = rises[4]
+        wrong = trace.forced("x", a, a + 5, 1)
+        assert frames(wrong, "x")[:4] == ["Parity error", "16 bit Position Frame", "NOK", "16384"] \
+            or frames(wrong, "x")[:4] == ["16 bit Position Frame", "NOK", "16384", "Parity error"], \
+            frames(wrong, "x")
+        assert frames(wrong, "y") == frames(trace, "y")
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_caliper(dut):
+    """The chip as a digital caliper: three readings, 12.34 mm, -0.5 mm and
+    0.5005 in, each a 24-bit packet with a bit of 12.8 us (CLKDIV 16; 81 at
+    50 MHz gives 12.96 us, the 77 kHz clock of real calipers). The host
+    gives the reading in counts, its sign and its unit; the chip places
+    them. sigrok's caliper decoder reads DATA as CLK rises, 16 bits of
+    reading, the sign in bit 20 and inches in bit 23, and divides by 100 or
+    2000."""
+    await reset(dut)
+    trace = pin_trace(dut, clk=0, data=1)
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def play():
+        caliper = motion.Caliper(chip, firmware("caliper"))
+        caliper.send(12.34)
+        caliper.send(-0.5)
+        caliper.send(0.5005, inches=True)
+
+    await play()
+    await ClockCycles(dut.clk, 28_000)
+    trace.stop()
+    rises = [t for t, v in trace.level("clk") if v == 1][1:]  # [0]: before the pin drives
+    assert len(rises) == 72, len(rises)
+    for k in range(3):
+        bits = rises[24 * k:24 * k + 24]
+        assert {b - a for a, b in zip(bits, bits[1:])} == {128}, k
+        if k:
+            assert bits[0] - rises[24 * k - 1] >= 64 * 128, "64 bit times of rest"
+    if sigrok.extra_available():
+        found = trace.decode("caliper", extra=True)
+        want = ["12.34mm", "-0.5mm", "0.5005in"]
+        assert texts(found) == want, texts(found)
+        # DATA held low through the second packet's sign bit: not negative.
+        a = rises[24 + 20]
+        wrong = texts(trace.forced("data", a - 30, a + 30, 0).decode("caliper", extra=True))
+        assert wrong == ["12.34mm", "0.5mm", "0.5005in"], wrong
+
+
+class I3cTargetModel:
+    """An I3C target on the SDA and SCL lines, from the MIPI I3C Basic
+    specification, written apart from the OCaml one in sim/test_i3c.ml. It
+    looks at the lines once a cycle and decides what to put on SDA,
+    taking a bit as SCL rises and changing its own SDA only after SCL
+    falls. It ACKs the broadcast address 0x7E/W, takes the CCC after it
+    with its T bit checked for odd parity (RSTDAA forgets the dynamic
+    address, ENTDAA starts address assignment until STOP), answers 0x7E/R
+    in ENTDAA while it has no address by sending its provisioned ID, BCR and
+    DCR (64 bits, giving way if another target sends a 0 where it sends a
+    1) and ACKs the dynamic address that follows if its parity bit makes the
+    ones odd. At its dynamic address a write's first byte sets a pointer
+    into eight bytes of memory and the bytes after it are stored there; a
+    read sends from the pointer, T = 1 while another byte is left, then
+    T = 0; after T = 1 it stops if SDA is low as SCL falls. Anything else
+    found on the wires is put in [errors]."""
+
+    def __init__(self, pid, bcr, dcr, memory):
+        self.bits64 = [(pid >> (47 - k)) & 1 for k in range(48)] + \
+            [(bcr >> (7 - k)) & 1 for k in range(8)] + [(dcr >> (7 - k)) & 1 for k in range(8)]
+        self.mem, self.ptr, self.da = list(memory), 0, None
+        self.scl, self.sda, self.pull = 1, 1, 0
+        self.state, self.bits, self.entdaa = "off", [], False
+        self.log, self.errors = [], []
+
+    def _value(self):
+        return int("".join(map(str, self.bits)), 2) if self.bits else 0
+
+    def step(self, scl, sda, chip_sda_moved):
+        if scl != self.scl:
+            if chip_sda_moved:
+                self.errors.append("the controller moved SDA as SCL moved")
+            self.sda = sda
+            (self._rise if scl else self._fall)()
+        elif scl and sda != self.sda:
+            self.sda = sda
+            self._condition(stop=bool(sda))
+        self.scl, self.sda = scl, sda
+
+    def _condition(self, stop):
+        ok = self.state in ("off", "ignore", "ended") or (
+            self.state in ("address", "rx") and len(self.bits) <= 1)
+        if self.state == "tx" and self.k == 8 and self.more and not stop:
+            self.log.append(("read ended by the controller", self.sent))
+        elif not ok:
+            self.errors.append(("STOP" if stop else "START") + " in state " + self.state)
+        self.pull, self.bits = 0, []
+        if stop:
+            self.state, self.entdaa = "off", False
+        else:
+            self.state = "address"
+
+    def _rise(self):
+        st = self.state
+        if st in ("address", "dynamic") and len(self.bits) < 8:
+            self.bits.append(self.sda)
+        elif st == "rx":
+            if len(self.bits) < 8:
+                self.bits.append(self.sda)
+            else:
+                byte = self._value()
+                if (bin(byte).count("1") + self.sda) % 2 == 0:
+                    self.errors.append("parity error after 0x%02x" % byte)
+                self._take(byte)
+                self.bits = []
+        elif st == "tx" and self.k == 8 and self.more:
+            self.pull = 0  # T = 1: let go, so the controller may end the read
+        elif st == "tx" and self._bit() and not self.sda:
+            self.errors.append("SDA low while the target sends a 1")
+        elif st == "id" and self.bits64[self.k] and not self.sda:
+            self.state, self.pull = "ignore", 0  # a lower ID won
+
+    def _bit(self):
+        return (self.byte >> (7 - self.k)) & 1 if self.k < 8 else int(self.more)
+
+    def _drive(self):
+        self.pull = 1 - self._bit()
+
+    def _next_byte(self):
+        self.byte, self.k = self.mem[self.ptr], 0
+        self.more = self.ptr < len(self.mem) - 1
+        self.ptr = min(self.ptr + 1, len(self.mem) - 1)
+        self.sent += 1
+        self._drive()
+
+    def _fall(self):
+        st = self.state
+        if st == "address" and len(self.bits) == 8:
+            a = self._value()
+            address, read = a >> 1, a & 1
+            if a == 0xFC:
+                ack, self.after = 1, ("rx", "ccc")
+            elif a == 0xFD and self.entdaa and self.da is None:
+                ack, self.after = 1, ("id", None)
+            elif self.da is not None and address == self.da:
+                ack, self.after = 1, ("tx", None) if read else ("rx", "pointer")
+            else:
+                ack, self.after = 0, ("ignore", None)
+            self.pull, self.state = ack, "ninth"
+        elif st == "ninth":
+            self.pull, self.bits = 0, []
+            self.state, self.kind = self.after
+            if self.state == "tx":
+                self.sent = 0
+                self._next_byte()
+            elif self.state == "id":
+                self.k = 0
+                self.pull = 1 - self.bits64[0]
+        elif st == "tx":
+            if self.k < 8:
+                self.k += 1
+                self._drive()
+            elif not self.more:
+                self.pull, self.state = 0, "ended"
+                self.log.append(("read ended by the target", self.sent))
+            else:
+                self._next_byte()
+        elif st == "ended":
+            self.errors.append("a clock after the target ended its read")
+        elif st == "id":
+            self.k += 1
+            if self.k == 64:
+                self.pull, self.state, self.bits = 0, "dynamic", []
+            else:
+                self.pull = 1 - self.bits64[self.k]
+        elif st == "dynamic" and len(self.bits) == 8:
+            v = self._value()
+            ok = bin(v).count("1") % 2 == 1
+            if ok:
+                self.da = v >> 1
+                self.log.append(("dynamic address", self.da))
+            else:
+                self.errors.append("parity error in the dynamic address")
+            self.pull, self.state, self.after = int(ok), "ninth", ("ignore", None)
+
+    def _take(self, byte):
+        if self.kind == "ccc":
+            self.log.append(("CCC", byte))
+            if byte == 0x06:
+                self.da = None
+            elif byte == 0x07:
+                self.entdaa = True
+            self.kind = "ccc data"
+        elif self.kind == "pointer":
+            self.ptr, self.kind = byte % len(self.mem), "data"
+        elif self.kind == "data":
+            self.mem[self.ptr] = byte
+            self.log.append(("write", self.ptr, byte))
+            self.ptr = min(self.ptr + 1, len(self.mem) - 1)
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_i3c(dut):
+    """An I3C SDR controller, at 2 MHz (CLKDIV 1, a tick of 100 ns; at 50
+    MHz the same rate is CLKDIV 5), with one target written from the
+    specification: RSTDAA, ENTDAA giving it dynamic address 0x09, a write
+    of three bytes, a register read the controller ends after two bytes
+    in a T bit of 1, and one the target ends with T = 0 after two of the
+    four asked for. SDA is open-drain throughout (the chip cannot switch a
+    pin's drive mode inside a frame), so the frame keeps to the
+    specification's open-drain timing.
+
+    The I3C decoder from sigrok's extra decoders (i3c_ext) reads the
+    wires and must give the frames back exactly: START, the addresses with
+    ACK or NAK, the CCC bytes with their parity bits, the 64 bits of ENTDAA
+    as eight bytes, the dynamic address byte, data written with its T bit
+    as parity, data read with its T bit as CONT or ABORT, repeated START
+    and STOP. It needs no sample rate and has no timing checks; it tells
+    I3C from I2C by what follows 0x7E. Two things in what it shows are its
+    own. It recognises ENTDAA only in the first round after the CCC (its
+    detector, pd.py lines 589-590 and 624-630, is armed by the CCC byte
+    and disarmed after one round of eight bytes), so with two targets the
+    second would be decoded as an ordinary read; hence one target here,
+    and several in the model test. And after ENTDAA's eight bytes it
+    labels the dynamic address byte 'Data write' and the target's ACK
+    after it 'Par0' (pd.py line 361 marks what follows as a write); the
+    waveform there is the specification's: seven address bits, the parity
+    bit, then the target's ACK. It also holds each annotation until the
+    next edge on either line, so the recording is given one more falling
+    edge of SCL after the last STOP, which it takes for nothing, and its
+    annotations are put in order of where they start."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    pid, bcr, dcr = 0x04A6_1234_5678, 0x06, 0x44
+    target = I3cTargetModel(pid, bcr, dcr, [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x77, 0x88])
+    last = {"chip": 1}
+
+    def chip_sda():
+        return 0 if (int(dut.uio_oe.value) & 1) and not (int(dut.uio_out.value) & 1) else 1
+
+    def scl():
+        return (int(dut.uio_out.value) >> 1) & 1 if (int(dut.uio_oe.value) >> 1) & 1 else 1
+
+    # What the target puts on SDA, a cycle after it decides: it holds its
+    # old bit for that long after SCL falls, as a target's data hold time
+    # lets it, and a recording taken once a cycle can see the order.
+    held = {"pull": 0, "next": 0}
+
+    def sda():
+        return chip_sda() & (1 - held["pull"])
+
+    async def wires():
+        while True:
+            await FallingEdge(dut.clk)
+            held["pull"] = held["next"]
+            mine = chip_sda()
+            target.step(scl(), sda(), mine != last["chip"])
+            last["chip"] = mine
+            held["next"] = target.pull
+            dut.uio_in.value = 0xFE | sda()
+
+    trace = sigrok.Trace(dut, {"scl": scl, "sda": sda})
+    bus = cocotb.start_soon(wires())
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        i3c = i3c_protocols.I3c(chip, firmware("i3c"))
+        reset_ack = i3c.rstdaa()
+        assigned = i3c.entdaa([0x09, 0x0A])
+        wrote = i3c.write(0x09, [0x02, 0xA5, 0x3C])
+        return (reset_ack, assigned, wrote, i3c.write_read(0x09, [0x02], 2),
+                i3c.write_read(0x09, [0x06], 4))
+
+    reset_ack, assigned, wrote, read1, read2 = await session()
+    await ClockCycles(dut.clk, 100)
+    trace.stop()
+    bus.cancel()
+    assert reset_ack and wrote, (reset_ack, wrote)
+    assert assigned == [(pid, bcr, dcr, 0x09, True)], assigned
+    assert (read1, read2) == ([0xA5, 0x3C], [0x77, 0x88]), (read1, read2)
+    assert target.errors == [], target.errors
+    assert target.da == 0x09 and target.mem[2:4] == [0xA5, 0x3C], (target.da, target.mem)
+    assert target.log == [("CCC", 0x06), ("CCC", 0x07), ("dynamic address", 0x09),
+                          ("write", 2, 0xA5), ("write", 3, 0x3C),
+                          ("read ended by the controller", 2),
+                          ("read ended by the target", 2)], target.log
+    if sigrok.extra_available():
+        decoder = "i3c:scl=scl:sda=sda"
+        rows = "i3c=addr-data"
+        found = sorted(trace.decode(decoder, rows, then_fall="scl", extra=True))
+        par = lambda b: "Par%d" % i3c_protocols.I3c.odd_parity(b)
+        da_byte = (0x09 << 1) | i3c_protocols.I3c.odd_parity(0x09, 7)
+        ident = [(pid >> s) & 0xFF for s in range(40, -8, -8)] + [bcr, dcr]
+        want = (["Start", "Address write: 7E", "ACK", "CONT", "Data write: 06", par(0x06), "Stop"]
+                + ["Start", "Address write: 7E", "ACK", "CONT", "Data write: 07", par(0x07),
+                   "Start repeat", "Address read: 7E", "ACK", "CONT"]
+                + ["ENTDAA read: %02X" % b for b in ident]
+                + ["Data write: %02X" % da_byte, "Par0",
+                   "Start repeat", "Address read: 7E", "NAK", "ABORT", "Stop"]
+                + ["Start", "Address write: 09", "ACK", "CONT"]
+                + sum((["Data write: %02X" % b, par(b)] for b in (0x02, 0xA5, 0x3C)), []) + ["Stop"]
+                + ["Start", "Address write: 09", "ACK", "CONT", "Data write: 02", par(0x02),
+                   "Start repeat", "Address read: 09", "ACK", "CONT",
+                   "Data read: A5", "CONT", "CONT", "Data read: 3C", "CONT", "ABORT", "Stop"]
+                + ["Start", "Address write: 09", "ACK", "CONT", "Data write: 06", par(0x06),
+                   "Start repeat", "Address read: 09", "ACK", "CONT",
+                   "Data read: 77", "CONT", "CONT", "Data read: 88", "ABORT", "ABORT", "Stop"])
+        assert texts(found) == want, texts(found)
+        # SDA held low through the T bit after 0xA5 (odd parity: 1): the
+        # decoder reads Par0 there.
+        k = next(i for i, (a, b, t) in enumerate(found) if t == "Data write: A5")
+        a, b = found[k + 1][0], found[k + 1][1]
+        wrong = texts(sorted(trace.forced("sda", a, b + 1, 0).decode(
+            decoder, rows, then_fall="scl", extra=True)))
+        assert wrong[k + 1] == "Par0" and wrong[:k + 1] + wrong[k + 2:] == want[:k + 1] + want[k + 2:], wrong
+
+
+# --- Automotive: a SENT sensor, a J1850 VPW node --------------------------------
+
+def sent_crc4(data):
+    """SAE J2716's CRC-4 the recommended way, written here from the
+    standard: x^4 + x^3 + x^2 + 1, seed 0101, over the data nibbles most
+    significant bit first and then a nibble of zeros; not the status."""
+    crc = 0b0101
+    for nibble in list(data) + [0]:
+        for k in range(3, -1, -1):
+            crc = (crc << 1) | ((nibble >> k) & 1)
+            if crc & 0x10:
+                crc ^= 0b11101
+    return crc
+
+
+def every_tenth(trace):
+    """The trace as a logic analyser sampling at a tenth of the clock rate
+    would have recorded it."""
+    other = sigrok.Trace.__new__(sigrok.Trace)
+    other.names, other.clock_hz, other.n = trace.names, trace.clock_hz // 10, (trace.n + 9) // 10
+    other.changes = []
+    for t, levels in trace.changes:
+        k = (t + 9) // 10  # the first sample at or after the change
+        if other.changes and other.changes[-1][0] == k:
+            other.changes[-1] = (k, levels)
+        else:
+            other.changes.append((k, levels))
+    return other
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_sent_sensor(dut):
+    """SAE J2716 SENT, a sensor's side, at the nominal tick of 3 us (half a
+    tick is the thread's, CLKDIV 15 at 10 MHz): frames of a status nibble
+    and six data nibbles, the CRC-4 nibble computed on the chip. Every
+    pulse must last its nibble's ticks to the cycle and be low for five,
+    and the CRC must be the standard's, computed here. The SENT decoder
+    for sigrok by enp6s0 must read every nibble and find each CRC good.
+
+    Two things about that decoder. It closes a frame at a pulse longer
+    than 100 ticks: the pause pulse here is 120, which the standard
+    allows (12 to 768), and the frame is closed by the falling edge that
+    ends the pause, so a third frame is sent and the trace stops as it
+    begins. And it reckons 100 ticks as 1e6 x 100 x tick / samplerate
+    samples, which is right only at a sample rate of 1 MHz (at 10 MHz it
+    would be 10 ticks, and every pulse would end a frame). So it is shown
+    the wire at 1 MHz, every tenth sample; every edge here is a whole
+    number of microseconds after the last, so the pulses keep their
+    lengths."""
+    await reset(dut)
+    trace = pin_trace(dut, sent=0)
+    chip = pe.Chip(sim_port(dut))
+    frames = [(0x5, [0x0, 0xF, 0x8, 0x7, 0x1, 0xE]), (0xA, [0x3, 0xC, 0x5, 0xA, 0x6, 0x9]),
+              (0x0, [0] * 6)]
+
+    @bridge
+    def play():
+        sensor = auto.SentTx(chip, firmware("sent_tx"))
+        for status, data in frames:
+            sensor.send(status, data)
+
+    await play()
+    falls = lambda: [t for t, v in trace.level("sent") if v == 0]
+    while len(falls()) < 21:  # nine pulses and a pause, twice; then the third frame begins
+        await ClockCycles(dut.clk, 300)
+    trace.stop()
+    tick = 30
+    want = []
+    for status, data in frames[:2]:
+        want += [56, 12 + status] + [12 + d for d in data] + [12 + sent_crc4(data), 120]
+    got = [b - a for a, b in zip(falls(), falls()[1:])]
+    assert got == [n * tick for n in want], [g / tick for g in got]
+    lows = {b - a for a, b in trace.low_pulses("sent")}
+    assert lows == {5 * tick}, lows
+    if sigrok.extra_available():
+        decoder = "sae_j2716_sent:sent=sent"
+        slow = every_tenth(trace)
+        nib = lambda v: "0X%X" % v
+
+        def frame_texts(status, data, crc=None):
+            good = crc is None or crc == sent_crc4(data)
+            return (["Calibration (tick: 3.0 samples)", "Status: " + nib(status)]
+                    + ["Data: " + nib(d) for d in data]
+                    + ["CRC: " + nib(sent_crc4(data) if crc is None else crc)]
+                    + ["SENT frame of length 9" if good else
+                       "Invalid SENT frame of length 9 (CRC error: expected %s, got %s)"
+                       % (nib(sent_crc4(data)), nib(crc))])
+
+        want = frame_texts(*frames[0]) + frame_texts(*frames[1])
+        assert texts(slow.decode(decoder, extra=True)) == want, texts(slow.decode(decoder, extra=True))
+        # The edge between the first two data nibbles held back one tick:
+        # 0x0 and 0xF read as 0x1 and 0xE, and the CRC no longer fits.
+        edge = [t for t, v in slow.level("sent") if v == 0][3]
+        status, data = frames[0]
+        moved = [1, 0xE] + data[2:]
+        assert sent_crc4(moved) != sent_crc4(data)
+        wrong = texts(slow.forced("sent", edge, edge + 3, 1).decode(decoder, extra=True))
+        assert wrong == frame_texts(status, moved, crc=sent_crc4(data)) + want[10:], wrong
+
+
+def j1850_crc8(data):
+    """SAE J1850's CRC-8, written here from the standard: x^8 + x^4 + x^3 +
+    x^2 + 1, from all ones, most significant bit first, sent inverted."""
+    crc = 0xFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1D) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+    return crc ^ 0xFF
+
+
+@cocotb.test(timeout_time=60, timeout_unit="ms")
+async def test_j1850_vpw(dut):
+    """SAE J1850 VPW at 10.4 kbit/s (a tick of 1 us, CLKDIV 10 at 10 MHz):
+    an OBD-II request, 68 6A F1 for the header and mode 3, read the stored
+    trouble codes; the CRC-8 after it computed on the chip. The bus idles
+    low (passive), so undriven it reads 0 here. Start of frame must be 200
+    us, every symbol 64 or 128 us to the cycle as its bit and level say,
+    and the CRC the standard's, computed here. sigrok's J1850 VPW decoder
+    must read the start of frame, priority, target, source, mode, the CRC
+    byte and the end of the frame.
+
+    That decoder does not check the CRC; the test does. It also stops with
+    an error at the end of any mode 1 frame (handle_databytes formats the
+    (byte, start, end) tuple it keeps as if it were the byte), so the
+    request is mode 3."""
+    await reset(dut)
+    level = lambda: (int(dut.uio_out.value) & 1) if (int(dut.uio_oe.value) & 1) else 0
+    trace = sigrok.Trace(dut, {"vpw": level})
+    chip = pe.Chip(sim_port(dut))
+    frame = [0x68, 0x6A, 0xF1, 0x03]
+
+    @bridge
+    def play():
+        auto.J1850Vpw(chip, firmware("j1850_tx")).send(frame)  # returns at the frame's end
+
+    await play()
+    await ClockCycles(dut.clk, 2_600)  # 260 us: the decoder takes 240 of passive bus as the end
+    trace.stop()
+    crc = j1850_crc8(frame)
+    bits = [(b >> (7 - k)) & 1 for b in frame + [crc] for k in range(8)]
+    changes = [t for t, v in trace.level("vpw")][1:]  # [0]: the trace's first sample
+    assert len(changes) == 2 + len(bits), len(changes)
+    # Active symbols are the odd ones: a 1 is short there, and long when passive.
+    want = [2000] + [640 if b == (k % 2) else 1280 for k, b in enumerate(bits)]
+    assert [b - a for a, b in zip(changes, changes[1:])] == want
+    if sigrok.extra_available():
+        decoder = "sae_j1850_vpw:data=vpw"
+        fields = "sae_j1850_vpw=sof:prio:dest:src:mode:data:csum:ifs:warn"
+        want = ["1x SOF"] + ["%02x" % b for b in frame + [crc]] + ["EOF"]
+        assert texts(trace.decode(decoder, fields, extra=True)) == want
+        assert texts(trace.decode(decoder, "sae_j1850_vpw=csum", extra=True)) == ["%02x" % crc]
+        # The edge after the source byte's first symbol moved 64 us earlier:
+        # passive long (1) and active short (1) read as passive short (0)
+        # and active long (0), so F1 is read as 31, and the CRC no longer fits.
+        at = changes[1 + 16 + 1]
+        wrong = texts(trace.forced("vpw", at - 640, at, 1).decode(decoder, fields, extra=True))
+        assert wrong == want[:3] + ["31"] + want[4:], wrong
+        assert j1850_crc8([0x68, 0x6A, 0x31, 0x03]) != crc
+
+
+# --- Sony SIRC, an SLE 4442 card, TI's SDQ: judged by decoders sigrok has
+# in its source but not in the packaged release (test/extra_decoders.sh) --
+
+
+def sirc_bursts(trace, name, period):
+    """The bursts on the LED, each in carrier periods: rises one [period]
+    apart belong to one burst."""
+    rises = [t for t, v in trace.level(name) if v == 1][1:]  # [0]: before the pin drives
+    bursts, n = [], 1
+    for a, b in zip(rises, rises[1:]):
+        if b - a == period:
+            n += 1
+        else:
+            bursts.append(n)
+            n = 1
+    return bursts + [n]
+
+
+@cocotb.test(timeout_time=400, timeout_unit="ms")
+async def test_sony_sirc(dut):
+    """Sony SIRC with its 40 kHz carrier, as the LED is driven: a TV's
+    power key, a 12-bit frame. The firmware makes the frame from the
+    command and address. The bursts must be whole units of 24 carrier
+    periods as SIRC's rules give them; sigrok's SIRC decoder (from
+    sigrok's source; test/extra_decoders.sh) is given the LED as a
+    receiver module would report it, and must name the command, the
+    address and the key. Line rate: SIRC's own, 600 us a unit, on a
+    10 MHz clock (CLKDIV 125; 625 at 50 MHz). The frame alone is 19.8 ms
+    (SIRC's shortest is 17.4 ms), so this test runs about 23 ms of
+    simulated time, longer than most."""
+    await reset(dut)
+    trace = sigrok.Trace(dut, {"ir": ir_receiver(dut, 0, 375)})  # 1.5 carrier periods
+    led = pin_trace(dut, led=0)
+    chip = pe.Chip(sim_port(dut))
+    command, address = 0x15, 0x01
+
+    @bridge
+    def play():
+        misc.SircTx(chip, firmware("sirc_tx")).send(command, address)
+
+    await play()
+    await ClockCycles(dut.clk, 212_000)
+    trace.stop()
+    led.stop()
+    # From SIRC's rules: a start burst of 4 units, then for each bit,
+    # least significant first, a unit dark and a burst of 2 units for a 1
+    # or 1 for a 0. A unit is 24 periods of 40 kHz (250 cycles).
+    bits = [(command >> k) & 1 for k in range(7)] + [(address >> k) & 1 for k in range(5)]
+    assert sirc_bursts(led, "led", 250) == [96] + [24 * (1 + b) for b in bits], sirc_bursts(led, "led", 250)
+    if sigrok.extra_available():
+        decoder = "ir_sirc:polarity=active-high"
+        fields = lambda found: [t for t in texts(found) if t not in ("0", "1")]
+        found = trace.decode(decoder, extra=True)
+        want = ["AGC", "Pause", "Start", "Command: 0x15", "Address: 0x01", "TV: Power"]
+        assert fields(found) == want, fields(found)
+        # The first bit's second unit of burst blanked out: not the power key.
+        a = next(a for a, _, text in found if text == "Command: 0x15")
+        wrong = fields(trace.forced("ir", a + 6000, a + 12_000, 0).decode(decoder, extra=True))
+        assert wrong[:3] == want[:3] and wrong[3:] != want[3:], wrong
+
+
+class Sle4442Card:
+    """An SLE 4442 card written from the SLE 4432/4442 data sheet, on RST
+    (pin 0), CLK (pin 1) and I/O (pin 2, open-drain, pulled up). A reset
+    is RST high with a clock pulse in it; as RST falls the card puts out
+    the first bit of its answer (its first four bytes), and changes I/O
+    after each falling edge of CLK, 2 us after it; the 33rd clock lets I/O
+    go. A command is START (I/O falling while CLK is high), 24 bits taken
+    as CLK rises, least significant first, a 25th clock, and STOP (I/O
+    rising while CLK is high). Read Main Memory (30h) from address N then
+    puts out 256 - N bytes from the next falling edge, and the clock after
+    the last bit lets I/O go. START and STOP are ignored while it sends.
+    CLK must be high and low 9 us at least, and 50 kHz at most."""
+
+    def __init__(self, dut, memory):
+        self.dut, self.memory = dut, memory
+        self.errors, self.commands = [], []
+
+    async def run(self):
+        dut, step = self.dut, 10  # a microsecond
+        t, rst, clk, line = 0, 0, 0, 1
+        drive, due = 1, None  # the card's I/O, 0 pulling low; (when, level)
+        mode, taken, out, clocks, in_reset_clock = "idle", [], [], 0, False
+        rose = fell = -100
+        while True:
+            await ClockCycles(dut.clk, step)
+            t += 1
+            oe, pins = int(dut.uio_oe.value), int(dut.uio_out.value)
+            now_rst = pins & oe & 1
+            now_clk = (pins & oe) >> 1 & 1
+            reader = 0 if (oe >> 2) & 1 and not (pins >> 2) & 1 else 1
+            if due is not None and due[0] <= t:
+                drive, due = due[1], None
+            if now_rst and not rst:
+                mode, drive, due, in_reset_clock = "idle", 1, None, False
+            if rst and not now_rst:
+                if in_reset_clock:
+                    out = [(b >> k) & 1 for b in self.memory[:4] for k in range(8)]
+                    due, out, mode, clocks = (t + 2, out[0]), out[1:], "send", 33
+                    self.commands.append("answer to reset")
+                else:
+                    self.errors.append("a reset with no clock pulse")
+            if now_clk and not clk:
+                if t - fell < 9 or t - rose < 20:
+                    self.errors.append(f"CLK low {t - fell} us, period {t - rose} us")
+                rose = t
+                if now_rst:
+                    in_reset_clock = True
+                elif mode == "command":
+                    taken.append(reader)
+                elif mode == "send":
+                    clocks -= 1
+                    if clocks == 0:
+                        drive, due = 1, None
+            if clk and not now_clk:
+                if t - rose < 9:
+                    self.errors.append(f"CLK high {t - rose} us")
+                fell = t
+                if mode == "send":
+                    if clocks == 0:
+                        mode = "idle"
+                    elif out:
+                        due, out = (t + 2, out[0]), out[1:]
+            wire = reader & drive
+            if now_clk and clk and not now_rst and wire != line and mode != "send":
+                if not wire:
+                    mode, taken = "command", []
+                elif mode == "command":
+                    mode = "idle"
+                    if len(taken) != 25:
+                        self.errors.append(f"STOP after {len(taken)} clocks")
+                    else:
+                        control, address, data = (
+                            sum(taken[8 * i + k] << k for k in range(8)) for i in range(3))
+                        self.commands.append((control, address, data))
+                        if control == 0x30:
+                            out = [(b >> k) & 1 for b in self.memory[address:] for k in range(8)]
+                            mode, clocks = "send", len(out) + 1
+            rst, clk, line = now_rst, now_clk, wire
+            drive_pin(dut, 2, wire)
+
+
+@cocotb.test(timeout_time=200, timeout_unit="ms")
+async def test_sle4442_card(dut):
+    """The SLE 4442 card reader: a reset and the card's answer to it, then
+    Read Main Memory from F8h, eight bytes and the clock that ends them,
+    against a card written from the data sheet. CLK is 40 kHz, inside the
+    card's 7 to 50 kHz, on a 10 MHz clock. sigrok's SLE44xx decoder (from
+    sigrok's source; test/extra_decoders.sh) reads RST, CLK and I/O: it
+    must find the answer to reset, the command, and the eight bytes."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    memory = bytes([0xA2, 0x13, 0x10, 0x91]) + bytes((37 * a + 11) & 0xFF for a in range(4, 256))
+    card = Sle4442Card(dut, memory)
+    task = cocotb.start_soon(card.run())
+    driven = lambda k: lambda: int(dut.uio_out.value) >> k & 1 if int(dut.uio_oe.value) >> k & 1 else 0
+    trace = sigrok.Trace(dut, {"rst": driven(0), "clk": driven(1),
+                               "io": lambda: int(dut.uio_in.value) >> 2 & 1})
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        reader = misc.Sle4442(chip, firmware("sle4442"))
+        return reader.reset(), reader.read_main(0xF8)
+
+    atr, data = await session()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    task.cancel()
+    assert card.errors == [], card.errors
+    assert card.commands == ["answer to reset", (0x30, 0xF8, 0x00)], card.commands
+    assert atr == memory[:4] and data == memory[0xF8:], (atr.hex(), data.hex())
+    if sigrok.extra_available():
+        decoder = "sle44xx:rst=rst:clk=clk:io=io"
+        fields = lambda found: [t for t in texts(found) if t not in ("0", "1")]
+        found = trace.decode(decoder, extra=True)
+        hexes = " ".join("%02x" % b for b in memory[0xF8:])
+        want = (["Reset"] + ["Answer To Reset: %02x" % b for b in memory[:4]]
+                + ["Answer To Reset: a2 13 10 91", "Start", "Command: 30", "Command: f8",
+                   "Command: 00", "read main memory, addr f8", "Stop"]
+                + ["Outgoing data: %02x" % b for b in memory[0xF8:]] + ["Outgoing: " + hexes])
+        assert fields(found) == want, fields(found)
+        # I/O held low through the first byte the card sends: not that byte.
+        a, b = next((a, b) for a, b, text in found if text == "Outgoing data: %02x" % memory[0xF8])
+        wrong = fields(trace.forced("io", a, b, 0).decode(decoder, extra=True))
+        assert wrong[:-9] == want[:-9] and wrong[-9:] != want[-9:], wrong
+
+
+def sdq_crc8(data):
+    """CRC8 as TI's BQ2022A data sheet gives it: x^8 + x^5 + x^4 + 1, least
+    significant bit first, from 0."""
+    crc = 0
+    for byte in data:
+        for k in range(8):
+            mix = (crc ^ (byte >> k)) & 1
+            crc >>= 1
+            if mix:
+                crc ^= 0x8C
+    return crc
+
+
+class Bq2022aDevice:
+    """A BQ2022A written from TI's data sheet, on SDQ (pin 0, open-drain,
+    pulled up). A low of 480 us or more is a reset: 30 us after it ends the
+    part pulls the line low for 120 us (presence; tPPD 15 to 60, tPP 60 to
+    240). Every other fall begins a bit: the part takes a written bit 30 us
+    in (the host's data is valid by 15 us, tWDSU, and a 0 lasts 60 us,
+    tWDH), and sends a 0 by holding the line low 45 us from the fall
+    (valid by 13 us, tODD; let go before the 60 us slot can end). Bytes go
+    least significant bit first. It answers READ ROM (33h) with its ROM,
+    and after SKIP ROM (CCh), READ MEMORY (F0h) and the address, low byte
+    first, with the CRC8 of those three bytes, the memory from the address
+    to the end of the 128 bytes, the CRC8 of the bytes read, then 1s. It
+    checks the host's timing against the data sheet's limits."""
+
+    def __init__(self, dut, rom, memory):
+        self.dut, self.rom, self.memory = dut, rom, memory
+        self.errors, self.heard = [], []
+
+    def _check(self, ok, what):
+        if not ok and what not in self.errors:
+            self.errors.append(what)
+
+    async def run(self):
+        dut, us = self.dut, 0
+        host_low, fell, rose, hold_until, presence = False, None, -1000, -1, None
+        sending, taken, state, need = [], [], None, 8
+        sample_at = None
+        while True:
+            await ClockCycles(dut.clk, 10)  # a microsecond
+            us += 1
+            low = bool(int(dut.uio_oe.value) & 1) and not int(dut.uio_out.value) & 1
+            if low and not host_low:  # the host pulls the line low
+                fell = us
+                self._check(us - rose >= 1, "less than 1 us of recovery (trec)")
+                if presence is None and state is not None:
+                    bit = sending.pop(0) if sending else None
+                    if bit == 0:
+                        hold_until = us + 45
+                    if bit is None:
+                        sample_at = us + 30
+            if host_low and not low:
+                length, rose = us - fell, us
+                if length >= 480:  # a reset
+                    presence, state, sending, taken, need = us + 30, "rom", [], [], 8
+                    self.heard.append("reset")
+                else:
+                    self._check(length <= 15 or 60 <= length <= 120,
+                                f"a low of {length} us is no bit (tWSTRB, tWDH)")
+            if sample_at is not None and us == sample_at:
+                sample_at = None
+                taken.append(0 if low else 1)
+                if len(taken) == need:
+                    value = sum(b << k for k, b in enumerate(taken))
+                    taken = []
+                    if state == "rom" and value == 0x33:
+                        self.heard.append("read rom")
+                        sending, state = self._bits(self.rom), "done"
+                    elif state == "rom" and value == 0xCC:
+                        self.heard.append("skip rom")
+                        state = "function"
+                    elif state == "function" and value == 0xF0:
+                        state, need = "address", 16
+                    elif state == "address":
+                        self.heard.append(f"read memory from {value:02x}")
+                        data = self.memory[value:]
+                        sending = self._bits(bytes([sdq_crc8([0xF0, value & 0xFF, value >> 8])])
+                                             + data + bytes([sdq_crc8(data)]))
+                        state, need = "done", 8
+                    else:
+                        self.heard.append(f"{value:02x} not understood")
+                        state = None
+            part_low = us < hold_until or (presence is not None and presence <= us < presence + 120)
+            if presence is not None and us >= presence + 120:
+                presence = None
+            drive_pin(dut, 0, 0 if low or part_low else 1)
+            host_low = low
+
+    @staticmethod
+    def _bits(data):
+        return [(b >> k) & 1 for b in data for k in range(8)]
+
+
+@cocotb.test(timeout_time=300, timeout_unit="ms")
+async def test_sdq_bq2022a(dut):
+    """TI's SDQ, the wire of the BQ2022A battery-pack EPROM: the chip reads
+    the part's ROM (reset, presence, READ ROM, CRC8), then the last two
+    bytes of its memory (SKIP ROM, READ MEMORY F0h with the address, the
+    CRC8 of command and address, the data and its CRC8). No new firmware:
+    SDQ has 1-Wire's standard-speed timing (TI's table: reset 480 us,
+    presence 15 to 60 us after, slots of 60 to 120 us, a 1 written within
+    15 us), so the 1-Wire engine runs it with only the host's bytes new.
+    The part is written from TI's data sheet. sigrok's SDQ decoder (from
+    sigrok's source; test/extra_decoders.sh) reads the wire: it tells a 0
+    from a 1 by the low time against half its bit time and a break by more
+    than 1.2 bit times, so it is given the engine's slot, 76 us, as its
+    bit rate (its default, 98425 bit/s, is Apple's faster SDQ). A 0 the
+    part sends must then be low for more than 38 us: it holds 45, inside
+    TI's limits. Likewise it reads the presence pulse as a break only if
+    it is longer than 1.2 bit times, 91 us, where TI allows 60 to 240: the
+    part holds 120. Line rate: one bit every 76 us, on a 10 MHz clock. The
+    test takes about 16 ms of simulated time, as SDQ's slots make it."""
+    await reset(dut)
+    dut.dev_mode.value = 0
+    dut.uio_in.value = 0xFF
+    rom = bytes([0x09, 0x5A, 0x3C, 0x81, 0x00, 0x24, 0x7E])
+    rom += bytes([sdq_crc8(rom)])
+    memory = bytes((29 * a + 3) & 0xFF for a in range(128))
+    part = Bq2022aDevice(dut, rom, memory)
+    task = cocotb.start_soon(part.run())
+    trace = sigrok.Trace(dut, {"sdq": lambda: int(dut.uio_in.value) & 1})
+    chip = pe.Chip(sim_port(dut))
+
+    @bridge
+    def session():
+        bq = misc.Bq2022a(pe.OneWire(chip, firmware("onewire")))
+        return bq.read_rom(), bq.read_memory(0x7E)
+
+    got_rom, data = await session()
+    await ClockCycles(dut.clk, 200)
+    trace.stop()
+    task.cancel()
+    assert part.errors == [], part.errors
+    assert part.heard == ["reset", "read rom", "reset", "skip rom", "read memory from 7e"], part.heard
+    assert got_rom == rom and data == memory[0x7E:], (got_rom.hex(), data.hex())
+    if sigrok.extra_available():
+        decoder = "sdq:bitrate=13158"
+        fields = lambda found: [t for t in texts(found) if not t.startswith("Bit")]
+        found = trace.decode(decoder, extra=True)
+        command = [0xF0, 0x7E, 0x00]
+        sent = ([0x33] + list(rom), [0xCC] + command + [sdq_crc8(command)]
+                + list(memory[0x7E:]) + [sdq_crc8(memory[0x7E:])])
+        want = [text for part_bytes in sent for text in
+                ["Break", "Break"] + ["Byte: 0x%02x" % b for b in part_bytes]]
+        assert fields(found) == want, fields(found)
+        # The wire held low through the family code's first bit, a 1: a
+        # break where the ROM was.
+        a, b = next((a, b) for a, b, text in found if text == "Byte: 0x09")
+        wrong = fields(trace.forced("sdq", a, a + 400, 0).decode(decoder, extra=True))
+        assert "Byte: 0x09" not in wrong and wrong != want, wrong
