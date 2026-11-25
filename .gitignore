@@ -10,6 +10,8 @@ src/config_merged.json
 test/sim_build
 __pycache__/
 test/results.xml
+test/extra_decoders
+test/extra_decoders.src
 test/gate_level_netlist.v
 
 # OCaml

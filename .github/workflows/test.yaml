@@ -23,6 +23,9 @@ jobs:
         shell: bash
         run: pip install -r test/requirements.txt
 
+      - name: The sigrok decoders the package does not ship, each at a fixed commit
+        run: bash test/extra_decoders.sh
+
       - name: Run tests
         env:
           REQUIRE_SIGROK: 1  # a missing sigrok-cli fails, not skips

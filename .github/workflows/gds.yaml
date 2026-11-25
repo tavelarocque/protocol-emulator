@@ -67,6 +67,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y sigrok-cli
         continue-on-error: true  # without it those checks are skipped, as locally
 
+      - name: The sigrok decoders the package does not ship (test/extra_decoders.sh)
+        run: bash test/extra_decoders.sh
+        continue-on-error: true  # without them those checks are skipped, as locally
+
       - name: GL test
         uses: TinyTapeout/tt-gds-action/gl_test@ttihp27a
 

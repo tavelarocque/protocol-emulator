@@ -5,7 +5,13 @@ a sigrok decoder made of it, as (start sample, end sample, text) tuples.
 
 Needs sigrok-cli (apt install sigrok-cli). Without it, available() is False
 and the tests that use this say so and skip the decoder's verdict; CI sets
-REQUIRE_SIGROK=1, which turns a missing sigrok-cli into a failure."""
+REQUIRE_SIGROK=1, which turns a missing sigrok-cli into a failure.
+
+A few decoders are not in the packaged release: newer ones from sigrok's
+own source, and three published by others (SENT, DShot, I3C). The script
+extra_decoders.sh fetches them, each at a fixed commit, into
+extra_decoders/; decode(..., extra=True) uses that folder instead of the
+packaged decoders, and extra_available() says whether it is there."""
 
 import os
 import re
@@ -20,6 +26,16 @@ from cocotb.triggers import RisingEdge
 def available():
     found = shutil.which("sigrok-cli") is not None
     assert found or not os.environ.get("REQUIRE_SIGROK"), "sigrok-cli is not installed"
+    return found
+
+
+EXTRA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "extra_decoders")
+
+
+def extra_available():
+    found = available() and os.path.isdir(EXTRA_DIR)
+    assert found or not os.environ.get("REQUIRE_SIGROK"), \
+        "extra decoders missing: run test/extra_decoders.sh"
     return found
 
 
@@ -124,10 +140,10 @@ class Trace:
                 last[k] = v
 
     def decode(self, decoder, annotations=None, start=0, end=None, invert=(),
-               then_fall=None):
+               then_fall=None, extra=False):
         """decoder: sigrok-cli's -P argument, e.g. 'can:can_rx=rxd'. Returns
         [(start, end, text)] in the decoder's order, in this trace's sample
-        numbers."""
+        numbers. extra=True decodes with the decoders in EXTRA_DIR."""
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "trace.vcd")
             self.vcd(path, start, end, invert, then_fall)
@@ -135,7 +151,9 @@ class Trace:
                    "--protocol-decoder-samplenum"]
             if annotations:
                 cmd += ["-A", annotations]
-            out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+            env = dict(os.environ, SIGROKDECODE_DIR=EXTRA_DIR) if extra else None
+            out = subprocess.run(cmd, capture_output=True, text=True, check=True,
+                                 env=env).stdout
         found = []
         for line in out.splitlines():
             m = re.match(r"(\d+)-(\d+) [^:]+: (.*)", line)
