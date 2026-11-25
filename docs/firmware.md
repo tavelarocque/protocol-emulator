@@ -63,6 +63,13 @@ the rest.
 | Compact JTAG (IEEE 1149.7) | 55 | two pins: the escape and activation sequence into OScan1, then TDI, TMS and TDO multiplexed on TMSC, three TCKC cycles per JTAG clock |
 | PJON over PJDL | 56 | a PJON packet on one wire in any of PJDL's four modes: sync pads, data bits, the CRC8 PJON uses for packets of 15 bytes or less; it sends, since the line's other nodes need it released to a pull-down |
 | NXP LFAST with SIPI | 33 | LFAST frames at its low speed, 5 Mbit/s at 50 MHz: the sync pattern, the header, a SIPI frame and its CRC-16 made on the CRC register; it sends, and LVDS needs an external driver |
+| MIL-STD-1553B bus controller | 53 + 23 | Manchester II at 1 Mbit/s with command and data syncs and odd parity made on the chip; it reads each command to know how many data words follow and waits for a quiet bus; the second thread hears every word, the terminal's answers included. A real bus needs a transceiver and a coupling transformer |
+| ARINC 429 | 38 | bipolar return-to-zero on two pins, the label sent as the standard orders its bits, odd parity on the CRC register, the gap between words; 100 or 12.5 kbit/s exactly; the line needs a +-10 V driver |
+| SpaceWire | 45 + 13 | characters with the standard's parity on one thread, data-strobe encoding on the other; NULLs, data and EOP. It sends no flow-control tokens of its own; real links are LVDS |
+| ISO 7816-3 card reader | 62 + 2 | cold reset, the answer to reset at F 372, D 1, T=0 commands with procedure bytes, even parity, and the receiver's error signal with repetition; the other thread makes the card's clock. No PPS; the convention is set by the driver |
+| KNX TP1 | 63 | 9600 bit/s, 35 us pulses for a 0, characters with even parity, the telegram's checksum made on the chip, and the receiver's ACK read back; the 30 V bus needs a transceiver |
+| MVB (IEC 61375) | 112 | 1.5 Mbit/s Manchester with the start delimiters, master and slave frames and each block's check sequence made on the chip; at 50 MHz no whole number of clocks makes a bit, so the test runs at 48 MHz; the end delimiter follows published descriptions, not the standard's text |
+| SMPTE linear timecode | 78 | biphase mark, 80-bit frames with BCD time, user bits, the polarity bit computed ahead and the sync word, 25 frames a second; the host gives each frame's time |
 
 Everything from the I2C target down to CAN was written after the hardware
 was frozen at v1.4, as firmware alone.

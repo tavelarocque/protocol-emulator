@@ -389,7 +389,7 @@ with planted bugs. Section 5 lists the layers that found real ones.
 ### Planted bugs
 
 Every layer keeps its planted bugs in the repository as code, and the suite
-fails if any survives. There are 316 in all:
+fails if any survives. There are 400 in all:
 
 | Layer | Planted bugs | Where |
 |---|---:|---|
@@ -416,6 +416,7 @@ fails if any survives. There are 316 in all:
 | Microwire, HDMI-CEC and the infrared burst sender (4, 9, 5) | 18 | `sim/test_microwire.ml`, `sim/test_cec.ml`, `sim/test_ir.ml` |
 | Step and direction, the DHT22 reader, the level stream sender, TDM audio and the TLC5620 writer (6, 9, 3, 6, 7) | 31 | `sim/test_stepper.ml`, `sim/test_dht.ml`, `sim/test_bitstream.ml`, `sim/test_tdm.ml`, `sim/test_tlc5620.ml` |
 | SBUS, DShot, XY2-100, a caliper's port, I3C, SENT, J1850 VPW, Sony SIRC, SLE 4442, cJTAG, PJDL and LFAST (12, 9, 12, 9, 11, 8, 7, 7, 8, 9, 10, 7) | 109 | `sim/test_sbus.ml`, `test_dshot.ml`, `test_xy2.ml`, `test_caliper.ml`, `test_i3c.ml`, `test_sent.ml`, `test_j1850.ml`, `test_sirc.ml`, `test_sle4442.ml`, `test_cjtag.ml`, `test_pjdl.ml`, `test_lfast.ml` |
+| MIL-STD-1553B, ARINC 429, SpaceWire, ISO 7816, KNX TP1, MVB and SMPTE timecode (17, 12, 12, 13, 10, 11, 9) | 84 | `sim/test_mil1553.ml`, `test_arinc429.ml`, `test_spacewire.ml`, `test_iso7816.ml`, `test_knx.ml`, `test_mvb.ml`, `test_ltc.ml` |
 | Ethernet firmware, one each way | 2 | `sim/test_ethernet.ml`, `sim/test_ethernet_rx.ml` |
 | gate netlist | 5 | `gl_equiv/check.py`: the RTL-to-netlist proof |
 | memory description, one for each size | 2 | `formal/sram_equiv.py`: the proofs against IHP's models |
@@ -427,7 +428,7 @@ count as a catch. The host-port and register-file bugs are a parameter of
 `hw/top.ml`, off by default, following `hw/pe_core.ml`; the generated
 Verilog is byte-identical with or without the parameter in the source.
 
-All 316 are caught. Two candidates turned out not to be bugs, and the
+All 400 are caught. Two candidates turned out not to be bugs, and the
 reasons are informative:
 
 - Popping an empty RX FIFO: the proof showed the FIFO ignores that pop.

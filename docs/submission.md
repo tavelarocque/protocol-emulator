@@ -22,7 +22,7 @@ Simulation only; each run is checked when the page is built.
 
 The chip is a small CPU whose instructions read pins, write pins and count
 clock cycles. A protocol is a program, loaded over SPI after fabrication;
-the largest here is 70 instructions. Nothing in the hardware knows what
+the largest here is 112 instructions. Nothing in the hardware knows what
 UART, SPI or I2C is.
 
 The evidence that this is general is what happened after the hardware was
@@ -117,6 +117,14 @@ CRC. Seven are devices on engines the chip had: an nRF905 radio, AD5626,
 AD7920, LTC2422 and LTC2607 converters, an MCP23017 port expander, and
 TI's SDQ, which shares 1-Wire's timing. That makes 86.
 
+**Eight more, judged by sigrok pull requests and others' decoders.**
+MIL-STD-1553B as a bus controller, with a second thread reading the remote
+terminal's answers; ARINC 429; SpaceWire; an ISO 7816-3 smart card reader
+whose other thread clocks the card; KNX TP1; the MVB train bus; and SMPTE
+timecode, all new firmware with model tests and planted bugs; and a TPM 2.0
+on the SPI controller. Where two independent decoders exist the test must
+pass both. That makes 94.
+
 I3C showed a real limit of the instruction set. Its data line should be
 push-pull for data and open-drain for acknowledgements within one frame,
 but only the host sets a pin's mode, so the controller keeps SDA
@@ -210,6 +218,8 @@ finding what was missing; [`firmware.md`](firmware.md) tells that story.
 | 17 more devices, from an ATSHA204A to MIPS EJTAG | on the I2C, MDIO, SPI, Microwire, UART, 1-Wire and JTAG controllers | no new firmware |
 | SENT, J1850 VPW, DShot, SBUS, XY2-100, a caliper, I3C, cJTAG, PJON over PJDL, LFAST with SIPI, Sony SIRC, SLE 4442 | new engines, judged by decoders the packaged sigrok does not ship | 19 to 63 each |
 | nRF905, AD5626, AD7920, LTC2422, LTC2607, MCP23017, TI SDQ | on the SPI, I2C and 1-Wire controllers | no new firmware |
+| MIL-STD-1553B, ARINC 429, SpaceWire, ISO 7816 card reader, KNX TP1, MVB, SMPTE timecode | new engines, judged by sigrok pull requests and others' decoders | 38 to 112 each |
+| TPM 2.0 over SPI | on the SPI controller | no new firmware |
 
 ![SPI controller waveform from the reference model](img/spi.svg)
 
@@ -233,16 +243,16 @@ runs a program on the reference model and prints the pins.
    picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
    USB device, sockit_owm's 1-Wire slave. For USB, 1-Wire, WS2812, SWD, PS/2,
    CAN and every protocol added after them but Ethernet, the recorded pins
-   go to a protocol decoder (sigrok's, or for SENT, DShot and I3C one
-   published by others), 84 tests in all, 82 of them with a
+   go to a protocol decoder (sigrok's, or one
+   published by others), 92 tests in all, 90 of them with a
    fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
    receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
    sender has its own clock, 100 ppm off, and jitter on every edge.
-4. **Tests that are themselves tested.** 316 bugs are planted in the RTL,
+4. **Tests that are themselves tested.** 400 bugs are planted in the RTL,
    firmware, drivers, specifications and netlist, kept in the repository,
    and the build fails if any survives. Functional coverage also fails the
    build on any zero.
-5. **The gates, not only the RTL.** All 112 chip-level tests pass on the
+5. **The gates, not only the RTL.** All 120 chip-level tests pass on the
    post-layout netlist, with IHP's models of the SRAMs in place of the
    macros. That includes Ethernet at a 40 MHz clock, both ways.
 6. **The software that will run on the board.** The MicroPython driver is

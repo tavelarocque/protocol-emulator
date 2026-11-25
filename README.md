@@ -5,7 +5,7 @@
 An open-source protocol emulator ASIC for the
 [Jane Street protocol emulator competition](https://blog.janestreet.com/protocol-emulator-asic-competition/):
 a tiny CPU whose instructions read pins, write pins and count cycles, so UART,
-SPI, I2C and 83 other protocols, 10 Mbit Ethernet among them, are
+SPI, I2C and 91 other protocols, 10 Mbit Ethernet among them, are
 implemented in firmware loaded after fabrication rather than in fixed
 logic. Written in Hardcaml, designed for tapeout through
 [Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (8x4 tiles).
@@ -24,7 +24,7 @@ one-page summary for judges. This page is the map.
   protocol pins (input, push-pull or open-drain each), loaded over an SPI
   host port. LVS and the Tiny Tapeout precheck pass, and timing is met at
   50 MHz at every corner ([`docs/metrics.md`](docs/metrics.md)).
-- **86 protocols as firmware**, two running at a time. UART, SPI and I2C as
+- **94 protocols as firmware**, two running at a time. UART, SPI and I2C as
   required, in both roles for SPI and I2C; both stretch goals, low-speed
   USB as a host and 10 Mbit Ethernet, sending and receiving; JTAG, SWD,
   1-Wire, WS2812, PS/2 and CAN; I2S, DMX512, Wiegand, NEC and RC-5
@@ -34,11 +34,14 @@ one-page summary for judges. This page is the map.
   then SAE J2716 SENT and J1850 VPW from cars, DShot and SBUS from drones
   and radio control, XY2-100 laser scanners, a caliper's data port, MIPI
   I3C with dynamic address assignment, compact JTAG, PJON over PJDL, NXP
-  LFAST with SIPI, Sony infrared and an SLE 4442 card reader.
-  Thirty-eight have firmware of their own. Four are framed by the driver
+  LFAST with SIPI, Sony infrared and an SLE 4442 card reader; then
+  MIL-STD-1553, ARINC 429 and SpaceWire from aircraft and spacecraft, an
+  ISO 7816 smart card reader, KNX building automation, the MVB train bus
+  and SMPTE timecode.
+  Forty-five have firmware of their own. Four are framed by the driver
   on two senders that know no code (RC-6 on an infrared burst sender; Qi,
-  EM4100 and Morse on a sender of levels at a fixed rate), and forty-four
-  more (MIDI, LIN, Modbus RTU and forty-one devices on I2C, SPI,
+  EM4100 and Morse on a sender of levels at a fixed rate), and forty-five
+  more (MIDI, LIN, Modbus RTU and forty-two devices, a TPM 2.0 among them, on I2C, SPI,
   Microwire, UART, 1-Wire, JTAG and MDIO) run on the other engines with
   framing in the host driver.
 - **Hardware that did not need to know the protocols.** Nine engines were
@@ -63,8 +66,8 @@ one-page summary for judges. This page is the map.
   the RTL; and the memories those proofs assume equal IHP's own models of
   the SRAM macros.
 - **Judged by tools this project did not write.** Device models by other
-  people where one exists; for 84 tests the recorded pins go to a protocol
-  decoder: sigrok's, or for SENT, DShot and I3C one published by others.
+  people where one exists; for 92 tests the recorded pins go to a protocol
+  decoder: sigrok's, or one published by others.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
 - **Not yet done:** no FPGA or silicon run; and an Ethernet receiver that
@@ -158,7 +161,7 @@ history.
 
 Assembly for each is in [`examples/`](examples); descriptions and limits
 are in [`docs/firmware.md`](docs/firmware.md). Each thread has 256 words;
-the largest engine, Ethernet transmit, uses 70.
+the largest engine, the MVB train bus, uses 112, and Ethernet transmit 70.
 
 | Protocol | Role | Instructions | Checked against |
 |---|---|---|---|
@@ -227,6 +230,14 @@ the largest engine, Ethernet transmit, uses 70.
 | Compact JTAG (IEEE 1149.7) | probe, OScan1 | 55 | a target written from IEEE 1149.7; sigrok's newer cJTAG decoder |
 | PJON over PJDL | sender, any of PJDL's modes | 56 | sigrok's newer PJDL and PJON decoders |
 | NXP LFAST with SIPI | sender, 5 Mbit/s at 50 MHz | 33 | sigrok's newer LFAST and SIPI decoders |
+| MIL-STD-1553B | bus controller at 1 Mbit/s, with a second thread reading every word back | 53 + 23 | a remote terminal written from the standard; sigrok's 1553 decoder from pull request #28 |
+| ARINC 429 | sender, 100 kbit/s | 38 | two ARINC 429 decoders, by Aleksandr-Kai and by FrancescoTalotta |
+| SpaceWire | sender, data and strobe, 2 Mbit/s here, 10 at 50 MHz | 45 + 13 | sigrok's SpaceWire decoder from pull request #82 |
+| ISO 7816-3 smart card | reader, with the card's clock on the other thread | 62 + 2 | a card written from ISO 7816-3; two ISO 7816 decoders, by svenso and by arthursimas1 |
+| TPM 2.0 over SPI (TCG TIS) | on the SPI controller, wait states polled in one selection | no new firmware | the TPM written from the TCG specifications; sigrok's TPM decoders from pull request #88, and ghecko's |
+| KNX TP1 | sender that reads the receiver's ACK | 63 | a device written from the TP1 rules; two KNX decoders, by mwalle and by the selfbus project |
+| MVB (IEC 61375 train bus) | master and slave frames, 1.5 Mbit/s | 112 | a receiver written from published descriptions (the standard's text was not available); yeckel's MVB decoder |
+| SMPTE linear timecode | sender, 25 frames a second | 78 | sigrok's timecode decoder from pull request #136 |
 
 The "checked against" models are other people's wherever one exists. For
 SWD, PS/2 and CAN the device model is written here from the standard, so
@@ -234,11 +245,16 @@ the pins are also recorded and handed to sigrok's protocol decoders, which
 this project did not write ([`test/sigrok.py`](test/sigrok.py)). Every
 protocol from I2S down is judged the same way, by sigrok's decoder for it.
 The USB, 1-Wire and WS2812 recordings go to sigrok as well, beside the
-device models. In all but two of the 84 tests (DS1307 and PWM) one bit is
+device models. In all but two of the 92 tests (DS1307 and PWM) one bit is
 then forced on the recorded wire, and the decoder's verdict must change.
-Nineteen of those decoders are not in the packaged sigrok-cli 0.7.2:
-sixteen come from sigrok's own newer source, and three (SENT, DShot, I3C)
-were published by others.
+Twenty-seven of those protocols are judged by decoders the packaged
+sigrok-cli 0.7.2 does not ship: sixteen from sigrok's own newer source,
+four from sigrok pull requests not yet merged (MIL-STD-1553, SpaceWire,
+TPM over SPI, SMPTE timecode), and the rest published by others (SENT,
+DShot, I3C, ISO 7816, ARINC 429, KNX, MVB, with a second decoder for the
+smart card, ARINC 429, KNX and the TPM; a test must pass both). These are
+less reviewed than sigrok's own, and where one misreads a correct
+waveform the test's docstring says how.
 [`test/extra_decoders.sh`](test/extra_decoders.sh) fetches each at a fixed
 commit for the tests; none is copied into this repository.
 Ethernet has only the receiver and sender written here from the standard,
@@ -265,7 +281,7 @@ a bug.
 | Is every instruction defined? | Yes, all 65,536 words | exhaustive round trips, and the spec's datapath matched on every word |
 | Do the protocols work? | Each judged by an independent oracle | third-party device models and sigrok's decoders in cocotb, on the RTL and the gate netlist |
 | Does the host driver work? | The same file, unchanged | in cocotb, then in MicroPython on an emulated board (rp2040js) wired to the RTL |
-| Would the tests notice a bug? | 316 planted bugs, all caught | kept in the repo; the suite fails if one survives |
+| Would the tests notice a bug? | 400 planted bugs, all caught | kept in the repo; the suite fails if one survives |
 | Did the random tests reach everything? | Coverage is counted | any instruction, stall or timeout never seen fails the build |
 
 Generated files cannot drift: CI regenerates the Verilog, the firmware

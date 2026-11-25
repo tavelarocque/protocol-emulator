@@ -99,7 +99,10 @@ have a file each, named for their group: `host/i2c2_protocols.py` (LTC2607,
 MCP23017, SBUS), `motion_protocols.py` (DShot, XY2-100, a caliper's port),
 `i3c_protocols.py`, `auto_protocols.py` (SENT, J1850 VPW),
 `misc_protocols.py` (Sony SIRC, SLE 4442, TI SDQ) and `link_protocols.py`
-(compact JTAG, PJON over PJDL, LFAST with SIPI). Each needs
+(compact JTAG, PJON over PJDL, LFAST with SIPI), `aero_protocols.py`
+(MIL-STD-1553B, ARINC 429, SpaceWire), `card_protocols.py` (ISO 7816
+card reader, TPM 2.0 over SPI) and `rail_protocols.py` (KNX TP1, MVB,
+SMPTE timecode). Each needs
 `protocol_emulator.py` alone.
 
 With the demo board's microcontroller as SPI host: load a firmware image (for

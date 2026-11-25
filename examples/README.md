@@ -55,6 +55,13 @@ them, so they cannot drift.
 | [`cjtag.s`](cjtag.s) | Compact JTAG (IEEE 1149.7), OScan1 | 55 |
 | [`pjdl.s`](pjdl.s) | PJON over PJDL, sending | 56 |
 | [`lfast.s`](lfast.s) | NXP LFAST with SIPI frames, sending | 33 |
+| [`mil1553_bc.s`](mil1553_bc.s), [`mil1553_mon.s`](mil1553_mon.s) | MIL-STD-1553B bus controller and its listener | 53 + 23 |
+| [`arinc429_tx.s`](arinc429_tx.s) | ARINC 429 transmitter | 38 |
+| [`spacewire_chars.s`](spacewire_chars.s), [`spacewire_ds.s`](spacewire_ds.s) | SpaceWire characters and data-strobe encoder | 45 + 13 |
+| [`iso7816.s`](iso7816.s), [`iso7816_clk.s`](iso7816_clk.s) | ISO 7816-3 card reader and the card's clock | 62 + 2 |
+| [`knx_tx.s`](knx_tx.s) | KNX TP1 sender that reads the ACK | 63 |
+| [`mvb.s`](mvb.s) | MVB train bus, master and slave frames | 112 |
+| [`ltc.s`](ltc.s) | SMPTE linear timecode | 78 |
 | [`echo.s`](echo.s) | TX FIFO to RX FIFO, for bring-up | 5 |
 | [`ws2812/`](ws2812) | WS2812 LEDs: the blind firmware test, with its task and hidden test | 16 |
 
