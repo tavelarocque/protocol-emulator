@@ -1,0 +1,1 @@
+-config clkdiv=25,threshold=16,out_msb_first=1,out_base=0,out_count=1,set_base=0,set_count=1,timeout=14,timeout_vector=236,start=95 -mode 0=pp

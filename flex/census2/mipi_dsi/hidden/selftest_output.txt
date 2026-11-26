@@ -1,0 +1,220 @@
+ok    packets: exit sleep mode is 05 11 00 36 and display on 05 29 00 1C (the ECCs published for them)
+ok    packets: the checksum is CRC-16 0x1021 reflected from 0xFFFF (check value 0x6F91)
+ok    interface: the task sheet's example gives the words printed in the sheet (0x0005, 0x0011, 0x0139, 0x0005, 0x002A, 0x0000, 0x0000, 0x0000, 0x00EF)
+ok    interface: the wire bytes the sheet prints for its packets are the judge's (0x39, 0x05, 0x00, 0x36, 0x2A, 0x00, 0x00, 0x00, 0xEF, 0x48, 0x03)
+ok    interface: short packet two words; empty long packet two words, checksum 0xFFFF
+ok    generator: its own ECC and checksum give the judge's wire bytes in every case
+ok    example: the sheet's table for exit sleep mode is the judge's ideal (86 changes)
+ok    example: the generator's lane states for exit sleep mode are the judge's ideal
+ok    cases: 14 cases, 1 to 6 packets of 4 to 32 bytes on the wire (sizes 4 to 32)
+
+waveform    seed expected judge  cases   waveform decoder 
+                                 failed  check    check   what it is
+none        1    pass     pass   0/14    -        -       ideal: states of 5 cycles, first transmission at cycle 6000, Stop states of 200
+
+ok    seed 1: RATE bytes=29 cycles=2425, as the generator's transitions give
+
+none        2    pass     pass   0/14    -        -       ideal: states of 5 cycles, first transmission at cycle 6000, Stop states of 200
+
+ok    seed 2: RATE bytes=53 cycles=5870, as the generator's transitions give
+
+none        3    pass     pass   0/14    -        -       ideal: states of 5 cycles, first transmission at cycle 6000, Stop states of 200
+
+ok    seed 3: RATE bytes=15 cycles=1610, as the generator's transitions give
+
+none        7    pass     pass   0/14    -        -       ideal: states of 5 cycles, first transmission at cycle 6000, Stop states of 200
+
+ok    seed 7: RATE bytes=14 cycles=1225, as the generator's transitions give
+
+none        11   pass     pass   0/14    -        -       ideal: states of 5 cycles, first transmission at cycle 6000, Stop states of 200
+
+ok    seed 11: RATE bytes=42 cycles=4380, as the generator's transitions give
+
+fast        1    pass     pass   0/14    -        -       every state 3 cycles, first at cycle 5000, Stop states of 3 (all the limits)
+fast        2    pass     pass   0/14    -        -       every state 3 cycles, first at cycle 5000, Stop states of 3 (all the limits)
+fast        3    pass     pass   0/14    -        -       every state 3 cycles, first at cycle 5000, Stop states of 3 (all the limits)
+fast        7    pass     pass   0/14    -        -       every state 3 cycles, first at cycle 5000, Stop states of 3 (all the limits)
+fast        11   pass     pass   0/14    -        -       every state 3 cycles, first at cycle 5000, Stop states of 3 (all the limits)
+slow        1    pass     pass   0/14    -        -       every state 50 cycles, first at cycle 10000, Stop states of 1000 (all the limits)
+slow        2    pass     pass   0/14    -        -       every state 50 cycles, first at cycle 10000, Stop states of 1000 (all the limits)
+slow        3    pass     pass   0/14    -        -       every state 50 cycles, first at cycle 10000, Stop states of 1000 (all the limits)
+slow        7    pass     pass   0/14    -        -       every state 50 cycles, first at cycle 10000, Stop states of 1000 (all the limits)
+slow        11   pass     pass   0/14    -        -       every state 50 cycles, first at cycle 10000, Stop states of 1000 (all the limits)
+uneven      1    pass     pass   0/14    -        -       state lengths scattered from 3 to 50 cycles
+uneven      2    pass     pass   0/14    -        -       state lengths scattered from 3 to 50 cycles
+uneven      3    pass     pass   0/14    -        -       state lengths scattered from 3 to 50 cycles
+uneven      7    pass     pass   0/14    -        -       state lengths scattered from 3 to 50 cycles
+uneven      11   pass     pass   0/14    -        -       state lengths scattered from 3 to 50 cycles
+spare       1    pass     pass   0/14    -        -       P4, which the sheet leaves unused, toggling all through the run
+spare       2    pass     pass   0/14    -        -       P4, which the sheet leaves unused, toggling all through the run
+spare       3    pass     pass   0/14    -        -       P4, which the sheet leaves unused, toggling all through the run
+spare       7    pass     pass   0/14    -        -       P4, which the sheet leaves unused, toggling all through the run
+spare       11   pass     pass   0/14    -        -       P4, which the sheet leaves unused, toggling all through the run
+flipbit     1    fail     fail   14/14   objects  objects one bit of the last byte of the last packet inverted on the wire
+flipbit     2    fail     fail   14/14   objects  objects one bit of the last byte of the last packet inverted on the wire
+flipbit     3    fail     fail   14/14   objects  objects one bit of the last byte of the last packet inverted on the wire
+flipbit     7    fail     fail   14/14   objects  objects one bit of the last byte of the last packet inverted on the wire
+flipbit     11   fail     fail   14/14   objects  objects one bit of the last byte of the last packet inverted on the wire
+badecc      1    fail     fail   14/14   objects  objects ECC bit P2 inverted in every packet
+badecc      2    fail     fail   14/14   objects  objects ECC bit P2 inverted in every packet
+badecc      3    fail     fail   14/14   objects  objects ECC bit P2 inverted in every packet
+badecc      7    fail     fail   14/14   objects  objects ECC bit P2 inverted in every packet
+badecc      11   fail     fail   14/14   objects  objects ECC bit P2 inverted in every packet
+eccrev      1    fail     fail   13/14   objects  objects the six ECC bits in reverse order (P0 in bit 5)
+eccrev      2    fail     fail   14/14   objects  objects the six ECC bits in reverse order (P0 in bit 5)
+eccrev      3    fail     fail   14/14   objects  objects the six ECC bits in reverse order (P0 in bit 5)
+eccrev      7    fail     fail   14/14   objects  objects the six ECC bits in reverse order (P0 in bit 5)
+eccrev      11   fail     fail   13/14   objects  objects the six ECC bits in reverse order (P0 in bit 5)
+eccp6       1    fail     fail   14/14   objects  objects ECC bits P6 and P7 set to 1 instead of 0
+eccp6       2    fail     fail   14/14   objects  objects ECC bits P6 and P7 set to 1 instead of 0
+eccp6       3    fail     fail   14/14   objects  objects ECC bits P6 and P7 set to 1 instead of 0
+eccp6       7    fail     fail   14/14   objects  objects ECC bits P6 and P7 set to 1 instead of 0
+eccp6       11   fail     fail   14/14   objects  objects ECC bits P6 and P7 set to 1 instead of 0
+nocheck     1    fail     fail   12/14   objects  objects the checksum of every long packet left out
+nocheck     2    fail     fail   10/14   objects  objects the checksum of every long packet left out
+nocheck     3    fail     fail   9/14    objects  objects the checksum of every long packet left out
+nocheck     7    fail     fail   11/14   objects  objects the checksum of every long packet left out
+nocheck     11   fail     fail   12/14   objects  objects the checksum of every long packet left out
+badcheck    1    fail     fail   12/14   objects  objects one bit of every long packet's checksum inverted
+badcheck    2    fail     fail   10/14   objects  objects one bit of every long packet's checksum inverted
+badcheck    3    fail     fail   9/14    objects  objects one bit of every long packet's checksum inverted
+badcheck    7    fail     fail   11/14   objects  objects one bit of every long packet's checksum inverted
+badcheck    11   fail     fail   12/14   objects  objects one bit of every long packet's checksum inverted
+checkswap   1    fail     fail   12/14   objects  objects the checksum sent high byte first
+checkswap   2    fail     fail   10/14   objects  objects the checksum sent high byte first
+checkswap   3    fail     fail   9/14    objects  objects the checksum sent high byte first
+checkswap   7    fail     fail   11/14   objects  objects the checksum sent high byte first
+checkswap   11   fail     fail   12/14   objects  objects the checksum sent high byte first
+checkinit0  1    fail     fail   12/14   objects  objects the checksum's CRC started from 0 instead of 0xFFFF
+checkinit0  2    fail     fail   10/14   objects  objects the checksum's CRC started from 0 instead of 0xFFFF
+checkinit0  3    fail     fail   9/14    objects  objects the checksum's CRC started from 0 instead of 0xFFFF
+checkinit0  7    fail     fail   11/14   objects  objects the checksum's CRC started from 0 instead of 0xFFFF
+checkinit0  11   fail     fail   12/14   objects  objects the checksum's CRC started from 0 instead of 0xFFFF
+checkinv    1    fail     fail   12/14   objects  objects the checksum inverted (as CRC-16/X-25 would send it)
+checkinv    2    fail     fail   10/14   objects  objects the checksum inverted (as CRC-16/X-25 would send it)
+checkinv    3    fail     fail   9/14    objects  objects the checksum inverted (as CRC-16/X-25 would send it)
+checkinv    7    fail     fail   11/14   objects  objects the checksum inverted (as CRC-16/X-25 would send it)
+checkinv    11   fail     fail   12/14   objects  objects the checksum inverted (as CRC-16/X-25 would send it)
+wcmissing   1    fail     fail   12/14   objects  objects a long packet's word count bytes left out of the header
+wcmissing   2    fail     fail   10/14   objects  objects a long packet's word count bytes left out of the header
+wcmissing   3    fail     fail   9/14    objects  objects a long packet's word count bytes left out of the header
+wcmissing   7    fail     fail   11/14   objects  objects a long packet's word count bytes left out of the header
+wcmissing   11   fail     fail   12/14   objects  objects a long packet's word count bytes left out of the header
+msbfirst    1    fail     fail   14/14   objects  objects bytes sent most significant bit first
+msbfirst    2    fail     fail   14/14   objects  objects bytes sent most significant bit first
+msbfirst    3    fail     fail   14/14   objects  objects bytes sent most significant bit first
+msbfirst    7    fail     fail   14/14   objects  objects bytes sent most significant bit first
+msbfirst    11   fail     fail   14/14   objects  objects bytes sent most significant bit first
+cmdrev      1    fail     fail   14/14   objects  objects the LPDT command sent in reverse, 1,0,0,0,0,1,1,1
+cmdrev      2    fail     fail   14/14   objects  objects the LPDT command sent in reverse, 1,0,0,0,0,1,1,1
+cmdrev      3    fail     fail   14/14   objects  objects the LPDT command sent in reverse, 1,0,0,0,0,1,1,1
+cmdrev      7    fail     fail   14/14   objects  objects the LPDT command sent in reverse, 1,0,0,0,0,1,1,1
+cmdrev      11   fail     fail   14/14   objects  objects the LPDT command sent in reverse, 1,0,0,0,0,1,1,1
+ulps        1    fail     fail   14/14   objects  objects the ULPS entry command 0,0,0,1,1,1,1,0 instead of LPDT
+ulps        2    fail     fail   14/14   objects  objects the ULPS entry command 0,0,0,1,1,1,1,0 instead of LPDT
+ulps        3    fail     fail   14/14   objects  objects the ULPS entry command 0,0,0,1,1,1,1,0 instead of LPDT
+ulps        7    fail     fail   14/14   objects  objects the ULPS entry command 0,0,0,1,1,1,1,0 instead of LPDT
+ulps        11   fail     fail   14/14   objects  objects the ULPS entry command 0,0,0,1,1,1,1,0 instead of LPDT
+bta         1    fail     fail   14/14   objects  objects a turnaround request's entry (LP-10, LP-00, LP-10, LP-00) instead of escape entry
+bta         2    fail     fail   14/14   objects  objects a turnaround request's entry (LP-10, LP-00, LP-10, LP-00) instead of escape entry
+bta         3    fail     fail   14/14   objects  objects a turnaround request's entry (LP-10, LP-00, LP-10, LP-00) instead of escape entry
+bta         7    fail     fail   14/14   objects  objects a turnaround request's entry (LP-10, LP-00, LP-10, LP-00) instead of escape entry
+bta         11   fail     fail   14/14   objects  objects a turnaround request's entry (LP-10, LP-00, LP-10, LP-00) instead of escape entry
+nomark1     1    fail     fail   14/14   objects  objects exit straight from LP-00 to LP-11, no Mark-1
+nomark1     2    fail     fail   14/14   objects  objects exit straight from LP-00 to LP-11, no Mark-1
+nomark1     3    fail     fail   14/14   objects  objects exit straight from LP-00 to LP-11, no Mark-1
+nomark1     7    fail     fail   14/14   objects  objects exit straight from LP-00 to LP-11, no Mark-1
+nomark1     11   fail     fail   14/14   objects  objects exit straight from LP-00 to LP-11, no Mark-1
+nospace     1    fail     fail   14/14   objects  objects no space between two marks of different value (Dp and Dn change together)
+nospace     2    fail     fail   14/14   objects  objects no space between two marks of different value (Dp and Dn change together)
+nospace     3    fail     fail   14/14   objects  objects no space between two marks of different value (Dp and Dn change together)
+nospace     7    fail     fail   14/14   objects  objects no space between two marks of different value (Dp and Dn change together)
+nospace     11   fail     fail   14/14   objects  objects no space between two marks of different value (Dp and Dn change together)
+merged      1    fail     fail   11/14   objects  objects all of a run's packets in one transmission (the sheet asks one per packet)
+merged      2    fail     fail   11/14   objects  objects all of a run's packets in one transmission (the sheet asks one per packet)
+merged      3    fail     fail   10/14   objects  objects all of a run's packets in one transmission (the sheet asks one per packet)
+merged      7    fail     fail   10/14   objects  objects all of a run's packets in one transmission (the sheet asks one per packet)
+merged      11   fail     fail   9/14    objects  objects all of a run's packets in one transmission (the sheet asks one per packet)
+partial     1    fail     fail   14/14   objects  objects the last bit of the last transmission is not sent
+partial     2    fail     fail   14/14   objects  objects the last bit of the last transmission is not sent
+partial     3    fail     fail   14/14   objects  objects the last bit of the last transmission is not sent
+partial     7    fail     fail   14/14   objects  objects the last bit of the last transmission is not sent
+partial     11   fail     fail   14/14   objects  objects the last bit of the last transmission is not sent
+short2      1    fail     fail   14/14   objects  -       one state of the first transmission lasts 2 cycles
+short2      2    fail     fail   14/14   objects  -       one state of the first transmission lasts 2 cycles
+short2      3    fail     fail   14/14   objects  -       one state of the first transmission lasts 2 cycles
+short2      7    fail     fail   14/14   objects  -       one state of the first transmission lasts 2 cycles
+short2      11   fail     fail   14/14   objects  -       one state of the first transmission lasts 2 cycles
+long51      1    fail     fail   14/14   objects  -       one state of the first transmission lasts 51 cycles
+long51      2    fail     fail   14/14   objects  -       one state of the first transmission lasts 51 cycles
+long51      3    fail     fail   14/14   objects  -       one state of the first transmission lasts 51 cycles
+long51      7    fail     fail   14/14   objects  -       one state of the first transmission lasts 51 cycles
+long51      11   fail     fail   14/14   objects  -       one state of the first transmission lasts 51 cycles
+start4999   1    fail     fail   14/14   objects  -       first transmission at cycle 4999
+start4999   2    fail     fail   14/14   objects  -       first transmission at cycle 4999
+start4999   3    fail     fail   14/14   objects  -       first transmission at cycle 4999
+start4999   7    fail     fail   14/14   objects  -       first transmission at cycle 4999
+start4999   11   fail     fail   14/14   objects  -       first transmission at cycle 4999
+start10001  1    fail     fail   14/14   objects  -       first transmission at cycle 10001
+start10001  2    fail     fail   14/14   objects  -       first transmission at cycle 10001
+start10001  3    fail     fail   14/14   objects  -       first transmission at cycle 10001
+start10001  7    fail     fail   14/14   objects  -       first transmission at cycle 10001
+start10001  11   fail     fail   14/14   objects  -       first transmission at cycle 10001
+gap2        1    fail     fail   11/14   objects  -       Stop states of 2 cycles between transmissions
+gap2        2    fail     fail   11/14   objects  -       Stop states of 2 cycles between transmissions
+gap2        3    fail     fail   10/14   objects  -       Stop states of 2 cycles between transmissions
+gap2        7    fail     fail   10/14   objects  -       Stop states of 2 cycles between transmissions
+gap2        11   fail     fail   9/14    objects  -       Stop states of 2 cycles between transmissions
+gap1001     1    fail     fail   11/14   objects  -       Stop states of 1001 cycles between transmissions
+gap1001     2    fail     fail   11/14   objects  -       Stop states of 1001 cycles between transmissions
+gap1001     3    fail     fail   10/14   objects  -       Stop states of 1001 cycles between transmissions
+gap1001     7    fail     fail   10/14   objects  -       Stop states of 1001 cycles between transmissions
+gap1001     11   fail     fail   9/14    objects  -       Stop states of 1001 cycles between transmissions
+clkglitch   1    fail     fail   14/14   objects  -       CLKN low for 10 cycles in the middle of the run
+clkglitch   2    fail     fail   14/14   objects  -       CLKN low for 10 cycles in the middle of the run
+clkglitch   3    fail     fail   14/14   objects  -       CLKN low for 10 cycles in the middle of the run
+clkglitch   7    fail     fail   14/14   objects  -       CLKN low for 10 cycles in the middle of the run
+clkglitch   11   fail     fail   14/14   objects  -       CLKN low for 10 cycles in the middle of the run
+clklow      1    fail     fail   14/14   objects  -       the whole lane idle low from cycle 1: clock lane LP-00, data lane LP-00 between
+clklow      2    fail     fail   14/14   objects  -       the whole lane idle low from cycle 1: clock lane LP-00, data lane LP-00 between
+clklow      3    fail     fail   14/14   objects  -       the whole lane idle low from cycle 1: clock lane LP-00, data lane LP-00 between
+clklow      7    fail     fail   14/14   objects  -       the whole lane idle low from cycle 1: clock lane LP-00, data lane LP-00 between
+clklow      11   fail     fail   14/14   objects  -       the whole lane idle low from cycle 1: clock lane LP-00, data lane LP-00 between
+glitch      1    fail     fail   14/14   objects  -       Dn low for one cycle in the first Stop state after a transmission
+glitch      2    fail     fail   14/14   objects  -       Dn low for one cycle in the first Stop state after a transmission
+glitch      3    fail     fail   14/14   objects  -       Dn low for one cycle in the first Stop state after a transmission
+glitch      7    fail     fail   14/14   objects  -       Dn low for one cycle in the first Stop state after a transmission
+glitch      11   fail     fail   14/14   objects  -       Dn low for one cycle in the first Stop state after a transmission
+tail        1    fail     fail   14/14   objects  -       Dp low for 5 cycles, 1000 cycles after the last transmission
+tail        2    fail     fail   14/14   objects  -       Dp low for 5 cycles, 1000 cycles after the last transmission
+tail        3    fail     fail   14/14   objects  -       Dp low for 5 cycles, 1000 cycles after the last transmission
+tail        7    fail     fail   14/14   objects  -       Dp low for 5 cycles, 1000 cycles after the last transmission
+tail        11   fail     fail   14/14   objects  -       Dp low for 5 cycles, 1000 cycles after the last transmission
+droptx      1    fail     fail   14/14   objects  objects the last transmission is not sent
+droptx      2    fail     fail   14/14   objects  objects the last transmission is not sent
+droptx      3    fail     fail   14/14   objects  objects the last transmission is not sent
+droptx      7    fail     fail   14/14   objects  objects the last transmission is not sent
+droptx      11   fail     fail   14/14   objects  objects the last transmission is not sent
+extratx     1    fail     fail   14/14   objects  objects the last transmission is sent twice
+extratx     2    fail     fail   14/14   objects  objects the last transmission is sent twice
+extratx     3    fail     fail   14/14   objects  objects the last transmission is sent twice
+extratx     7    fail     fail   14/14   objects  objects the last transmission is sent twice
+extratx     11   fail     fail   14/14   objects  objects the last transmission is sent twice
+
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -config set_count=2,clkdiv=1\n': accepted
+ok    run_args.txt '-mo 0=pp -mo 1=pp -mo 2=pp -mo 3=pp -mo 4=in\n': accepted
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp\n': setup: FAIL: run_args.txt must make P0 to P3 push-pull (-mode P=pp); not so for P3
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp -mode 3=pp\n': setup: FAIL: run_args.txt must make P0 to P3 push-pull (-mode P=pp); not so for P1
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 3=in\n': setup: FAIL: run_args.txt must make P0 to P3 push-pull (-mode P=pp); not so for P3
+ok    run_args.txt '-mode 0=pp,1=pp,2=pp,3=pp\n': setup: FAIL: run_args.txt: -mode '0=pp,1=pp,2=pp,3=pp' is not P=pp|od|in
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -inputs 0xff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, real_idle: every case fails cleanly, no RATE line (case 0 (the task sheet's example, exit sleep mode: 1 packet, 4 bytes on the wire): FAIL: waveform: 0 transmissions on da)
+ok    real pe_sim, real_p0_low: every case fails cleanly, no RATE line (case 0 (the task sheet's example, exit sleep mode: 1 packet, 4 bytes on the wire): FAIL: waveform: data lane 0 is not ba)
+SELFTEST PASS

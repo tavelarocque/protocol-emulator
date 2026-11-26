@@ -1,0 +1,15 @@
+diff --git a/C2/pd.py b/C2/pd.py
+index fecd2bd..038dca9 100644
+--- a/C2/pd.py
++++ b/C2/pd.py
+@@ -45,8 +45,8 @@ class Decoder(srd.Decoder):
+     )
+     optional_channels = ()
+     annotations = (
+-        ('106', 'raw-Data', 'raw data'),
+-        ('106', 'c2-data', 'c2 data'),
++        ('raw-Data', 'raw data'),
++        ('c2-data', 'c2 data'),
+         ('warnings', 'Warnings'),
+     )
+     annotation_rows = (

@@ -1,0 +1,260 @@
+ok    interface: the sheet's example gives the words printed in the sheet (0x4001, 0x0020, 0xF000, 0x8003, 0x1ABC, 0xDE12, 0x1122, 0x3300)
+ok    interface: no data words for DLC 0; header bits 15 and 14; extended identifier split 13 + 16
+ok    example: the sheet's table of 64 bits is the judge's ideal frame (ACK slot at 4950, end at 5850)
+ok    example: CRC-17 0x05DE7, stuff count 3 (010), parity 1, as the sheet says
+ok    example: unacknowledged, the error flag from 5050 to 5650 and the end at 6450, as the sheet says
+ok    example: the stimulus file printed in the sheet is the judge's
+ok    example: the generator's edges for the example are the judge's
+ok    CRC: both routines, from zero, give the catalogue check values 0x04F03 (CRC-17, quoted in the sheet) and 0x0ED841 (CRC-21, used by no case)
+ok    cases: every frame has DLC 0 to 10 (a CRC-17), as the sheet says
+
+waveform    seed expected judge  cases   waveform rx     decoder 
+                                 failed  check    check  check   what it is
+none        1    pass     pass   0/17    -        -      -       ideal node
+
+ok    seed 1: RATE bytes=16 cycles=14660, as the generator's edges give
+
+none        2    pass     pass   0/17    -        -      -       ideal node
+
+ok    seed 2: RATE bytes=63 cycles=41825, as the generator's edges give
+
+none        3    pass     pass   0/17    -        -      -       ideal node
+
+ok    seed 3: RATE bytes=12 cycles=7110, as the generator's edges give
+
+none        7    pass     pass   0/17    -        -      -       ideal node
+
+ok    seed 7: RATE bytes=35 cycles=34500, as the generator's edges give
+
+none        11   pass     pass   0/17    -        -      -       ideal node
+
+ok    seed 11: RATE bytes=8 cycles=4825, as the generator's edges give
+
+jitter1     1    pass     pass   0/17    -        -      -       every chip edge 1 cycle off its place, alternately late and early (the limit)
+jitter1     2    pass     pass   0/17    -        -      -       every chip edge 1 cycle off its place, alternately late and early (the limit)
+jitter1     3    pass     pass   0/17    -        -      -       every chip edge 1 cycle off its place, alternately late and early (the limit)
+jitter1     7    pass     pass   0/17    -        -      -       every chip edge 1 cycle off its place, alternately late and early (the limit)
+jitter1     11   pass     pass   0/17    -        -      -       every chip edge 1 cycle off its place, alternately late and early (the limit)
+late1       1    pass     pass   0/17    -        -      -       every chip edge 1 cycle late (the limit)
+late1       2    pass     pass   0/17    -        -      -       every chip edge 1 cycle late (the limit)
+late1       3    pass     pass   0/17    -        -      -       every chip edge 1 cycle late (the limit)
+late1       7    pass     pass   0/17    -        -      -       every chip edge 1 cycle late (the limit)
+late1       11   pass     pass   0/17    -        -      -       every chip edge 1 cycle late (the limit)
+early1      1    pass     pass   0/17    -        -      -       every chip edge 1 cycle early (the limit)
+early1      2    pass     pass   0/17    -        -      -       every chip edge 1 cycle early (the limit)
+early1      3    pass     pass   0/17    -        -      -       every chip edge 1 cycle early (the limit)
+early1      7    pass     pass   0/17    -        -      -       every chip edge 1 cycle early (the limit)
+early1      11   pass     pass   0/17    -        -      -       every chip edge 1 cycle early (the limit)
+rxatack     1    pass     pass   0/17    -        -      -       each RX word pushed at the very start of the ACK slot (the earliest allowed)
+rxatack     2    pass     pass   0/17    -        -      -       each RX word pushed at the very start of the ACK slot (the earliest allowed)
+rxatack     3    pass     pass   0/17    -        -      -       each RX word pushed at the very start of the ACK slot (the earliest allowed)
+rxatack     7    pass     pass   0/17    -        -      -       each RX word pushed at the very start of the ACK slot (the earliest allowed)
+rxatack     11   pass     pass   0/17    -        -      -       each RX word pushed at the very start of the ACK slot (the earliest allowed)
+rxatend     1    pass     pass   0/17    -        -      -       each RX word pushed at the frame's end (the latest allowed)
+rxatend     2    pass     pass   0/17    -        -      -       each RX word pushed at the frame's end (the latest allowed)
+rxatend     3    pass     pass   0/17    -        -      -       each RX word pushed at the frame's end (the latest allowed)
+rxatend     7    pass     pass   0/17    -        -      -       each RX word pushed at the frame's end (the latest allowed)
+rxatend     11   pass     pass   0/17    -        -      -       each RX word pushed at the frame's end (the latest allowed)
+flipbit     1    fail     fail   17/17   objects  objects objects one data bit of the last frame sent wrong (stuffing and CRC follow it)
+flipbit     2    fail     fail   17/17   objects  objects objects one data bit of the last frame sent wrong (stuffing and CRC follow it)
+flipbit     3    fail     fail   17/17   objects  objects objects one data bit of the last frame sent wrong (stuffing and CRC follow it)
+flipbit     7    fail     fail   17/17   objects  objects objects one data bit of the last frame sent wrong (stuffing and CRC follow it)
+flipbit     11   fail     fail   17/17   objects  objects objects one data bit of the last frame sent wrong (stuffing and CRC follow it)
+crcbit      1    fail     fail   17/17   objects  -      objects one CRC bit of each frame inverted
+crcbit      2    fail     fail   17/17   objects  -      objects one CRC bit of each frame inverted
+crcbit      3    fail     fail   17/17   objects  -      objects one CRC bit of each frame inverted
+crcbit      7    fail     fail   17/17   objects  -      objects one CRC bit of each frame inverted
+crcbit      11   fail     fail   17/17   objects  -      objects one CRC bit of each frame inverted
+crcinit0    1    fail     fail   17/17   objects  -      objects the CRC started from zero (the pre-ISO CAN FD CRC)
+crcinit0    2    fail     fail   17/17   objects  -      objects the CRC started from zero (the pre-ISO CAN FD CRC)
+crcinit0    3    fail     fail   17/17   objects  -      objects the CRC started from zero (the pre-ISO CAN FD CRC)
+crcinit0    7    fail     fail   17/17   objects  -      objects the CRC started from zero (the pre-ISO CAN FD CRC)
+crcinit0    11   fail     fail   17/17   objects  -      objects the CRC started from zero (the pre-ISO CAN FD CRC)
+crcnostuff  1    fail     fail   16/17   objects  -      objects the CRC computed without the dynamic stuff bits
+crcnostuff  2    fail     fail   17/17   objects  -      objects the CRC computed without the dynamic stuff bits
+crcnostuff  3    fail     fail   17/17   objects  -      objects the CRC computed without the dynamic stuff bits
+crcnostuff  7    fail     fail   17/17   objects  -      objects the CRC computed without the dynamic stuff bits
+crcnostuff  11   fail     fail   16/17   objects  -      objects the CRC computed without the dynamic stuff bits
+crcnosc     1    fail     fail   17/17   objects  -      objects the CRC computed without the stuff count and parity
+crcnosc     2    fail     fail   17/17   objects  -      objects the CRC computed without the stuff count and parity
+crcnosc     3    fail     fail   17/17   objects  -      objects the CRC computed without the stuff count and parity
+crcnosc     7    fail     fail   17/17   objects  -      objects the CRC computed without the stuff count and parity
+crcnosc     11   fail     fail   17/17   objects  -      objects the CRC computed without the stuff count and parity
+binarysc    1    fail     fail   16/17   objects  -      objects the stuff count sent in binary, not Gray code
+binarysc    2    fail     fail   17/17   objects  -      objects the stuff count sent in binary, not Gray code
+binarysc    3    fail     fail   14/17   objects  -      objects the stuff count sent in binary, not Gray code
+binarysc    7    fail     fail   17/17   objects  -      objects the stuff count sent in binary, not Gray code
+binarysc    11   fail     fail   16/17   objects  -      objects the stuff count sent in binary, not Gray code
+oddparity   1    fail     fail   17/17   objects  -      objects the stuff count's parity bit inverted
+oddparity   2    fail     fail   17/17   objects  -      objects the stuff count's parity bit inverted
+oddparity   3    fail     fail   17/17   objects  -      objects the stuff count's parity bit inverted
+oddparity   7    fail     fail   17/17   objects  -      objects the stuff count's parity bit inverted
+oddparity   11   fail     fail   17/17   objects  -      objects the stuff count's parity bit inverted
+stufflast   1    fail     fail   8/17    objects  objects objects a dynamic stuff bit after the last data bit when its five last bits are equal
+stufflast   2    fail     fail   6/17    objects  objects objects a dynamic stuff bit after the last data bit when its five last bits are equal
+stufflast   3    fail     fail   6/17    objects  objects objects a dynamic stuff bit after the last data bit when its five last bits are equal
+stufflast   7    fail     fail   9/17    objects  objects objects a dynamic stuff bit after the last data bit when its five last bits are equal
+stufflast   11   fail     fail   11/17   objects  objects objects a dynamic stuff bit after the last data bit when its five last bits are equal
+nostuff     1    fail     fail   14/17   objects  objects objects no dynamic stuff bits in the data field
+nostuff     2    fail     fail   15/17   objects  objects objects no dynamic stuff bits in the data field
+nostuff     3    fail     fail   14/17   objects  objects objects no dynamic stuff bits in the data field
+nostuff     7    fail     fail   14/17   objects  objects objects no dynamic stuff bits in the data field
+nostuff     11   fail     fail   14/17   objects  objects objects no dynamic stuff bits in the data field
+nofsb       1    fail     fail   17/17   objects  objects objects no fixed stuff bits in the CRC field
+nofsb       2    fail     fail   17/17   objects  objects objects no fixed stuff bits in the CRC field
+nofsb       3    fail     fail   17/17   objects  objects objects no fixed stuff bits in the CRC field
+nofsb       7    fail     fail   17/17   objects  objects objects no fixed stuff bits in the CRC field
+nofsb       11   fail     fail   17/17   objects  objects objects no fixed stuff bits in the CRC field
+lsbfirst    1    fail     fail   13/17   objects  objects objects data bytes sent least significant bit first
+lsbfirst    2    fail     fail   12/17   objects  objects objects data bytes sent least significant bit first
+lsbfirst    3    fail     fail   13/17   objects  objects objects data bytes sent least significant bit first
+lsbfirst    7    fail     fail   13/17   objects  objects objects data bytes sent least significant bit first
+lsbfirst    11   fail     fail   13/17   objects  objects objects data bytes sent least significant bit first
+swapbytes   1    fail     fail   13/17   objects  objects objects the two bytes of each data word taken low byte first
+swapbytes   2    fail     fail   12/17   objects  objects objects the two bytes of each data word taken low byte first
+swapbytes   3    fail     fail   13/17   objects  objects objects the two bytes of each data word taken low byte first
+swapbytes   7    fail     fail   13/17   objects  objects objects the two bytes of each data word taken low byte first
+swapbytes   11   fail     fail   13/17   objects  objects objects the two bytes of each data word taken low byte first
+idsplit     1    fail     fail   11/17   objects  objects objects an extended identifier read as bits 28..18 in word 1, bits 17..0 in word 2
+idsplit     2    fail     fail   13/17   objects  objects objects an extended identifier read as bits 28..18 in word 1, bits 17..0 in word 2
+idsplit     3    fail     fail   10/17   objects  objects objects an extended identifier read as bits 28..18 in word 1, bits 17..0 in word 2
+idsplit     7    fail     fail   12/17   objects  objects objects an extended identifier read as bits 28..18 in word 1, bits 17..0 in word 2
+idsplit     11   fail     fail   11/17   objects  objects objects an extended identifier read as bits 28..18 in word 1, bits 17..0 in word 2
+esi1        1    fail     fail   17/17   objects  objects objects ESI sent recessive
+esi1        2    fail     fail   17/17   objects  objects objects ESI sent recessive
+esi1        3    fail     fail   17/17   objects  objects objects ESI sent recessive
+esi1        7    fail     fail   17/17   objects  objects objects ESI sent recessive
+esi1        11   fail     fail   17/17   objects  objects objects ESI sent recessive
+brs100      1    fail     fail   16/17   objects  objects objects the BRS bit a whole nominal bit: the rate switches at its end
+brs100      2    fail     fail   16/17   objects  objects objects the BRS bit a whole nominal bit: the rate switches at its end
+brs100      3    fail     fail   14/17   objects  objects objects the BRS bit a whole nominal bit: the rate switches at its end
+brs100      7    fail     fail   16/17   objects  objects objects the BRS bit a whole nominal bit: the rate switches at its end
+brs100      11   fail     fail   16/17   objects  objects objects the BRS bit a whole nominal bit: the rate switches at its end
+brs25       1    fail     fail   16/17   objects  objects objects the rate switches at the start of the BRS bit
+brs25       2    fail     fail   16/17   objects  objects objects the rate switches at the start of the BRS bit
+brs25       3    fail     fail   14/17   objects  objects objects the rate switches at the start of the BRS bit
+brs25       7    fail     fail   16/17   objects  objects objects the rate switches at the start of the BRS bit
+brs25       11   fail     fail   16/17   objects  objects objects the rate switches at the start of the BRS bit
+del100      1    fail     fail   16/17   objects  objects objects the rate switches back at the start of the CRC delimiter: a whole nominal bit
+del100      2    fail     fail   16/17   objects  objects objects the rate switches back at the start of the CRC delimiter: a whole nominal bit
+del100      3    fail     fail   14/17   objects  objects objects the rate switches back at the start of the CRC delimiter: a whole nominal bit
+del100      7    fail     fail   16/17   objects  objects objects the rate switches back at the start of the CRC delimiter: a whole nominal bit
+del100      11   fail     fail   16/17   objects  objects objects the rate switches back at the start of the CRC delimiter: a whole nominal bit
+del25       1    fail     fail   13/17   objects  -      objects the CRC delimiter a data-phase bit: the rate switches back at its end
+del25       2    fail     fail   13/17   objects  -      -       the CRC delimiter a data-phase bit: the rate switches back at its end
+del25       3    fail     fail   10/17   objects  -      -       the CRC delimiter a data-phase bit: the rate switches back at its end
+del25       7    fail     fail   14/17   objects  -      objects the CRC delimiter a data-phase bit: the rate switches back at its end
+del25       11   fail     fail   14/17   objects  -      -       the CRC delimiter a data-phase bit: the rate switches back at its end
+data26      1    fail     fail   16/17   objects  objects objects data-phase bits of 26 cycles
+data26      2    fail     fail   16/17   objects  objects objects data-phase bits of 26 cycles
+data26      3    fail     fail   14/17   objects  objects objects data-phase bits of 26 cycles
+data26      7    fail     fail   16/17   objects  objects objects data-phase bits of 26 cycles
+data26      11   fail     fail   16/17   objects  objects objects data-phase bits of 26 cycles
+nom99       1    fail     fail   17/17   objects  objects objects nominal bits of 99 cycles
+nom99       2    fail     fail   17/17   objects  objects objects nominal bits of 99 cycles
+nom99       3    fail     fail   17/17   objects  objects objects nominal bits of 99 cycles
+nom99       7    fail     fail   17/17   objects  objects objects nominal bits of 99 cycles
+nom99       11   fail     fail   17/17   objects  objects objects nominal bits of 99 cycles
+late2       1    fail     fail   17/17   objects  -      -       one edge of each frame 2 cycles late
+late2       2    fail     fail   17/17   objects  -      -       one edge of each frame 2 cycles late
+late2       3    fail     fail   17/17   objects  -      -       one edge of each frame 2 cycles late
+late2       7    fail     fail   17/17   objects  -      -       one edge of each frame 2 cycles late
+late2       11   fail     fail   17/17   objects  -      -       one edge of each frame 2 cycles late
+sof2002     1    fail     fail   17/17   objects  -      -       the first frame starts at cycle 2002
+sof2002     2    fail     fail   17/17   objects  -      -       the first frame starts at cycle 2002
+sof2002     3    fail     fail   17/17   objects  -      -       the first frame starts at cycle 2002
+sof2002     7    fail     fail   17/17   objects  -      -       the first frame starts at cycle 2002
+sof2002     11   fail     fail   17/17   objects  -      -       the first frame starts at cycle 2002
+ifs302      1    fail     fail   14/17   objects  -      -       each later frame starts 302 cycles after the one before ends
+ifs302      2    fail     fail   12/17   objects  -      -       each later frame starts 302 cycles after the one before ends
+ifs302      3    fail     fail   11/17   objects  -      -       each later frame starts 302 cycles after the one before ends
+ifs302      7    fail     fail   14/17   objects  -      -       each later frame starts 302 cycles after the one before ends
+ifs302      11   fail     fail   13/17   objects  -      -       each later frame starts 302 cycles after the one before ends
+selfack     1    fail     fail   17/17   objects  -      -       the chip pulls its own ACK slot low
+selfack     2    fail     fail   17/17   objects  -      -       the chip pulls its own ACK slot low
+selfack     3    fail     fail   17/17   objects  -      -       the chip pulls its own ACK slot low
+selfack     7    fail     fail   17/17   objects  -      -       the chip pulls its own ACK slot low
+selfack     11   fail     fail   17/17   objects  -      -       the chip pulls its own ACK slot low
+ignoreack   1    fail     fail   7/17    objects  objects objects the ACK is never looked at: no error flag, every RX word 0x0001
+ignoreack   2    fail     fail   7/17    objects  objects objects the ACK is never looked at: no error flag, every RX word 0x0001
+ignoreack   3    fail     fail   4/17    objects  objects objects the ACK is never looked at: no error flag, every RX word 0x0001
+ignoreack   7    fail     fail   6/17    objects  objects objects the ACK is never looked at: no error flag, every RX word 0x0001
+ignoreack   11   fail     fail   8/17    objects  objects objects the ACK is never looked at: no error flag, every RX word 0x0001
+flag5       1    fail     fail   7/17    objects  objects objects an error flag of 5 dominant bits
+flag5       2    fail     fail   7/17    objects  objects objects an error flag of 5 dominant bits
+flag5       3    fail     fail   4/17    objects  objects objects an error flag of 5 dominant bits
+flag5       7    fail     fail   6/17    objects  objects objects an error flag of 5 dominant bits
+flag5       11   fail     fail   8/17    objects  objects objects an error flag of 5 dominant bits
+flag7       1    fail     fail   7/17    objects  objects objects an error flag of 7 dominant bits
+flag7       2    fail     fail   7/17    objects  objects objects an error flag of 7 dominant bits
+flag7       3    fail     fail   4/17    objects  objects objects an error flag of 7 dominant bits
+flag7       7    fail     fail   6/17    objects  objects objects an error flag of 7 dominant bits
+flag7       11   fail     fail   8/17    objects  objects objects an error flag of 7 dominant bits
+flaglate    1    fail     fail   7/17    objects  objects objects the error flag starts a bit late, after a recessive ACK delimiter
+flaglate    2    fail     fail   7/17    objects  objects objects the error flag starts a bit late, after a recessive ACK delimiter
+flaglate    3    fail     fail   4/17    objects  objects objects the error flag starts a bit late, after a recessive ACK delimiter
+flaglate    7    fail     fail   6/17    objects  objects objects the error flag starts a bit late, after a recessive ACK delimiter
+flaglate    11   fail     fail   8/17    objects  objects objects the error flag starts a bit late, after a recessive ACK delimiter
+rxwrong     1    fail     fail   7/17    -        objects -       the right waveform, but RX word 0x0001 for a frame not acknowledged
+rxwrong     2    fail     fail   7/17    -        objects -       the right waveform, but RX word 0x0001 for a frame not acknowledged
+rxwrong     3    fail     fail   4/17    -        objects -       the right waveform, but RX word 0x0001 for a frame not acknowledged
+rxwrong     7    fail     fail   6/17    -        objects -       the right waveform, but RX word 0x0001 for a frame not acknowledged
+rxwrong     11   fail     fail   8/17    -        objects -       the right waveform, but RX word 0x0001 for a frame not acknowledged
+rxmissing   1    fail     fail   17/17   -        objects -       no RX word for the last frame
+rxmissing   2    fail     fail   17/17   -        objects -       no RX word for the last frame
+rxmissing   3    fail     fail   17/17   -        objects -       no RX word for the last frame
+rxmissing   7    fail     fail   17/17   -        objects -       no RX word for the last frame
+rxmissing   11   fail     fail   17/17   -        objects -       no RX word for the last frame
+rxextra     1    fail     fail   17/17   -        objects -       an extra RX word after the last frame's
+rxextra     2    fail     fail   17/17   -        objects -       an extra RX word after the last frame's
+rxextra     3    fail     fail   17/17   -        objects -       an extra RX word after the last frame's
+rxextra     7    fail     fail   17/17   -        objects -       an extra RX word after the last frame's
+rxextra     11   fail     fail   17/17   -        objects -       an extra RX word after the last frame's
+rxtoolate   1    fail     fail   17/17   -        objects -       each RX word pushed 1 cycle after the frame's end
+rxtoolate   2    fail     fail   17/17   -        objects -       each RX word pushed 1 cycle after the frame's end
+rxtoolate   3    fail     fail   17/17   -        objects -       each RX word pushed 1 cycle after the frame's end
+rxtoolate   7    fail     fail   17/17   -        objects -       each RX word pushed 1 cycle after the frame's end
+rxtoolate   11   fail     fail   17/17   -        objects -       each RX word pushed 1 cycle after the frame's end
+rxtooearly  1    fail     fail   17/17   -        objects -       each RX word pushed 1 cycle before the ACK slot starts
+rxtooearly  2    fail     fail   17/17   -        objects -       each RX word pushed 1 cycle before the ACK slot starts
+rxtooearly  3    fail     fail   17/17   -        objects -       each RX word pushed 1 cycle before the ACK slot starts
+rxtooearly  7    fail     fail   17/17   -        objects -       each RX word pushed 1 cycle before the ACK slot starts
+rxtooearly  11   fail     fail   17/17   -        objects -       each RX word pushed 1 cycle before the ACK slot starts
+glitch      1    fail     fail   17/17   objects  -      objects a one-cycle low pulse in the intermission after the first frame
+glitch      2    fail     fail   17/17   objects  -      objects a one-cycle low pulse in the intermission after the first frame
+glitch      3    fail     fail   17/17   objects  -      objects a one-cycle low pulse in the intermission after the first frame
+glitch      7    fail     fail   17/17   objects  -      objects a one-cycle low pulse in the intermission after the first frame
+glitch      11   fail     fail   17/17   objects  -      objects a one-cycle low pulse in the intermission after the first frame
+tail        1    fail     fail   17/17   objects  -      objects a one-cycle low pulse 1000 cycles after the last frame's end
+tail        2    fail     fail   17/17   objects  -      objects a one-cycle low pulse 1000 cycles after the last frame's end
+tail        3    fail     fail   17/17   objects  -      objects a one-cycle low pulse 1000 cycles after the last frame's end
+tail        7    fail     fail   17/17   objects  -      objects a one-cycle low pulse 1000 cycles after the last frame's end
+tail        11   fail     fail   17/17   objects  -      objects a one-cycle low pulse 1000 cycles after the last frame's end
+dropframe   1    fail     fail   17/17   objects  objects objects the last frame is not sent (and has no RX word)
+dropframe   2    fail     fail   17/17   objects  objects objects the last frame is not sent (and has no RX word)
+dropframe   3    fail     fail   17/17   objects  objects objects the last frame is not sent (and has no RX word)
+dropframe   7    fail     fail   17/17   objects  objects objects the last frame is not sent (and has no RX word)
+dropframe   11   fail     fail   17/17   objects  objects objects the last frame is not sent (and has no RX word)
+lowstart    1    fail     fail   17/17   objects  -      objects P0 pulled low for cycles 10 to 19 of the run
+lowstart    2    fail     fail   17/17   objects  -      objects P0 pulled low for cycles 10 to 19 of the run
+lowstart    3    fail     fail   17/17   objects  -      objects P0 pulled low for cycles 10 to 19 of the run
+lowstart    7    fail     fail   17/17   objects  -      objects P0 pulled low for cycles 10 to 19 of the run
+lowstart    11   fail     fail   17/17   objects  -      objects P0 pulled low for cycles 10 to 19 of the run
+
+ok    run_args.txt '-mode 0=od -config clkdiv=1\n': accepted
+ok    run_args.txt '-mo 0=od -mode 1=pp\n': accepted
+ok    run_args.txt '-config out_msb_first=1 -mode 0=od\n': accepted
+ok    run_args.txt '-mode 0=pp\n': setup: FAIL: run_args.txt must make P0 open-drain (-mode 0=od)
+ok    run_args.txt '-config clkdiv=1\n': setup: FAIL: run_args.txt must make P0 open-drain (-mode 0=od)
+ok    run_args.txt '-mode 0=od -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=od -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=od -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=od -inputs 0xff\n': setup: FAIL: run_args.txt must not give -inputs: the test does
+ok    run_args.txt '-mode 0=od -stimulus s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=od -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=od\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, real_idle: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 1 frame, 1 byte): FAIL: waveform: P0 never makes change 0: a fall at cycle 2000 (frame)
+ok    real pe_sim, real_low_only: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 1 frame, 1 byte): FAIL: waveform: change 0 of P0: falls at cycle 1, wanted a fall at 2)
+SELFTEST PASS
+exit status 0

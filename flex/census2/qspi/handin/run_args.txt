@@ -1,0 +1,1 @@
+-config out_base=0,out_count=4,set_base=0,set_count=1,sideset_base=4,sideset_count=2,threshold=16,out_msb_first=1 -mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp

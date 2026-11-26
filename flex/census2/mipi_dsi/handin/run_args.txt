@@ -1,0 +1,1 @@
+-config set_base=0,set_count=2,out_base=4,out_count=3,threshold=8,in_msb_first=1,crc_poly=0x8408,crc_init=0xFFFF -mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp -mode 6=pp

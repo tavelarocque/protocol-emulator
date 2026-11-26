@@ -1,0 +1,33 @@
+diff --git a/can-fd/pd.py b/can-fd/pd.py
+index 0ad2203..9e27685 100644
+--- a/can-fd/pd.py
++++ b/can-fd/pd.py
+@@ -24,7 +24,17 @@
+ ## 2024/3/28 DreamSourceLab : Display data when zooming out 
+ ##
+ 
+-from common.srdhelper import bitpack_msb
++from common.srdhelper import bitpack
++
++# Port to sigrok-cli 0.7.2: its common.srdhelper has no bitpack_msb. This is
++# DSView's own definition (libsigrokdecode4DSL common/srdhelper/mod.py).
++def bitpack_msb(bits, idx=None):
++    '''Conversion from MSB first bit sequence to integer.'''
++    bits = bits[:]
++    if idx is not None:
++        bits = [b[idx] for b in bits]
++    bits.reverse()
++    return bitpack(bits)
+ import sigrokdecode as srd
+ 
+ class SamplerateError(Exception):
+@@ -614,7 +624,7 @@ class Decoder(srd.Decoder):
+                 
+                 pos = self.get_sample_point(self.curbit)
+                 (can_rx,) = self.wait([{'skip': pos - self.samplenum}, {0: 'f'}])
+-                if (self.matched & (0b1 << 1)):
++                if self.matched[1]:  # port: sigrok 0.7.2 gives a tuple, DSView a bitmask
+                     self.dom_edge_seen()
+-                if (self.matched & (0b1 << 0)):
++                if self.matched[0]:  # port: as above
+                     self.handle_bit(can_rx)

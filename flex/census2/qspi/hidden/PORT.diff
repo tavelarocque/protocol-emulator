@@ -1,0 +1,76 @@
+diff --git a/qspi/pd.py b/qspi/pd.py
+index 2723842..fdb0205 100644
+--- a/qspi/pd.py
++++ b/qspi/pd.py
+@@ -68,7 +68,7 @@ class Decoder(srd.Decoder):
+         {'id': 'wordsize', 'desc': 'Word size', 'default': 8, 'idn':'dec_qspi_opt_wordsize'},
+     )
+     annotations = (
+-        ('106', 'data', 'data'),
++        ('data', 'data'),
+     )
+     annotation_rows = (
+         ('data', 'data', (0,)),
+@@ -171,7 +171,7 @@ class Decoder(srd.Decoder):
+         self.reset_decoder_state()
+ 
+     def find_clk_edge(self, datapins, clk, cs, first):
+-        if self.have_cs and (first or (self.matched & (0b1 << self.have_cs))):
++        if self.have_cs and (first or self.matched[self.have_cs]):
+             # Send all CS# pin value changes.
+             oldcs = None if first else 1 - cs
+ 
+@@ -183,7 +183,7 @@ class Decoder(srd.Decoder):
+             return
+ 
+         # Ignore sample if the clock pin hasn't changed.
+-        if first or not (self.matched & (0b1 << 0)):
++        if first or not self.matched[0]:
+             return
+ 
+         # Found the correct clock edge, now get the SPI bit(s).
+diff --git a/smart_qspi/pd.py b/smart_qspi/pd.py
+index 0668b08..b67e63d 100644
+--- a/smart_qspi/pd.py
++++ b/smart_qspi/pd.py
+@@ -219,14 +219,14 @@ class Decoder(srd.Decoder):
+ 
+     )
+     annotations = (
+-        ('6', 'data-transfer', 'data transfer'),
+-        ('108', 'Quad data', 'Q-Data'),
+-        ('108', 'Dual data', 'D-Data'),
+-        ('106', 'd0', 'IO0 data'),
+-        ('106', 'd1', 'IO1 data'),
+-        ('106', 'd2', 'IO2 data'),
+-        ('106', 'd3', 'IO3 data'),
+-        ('1000', 'other', 'Human-readable warnings'),
++        ('data-transfer', 'data transfer'),
++        ('Quad data', 'Q-Data'),
++        ('Dual data', 'D-Data'),
++        ('d0', 'IO0 data'),
++        ('d1', 'IO1 data'),
++        ('d2', 'IO2 data'),
++        ('d3', 'IO3 data'),
++        ('other', 'Human-readable warnings'),
+     )
+     annotation_rows = (
+         ('data-transfer', 'data transfer', (0,)),
+@@ -571,7 +571,7 @@ class Decoder(srd.Decoder):
+ 
+     def find_clk_edge(self, datapins, clk, cs, first,frame):
+ 
+-        if self.have_cs and (first or (self.matched & (0b1 << self.have_cs))):
++        if self.have_cs and (first or self.matched[self.have_cs]):
+             # Send all CS# pin value changes.
+             oldcs = None if first else 1 - cs
+             self.put(self.samplenum, self.samplenum, self.out_python,
+@@ -604,7 +604,7 @@ class Decoder(srd.Decoder):
+             return
+ 
+         # Ignore sample if the clock pin hasn't changed.
+-        if first or not (self.matched & (0b1 << 0)):
++        if first or not self.matched[0]:
+             return
+ 
+         # Found the correct clock edge, now get the SPI bit(s).

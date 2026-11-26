@@ -1,0 +1,1 @@
+-config clkdiv=4,set_base=0,set_count=2,out_base=0,out_count=1,threshold=16 -mode 0=pp -mode 1=pp

@@ -1,0 +1,258 @@
+{
+ "eth_an": [
+  {
+   "line": 15,
+   "from": "nop [15]",
+   "to": "nop [14]",
+   "verdict": "PASS"
+  },
+  {
+   "line": 29,
+   "from": "out pins, 1             ; data pulse Dk at T+625 (P0 = Dk)",
+   "to": "out pins, 2",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 31,
+   "from": "set x, 18               ; 1 tick",
+   "to": "set x, 19",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 26,
+   "from": "set x, 18               ; 1 tick",
+   "to": "set x, 17",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 22,
+   "from": "set y, 15               ; 16 bits, D0 first (OSR shifts LSB first)",
+   "to": "set y, 16",
+   "verdict": "FAIL"
+  }
+ ],
+ "qspi": [
+  {
+   "line": 37,
+   "from": "out pins, 4     side 0          ; bits 7..4 on IO3..IO0",
+   "to": "out pins, 3     side 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 38,
+   "from": "nop             side 1",
+   "to": "nop             side 2",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 26,
+   "from": "jmp x-- cmd     side 1",
+   "to": "jmp x-- cmd     side 2",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 22,
+   "from": "mov osr, x      side 2",
+   "to": "mov osr, x      side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 26,
+   "from": "jmp x-- cmd     side 1",
+   "to": "jmp x-- cmd     side 2",
+   "verdict": "FAIL"
+  }
+ ],
+ "st7789": [
+  {
+   "line": 9,
+   "from": "jmp byte           side 0",
+   "to": "jmp byte           side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 9,
+   "from": "jmp byte           side 0",
+   "to": "jmp byte           side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 17,
+   "from": "jmp !y data        side 0      ; SCL low; not last: another data byte",
+   "to": "jmp !y data        side 1",
+   "verdict": "PASS"
+  },
+  {
+   "line": 6,
+   "from": "idle:   set pins, 3        side 0      ; CSX high, D/CX high, SCL low",
+   "to": "idle:   set pins, 3        side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 14,
+   "from": "out null, 1        side 0      ; bit 8: command flag, implied by position",
+   "to": "out null, 2        side 0",
+   "verdict": "FAIL"
+  }
+ ],
+ "c2": [
+  {
+   "line": 49,
+   "from": "in null, 10      side 1 [2]      ; -5..-3 right-justify",
+   "to": "in null, 10      side 1 [3]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 75,
+   "from": "rd:     nop              side 0 [1]      ; t8,t9",
+   "to": "rd:     nop              side 1 [1]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 55,
+   "from": "jmp y-- wfall    side 1 [3]      ; t4..t7",
+   "to": "jmp y-- wfall    side 1 [2]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 66,
+   "from": "dtail:  mov x, osr       side 0          ; t9 reads: X = bytes - 1",
+   "to": "dtail:  mov x, osr       side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 40,
+   "from": "jmp !y evn       side 1          ; -15 AR or DR",
+   "to": "jmp !y evn       side 0",
+   "verdict": "FAIL"
+  }
+ ],
+ "mipi_rffe": [
+  {
+   "line": 127,
+   "from": "jmp x-- p3      side 1",
+   "to": "jmp x-- p3      side 0",
+   "verdict": "PASS"
+  },
+  {
+   "line": 86,
+   "from": "mov x, y        side 0",
+   "to": "mov x, y        side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 172,
+   "from": "ST5:    set x, 7        side 0 [3]      ; o15: LO_r, then TA",
+   "to": "ST5:    set x, 7        side 0 [4]",
+   "verdict": "PASS"
+  },
+  {
+   "line": 62,
+   "from": "K12:    in y, 3         side 0          ; e12",
+   "to": "K12:    in y, 4         side 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 38,
+   "from": "jmp x-- q5      side 0",
+   "to": "jmp x-- q5      side 1",
+   "verdict": "FAIL"
+  }
+ ],
+ "mipi_dsi": [
+  {
+   "line": 60,
+   "from": "W5:     set x, 5            ; round 5: P0",
+   "to": "W5:     set x, 4",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 101,
+   "from": "out null, 3",
+   "to": "out null, 2",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 21,
+   "from": "set x, 8",
+   "to": "set x, 9",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 173,
+   "from": "set pins, 0 [2]",
+   "to": "set pins, 1 [2]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 48,
+   "from": "out null, 5",
+   "to": "out null, 4",
+   "verdict": "FAIL"
+  }
+ ],
+ "fsi": [
+  {
+   "line": 49,
+   "from": "jmp LAB         side 1 [2]      ; F+13..F+15",
+   "to": "jmp LAB         side 1 [3]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 103,
+   "from": "out null, 14    side 0          ; F+5",
+   "to": "out null, 13    side 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 225,
+   "from": "DXL:    jmp TOI         side 1 [4]      ; F+13..F+17",
+   "to": "DXL:    jmp TOI         side 0 [4]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 215,
+   "from": "jmp x!=y RD2    side 0          ; F+6",
+   "to": "jmp x!=y RD2    side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 172,
+   "from": "nop             side 1",
+   "to": "nop             side 0",
+   "verdict": "PASS"
+  }
+ ],
+ "can_fd": [
+  {
+   "line": 125,
+   "from": "N10:    set x, 9",
+   "to": "N10:    set x, 8",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 119,
+   "from": "out null, 11                  ; segment ESI, DLC",
+   "to": "out null, 12",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 270,
+   "from": "out null, 3                   ; 23",
+   "to": "out null, 2",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 231,
+   "from": "set pins, 1                   ; 2",
+   "to": "set pins, 2",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 138,
+   "from": "set y, 22                     ; +100",
+   "to": "set y, 23",
+   "verdict": "FAIL"
+  }
+ ]
+}

@@ -1,0 +1,127 @@
+ok    interface: the task sheet's example gives the words printed in the sheet (0x012A, 0x0000, 0x0000, 0x0000, 0x02EF, 0x0329)
+ok    interface: a lone command has bits 8 and 9 set; bit 9 only on a transfer's last byte
+ok    the task sheet says 'The host sends only the words defined above.'
+ok    the task sheet says 'All line coding, framing and timing must be done by the firmware.'
+ok    the task sheet says '100 cycles per byte'
+ok    the task sheet says 'plus 2000 cycles'
+ok    the task sheet says '0 to 1000 data bytes'
+ok    the task sheet says '50 MHz'
+good             seed 1: ACCEPT PASS, 0 of 16 cases failed, exit 0  -> as expected
+    (correct, every time at its fewest whole cycles)
+ok    seed 1: RATE bytes=22 cycles=709, as the ideal waveform's changes give
+good             seed 2: ACCEPT PASS, 0 of 16 cases failed, exit 0  -> as expected
+ok    seed 2: RATE bytes=39 cycles=1263, as the ideal waveform's changes give
+good             seed 3: ACCEPT PASS, 0 of 16 cases failed, exit 0  -> as expected
+ok    seed 3: RATE bytes=77 cycles=2467, as the ideal waveform's changes give
+good_relaxed     seed 1: ACCEPT PASS, 0 of 16 cases failed, exit 0  -> as expected
+    (correct, with random slack, a slower uneven clock, and noise on SCL, SDA, D/CX while CSX is high and on P4 to P7 throughout)
+good_relaxed     seed 2: ACCEPT PASS, 0 of 16 cases failed, exit 0  -> as expected
+good_relaxed     seed 3: ACCEPT PASS, 0 of 16 cases failed, exit 0  -> as expected
+bad_bit          seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+    (one data bit inverted)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: sigrok decoded 1 bytes, wanted 1; first difference at byte 0: got C:19, wanted C:11; framing: 1 CSX low pulses, wanted 1; pulse 0 holds command 19 with 0 data bytes, wanted command 
+bad_bit          seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_bit          seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_lsb          seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+    (bytes sent least significant bit first)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: sigrok decoded 1 bytes, wanted 1; first difference at byte 0: got C:88, wanted C:11; framing: 1 CSX low pulses, wanted 1; pulse 0 holds command 88 with 0 data bytes, wanted command 
+bad_lsb          seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_lsb          seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_dc_level     seed 1: ACCEPT FAIL, 13 of 16 cases failed, exit 1, caught by both  -> as expected
+    (data bytes sent with D/CX low)
+    first: case 1 (the task sheet's example: 2 transfers, 6 bytes): FAIL: sigrok decoded 6 bytes, wanted 6; first difference at byte 1: got C:00 C:00 C:00 C:EF, wanted D:00 D:00 D:00 D:EF; cycle 63: D/CX is 0 for data byte 1; cycle 95: D/CX is 0 for d
+bad_dc_level     seed 2: ACCEPT FAIL, 13 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_dc_level     seed 3: ACCEPT FAIL, 14 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_dc_cmd       seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+    (the first command byte sent with D/CX high)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: sigrok decoded 1 bytes, wanted 1; first difference at byte 0: got D:11, wanted C:11; cycle 31: D/CX is 1 for the command byte
+bad_dc_cmd       seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_dc_cmd       seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_extra        seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+    (one extra NOP transfer at the end)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: sigrok decoded 2 bytes, wanted 1; first difference at byte 1: got C:00, wanted (nothing); framing: 2 CSX low pulses, wanted 1; pulse 1 holds command 00 with 0 data bytes, wanted (no
+bad_extra        seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_extra        seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_missing      seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+    (the last byte of the last transfer left out)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: sigrok decoded 0 bytes, wanted 1; first difference at byte 0: got (nothing), wanted C:11; framing: 0 CSX low pulses, wanted 1; pulse 0 holds (nothing), wanted command 11 with 0 data
+bad_missing      seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_missing      seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_stray_bits   seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+    (three stray SCL pulses after the last byte of the first transfer)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: cycle 2: 11 clock pulses in this CSX low pulse, not a whole number of bytes
+bad_stray_bits   seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_stray_bits   seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_period_high  seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+    (one SCL pulse high for 1 cycle: period 60 ns (limit 66))
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: cycle 15: SCL period 60 ns (min 66); cycle 19: SCL period 60 ns (min 66)
+bad_period_high  seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_period_high  seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_period_low   seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+    (one SCL low gap of 1 cycle: period 60 ns (limit 66))
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: cycle 15: SCL period 60 ns (min 66)
+bad_period_low   seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_period_low   seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_sda_setup    seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+    (SDA changes in the same cycle as one SCL rising edge)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: cycle 19: SDA changes within 10 ns before or 10 ns after this SCL rising edge
+bad_sda_setup    seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_sda_setup    seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_dc_setup     seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+    (D/CX reaches its level in the same cycle as one 8th SCL rising edge)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: cycle 31: D/CX changes between 10 ns before the 8th SCL rising edge and 10 ns after the falling edge that ends that pulse
+bad_dc_setup     seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_dc_setup     seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_dc_hold      seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+    (D/CX changes in the same cycle as the falling edge after one 8th bit)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: sigrok decoded 1 bytes, wanted 1; first difference at byte 0: got D:11, wanted C:11; cycle 31: D/CX changes between 10 ns before the 8th SCL rising edge and 10 ns after the falling 
+bad_dc_hold      seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_dc_hold      seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_cs_high      seed 1: ACCEPT FAIL, 14 of 16 cases failed, exit 1, caught by direct  -> as expected
+    (CSX high for 20 ns between transfers (limit 40))
+    first: case 1 (the task sheet's example: 2 transfers, 6 bytes): FAIL: cycle 163: CSX high for only 20 ns between transfers (min 40)
+bad_cs_high      seed 2: ACCEPT FAIL, 12 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_cs_high      seed 3: ACCEPT FAIL, 14 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_cs_split     seed 1: ACCEPT FAIL, 13 of 16 cases failed, exit 1, caught by direct  -> as expected
+    (CSX pulses high between a command byte and its data)
+    first: case 1 (the task sheet's example: 2 transfers, 6 bytes): FAIL: cycle 66: D/CX is 1 for the command byte; framing: 3 CSX low pulses, wanted 2; pulse 0 holds command 2A with 0 data bytes, wanted command 2A with 4 data bytes
+bad_cs_split     seed 2: ACCEPT FAIL, 13 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_cs_split     seed 3: ACCEPT FAIL, 14 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_cs_stuck     seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+    (CSX never returns high after the last transfer)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: cycle 2: CSX is still low when the run ends (cycle 2100); framing: 0 CSX low pulses, wanted 1; pulse 0 holds (nothing), wanted command 11 with 0 data bytes
+bad_cs_stuck     seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_cs_stuck     seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_cs_early     seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+    (CSX rises in the same cycle as the last SCL falling edge)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: sigrok decoded 0 bytes, wanted 1; first difference at byte 0: got (nothing), wanted C:11; cycle 33: SCL is not low, or changes less than 15 ns before, at this rising edge of CSX
+bad_cs_early     seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_cs_early     seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_css          seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+    (the first SCL rising edge in the same cycle as CSX falls)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: sigrok decoded 0 bytes, wanted 1; first difference at byte 0: got (nothing), wanted C:11; cycle 2: SCL is not low, or changes less than 15 ns before, at this falling edge of CSX; cy
+bad_css          seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_css          seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_scl_idle     seed 1: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+    (SCL only goes low in the same cycle as the first CSX falling edge)
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: cycle 1: SCL is not low, or changes less than 15 ns before, at this falling edge of CSX
+bad_scl_idle     seed 2: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_scl_idle     seed 3: ACCEPT FAIL, 16 of 16 cases failed, exit 1, caught by direct  -> as expected
+bad_late         seed 1: ACCEPT FAIL, 14 of 16 cases failed, exit 1, caught by both  -> as expected
+    (starts so late that it is not finished when the run ends)
+    first: case 1 (the task sheet's example: 2 transfers, 6 bytes): FAIL: sigrok decoded 1 bytes, wanted 6; first difference at byte 1: got (nothing), wanted D:00 D:00 D:00 D:EF; cycle 2542: CSX is still low when the run ends (cycle 2600); framing: 0 
+bad_late         seed 2: ACCEPT FAIL, 14 of 16 cases failed, exit 1, caught by both  -> as expected
+bad_late         seed 3: ACCEPT FAIL, 15 of 16 cases failed, exit 1, caught by both  -> as expected
+verdicts as expected: 6 good runs passed, 57 bad runs failed
+ok    run_args.txt with ' -config clkdiv=1': accepted
+ok    run_args.txt with ' -tx other.txt': FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt with ' -t other.txt': FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt with ' -cycles 5': FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt with ' -inputs 0xff': FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt with ' -stimulus s.txt': FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt with '\n-config clkdiv=1': FAIL: run_args.txt must be one line
+ok    run_args.txt with P3 open-drain is refused
+real pe_sim, idle program: ACCEPT FAIL, 16 cases failed, no RATE line, exit 1 -> as expected
+    first: case 0 (one command, no data: 1 transfers, 1 bytes): FAIL: sigrok decoded 0 bytes, wanted 1; first difference at byte 0: got (nothing), wanted C:11; framing: 0 CSX low pulses, wanted 1; pulse 0 holds (nothing), wanted command 11 with 0 data
+ok    the st7789 decoder folder has no change against its commit (no port)
+VALIDATION OK

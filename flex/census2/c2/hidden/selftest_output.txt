@@ -1,0 +1,255 @@
+ok    interface: the example is the words 0x1000, 0x4001, and the firmware pushes 0x0030
+ok    interface: a Data Write of 0x12, 0x34 is 0x3002, 0x0012, 0x0034
+ok    interface: an Address Read is 0x2000; one rx word per byte the device sends
+ok    interface: the stand-in reads the judge's words back into the same frames
+ok    example: the sheet's table is the judge's schedule, slot by slot (29 slots)
+ok    example: the sheet's stimulus file is the judge's (0 ff; 2953 fd; 3153 ff; 3253 fd; 3353 ff)
+ok    example: N = 3550, S = 29
+ok    example: the ideal bus with the sheet's stimulus decodes as the sheet's frames
+ok    example: without the adjustment the decoder misreads the device's bits (WriteAddress(0x00), ReadData(1)=0x61)
+
+waveform      seed expected judge  cases   waveform decoder rx     
+                                   failed  check    check   check  what it is
+none          1    pass     pass   0/14    -        -       -      ideal: reset from cycle 1 to 1500, strobes low 20 cycles, chip bits put out and C2D released 10 cycles after a rising edge
+
+ok    seed 1: RATE bytes=16 cycles=11299, as the generator's output gives
+
+none          2    pass     pass   0/14    -        -       -      ideal: reset from cycle 1 to 1500, strobes low 20 cycles, chip bits put out and C2D released 10 cycles after a rising edge
+
+ok    seed 2: RATE bytes=2 cycles=3199, as the generator's output gives
+
+none          3    pass     pass   0/14    -        -       -      ideal: reset from cycle 1 to 1500, strobes low 20 cycles, chip bits put out and C2D released 10 cycles after a rising edge
+
+ok    seed 3: RATE bytes=17 cycles=11049, as the generator's output gives
+
+none          7    pass     pass   0/14    -        -       -      ideal: reset from cycle 1 to 1500, strobes low 20 cycles, chip bits put out and C2D released 10 cycles after a rising edge
+
+ok    seed 7: RATE bytes=1 cycles=2549, as the generator's output gives
+
+none          11   pass     pass   0/14    -        -       -      ideal: reset from cycle 1 to 1500, strobes low 20 cycles, chip bits put out and C2D released 10 cycles after a rising edge
+
+ok    seed 11: RATE bytes=14 cycles=10599, as the generator's output gives
+
+jitter2       1    pass     pass   0/14    -        -       -      rising edges alternately 2 cycles early and 2 late (the limit)
+jitter2       2    pass     pass   0/14    -        -       -      rising edges alternately 2 cycles early and 2 late (the limit)
+jitter2       3    pass     pass   0/14    -        -       -      rising edges alternately 2 cycles early and 2 late (the limit)
+jitter2       7    pass     pass   0/14    -        -       -      rising edges alternately 2 cycles early and 2 late (the limit)
+jitter2       11   pass     pass   0/14    -        -       -      rising edges alternately 2 cycles early and 2 late (the limit)
+late2         1    pass     pass   0/14    -        -       -      every rising edge 2 cycles late
+late2         2    pass     pass   0/14    -        -       -      every rising edge 2 cycles late
+late2         3    pass     pass   0/14    -        -       -      every rising edge 2 cycles late
+late2         7    pass     pass   0/14    -        -       -      every rising edge 2 cycles late
+late2         11   pass     pass   0/14    -        -       -      every rising edge 2 cycles late
+low4          1    pass     pass   0/14    -        -       -      strobes low 4 cycles (the shortest allowed)
+low4          2    pass     pass   0/14    -        -       -      strobes low 4 cycles (the shortest allowed)
+low4          3    pass     pass   0/14    -        -       -      strobes low 4 cycles (the shortest allowed)
+low4          7    pass     pass   0/14    -        -       -      strobes low 4 cycles (the shortest allowed)
+low4          11   pass     pass   0/14    -        -       -      strobes low 4 cycles (the shortest allowed)
+low40jit      1    pass     pass   0/14    -        -       -      strobes low 40 cycles with rising edges alternately 2 late and 2 early: high for 6 cycles (both limits)
+low40jit      2    pass     pass   0/14    -        -       -      strobes low 40 cycles with rising edges alternately 2 late and 2 early: high for 6 cycles (both limits)
+low40jit      3    pass     pass   0/14    -        -       -      strobes low 40 cycles with rising edges alternately 2 late and 2 early: high for 6 cycles (both limits)
+low40jit      7    pass     pass   0/14    -        -       -      strobes low 40 cycles with rising edges alternately 2 late and 2 early: high for 6 cycles (both limits)
+low40jit      11   pass     pass   0/14    -        -       -      strobes low 40 cycles with rising edges alternately 2 late and 2 early: high for 6 cycles (both limits)
+reset1100     1    pass     pass   0/14    -        -       -      reset low from cycle 300 to 1400: the latest fall, the shortest reset
+reset1100     2    pass     pass   0/14    -        -       -      reset low from cycle 300 to 1400: the latest fall, the shortest reset
+reset1100     3    pass     pass   0/14    -        -       -      reset low from cycle 300 to 1400: the latest fall, the shortest reset
+reset1100     7    pass     pass   0/14    -        -       -      reset low from cycle 300 to 1400: the latest fall, the shortest reset
+reset1100     11   pass     pass   0/14    -        -       -      reset low from cycle 300 to 1400: the latest fall, the shortest reset
+reset1800     1    pass     pass   0/14    -        -       -      reset low from cycle 300 to 1800: the latest rise
+reset1800     2    pass     pass   0/14    -        -       -      reset low from cycle 300 to 1800: the latest rise
+reset1800     3    pass     pass   0/14    -        -       -      reset low from cycle 300 to 1800: the latest rise
+reset1800     7    pass     pass   0/14    -        -       -      reset low from cycle 300 to 1800: the latest rise
+reset1800     11   pass     pass   0/14    -        -       -      reset low from cycle 300 to 1800: the latest rise
+setuplimit    1    pass     pass   0/14    -        -       -      each chip bit put out in the cycle before C2CK falls (the latest allowed)
+setuplimit    2    pass     pass   0/14    -        -       -      each chip bit put out in the cycle before C2CK falls (the latest allowed)
+setuplimit    3    pass     pass   0/14    -        -       -      each chip bit put out in the cycle before C2CK falls (the latest allowed)
+setuplimit    7    pass     pass   0/14    -        -       -      each chip bit put out in the cycle before C2CK falls (the latest allowed)
+setuplimit    11   pass     pass   0/14    -        -       -      each chip bit put out in the cycle before C2CK falls (the latest allowed)
+holdlimit     1    pass     pass   0/14    -        -       -      each chip bit put out in the cycle after the rising edge before (the earliest allowed)
+holdlimit     2    pass     pass   0/14    -        -       -      each chip bit put out in the cycle after the rising edge before (the earliest allowed)
+holdlimit     3    pass     pass   0/14    -        -       -      each chip bit put out in the cycle after the rising edge before (the earliest allowed)
+holdlimit     7    pass     pass   0/14    -        -       -      each chip bit put out in the cycle after the rising edge before (the earliest allowed)
+holdlimit     11   pass     pass   0/14    -        -       -      each chip bit put out in the cycle after the rising edge before (the earliest allowed)
+releaselimit  1    pass     pass   0/14    -        -       -      C2D released in the cycle C2CK falls for the strobe after the chip's field (the latest allowed)
+releaselimit  2    pass     pass   0/14    -        -       -      C2D released in the cycle C2CK falls for the strobe after the chip's field (the latest allowed)
+releaselimit  3    pass     pass   0/14    -        -       -      C2D released in the cycle C2CK falls for the strobe after the chip's field (the latest allowed)
+releaselimit  7    pass     pass   0/14    -        -       -      C2D released in the cycle C2CK falls for the strobe after the chip's field (the latest allowed)
+releaselimit  11   pass     pass   0/14    -        -       -      C2D released in the cycle C2CK falls for the strobe after the chip's field (the latest allowed)
+pushlate      1    pass     pass   0/14    -        -       -      every rx word pushed at the very end of the run
+pushlate      2    pass     pass   0/14    -        -       -      every rx word pushed at the very end of the run
+pushlate      3    pass     pass   0/14    -        -       -      every rx word pushed at the very end of the run
+pushlate      7    pass     pass   0/14    -        -       -      every rx word pushed at the very end of the run
+pushlate      11   pass     pass   0/14    -        -       -      every rx word pushed at the very end of the run
+flipbit       1    fail     fail   14/14   objects  objects -      the last chip-driven bit of the last frame inverted
+flipbit       2    fail     fail   14/14   objects  objects -      the last chip-driven bit of the last frame inverted
+flipbit       3    fail     fail   14/14   objects  objects -      the last chip-driven bit of the last frame inverted
+flipbit       7    fail     fail   14/14   objects  objects -      the last chip-driven bit of the last frame inverted
+flipbit       11   fail     fail   14/14   objects  objects -      the last chip-driven bit of the last frame inverted
+msbfirst      1    fail     fail   12/14   objects  objects objects ADDRESS and DATA bytes sent and read most significant bit first
+msbfirst      2    fail     fail   11/14   objects  objects objects ADDRESS and DATA bytes sent and read most significant bit first
+msbfirst      3    fail     fail   11/14   objects  objects objects ADDRESS and DATA bytes sent and read most significant bit first
+msbfirst      7    fail     fail   12/14   objects  objects objects ADDRESS and DATA bytes sent and read most significant bit first
+msbfirst      11   fail     fail   12/14   objects  objects objects ADDRESS and DATA bytes sent and read most significant bit first
+insmsb        1    fail     fail   9/14    objects  objects -      the INS code sent most significant bit first (Address Read and Data Write swapped)
+insmsb        2    fail     fail   10/14   objects  objects -      the INS code sent most significant bit first (Address Read and Data Write swapped)
+insmsb        3    fail     fail   12/14   objects  objects -      the INS code sent most significant bit first (Address Read and Data Write swapped)
+insmsb        7    fail     fail   12/14   objects  objects -      the INS code sent most significant bit first (Address Read and Data Write swapped)
+insmsb        11   fail     fail   11/14   objects  objects -      the INS code sent most significant bit first (Address Read and Data Write swapped)
+lenn          1    fail     fail   10/14   objects  objects -      LENGTH sent as n, not n - 1
+lenn          2    fail     fail   10/14   objects  objects -      LENGTH sent as n, not n - 1
+lenn          3    fail     fail   11/14   objects  objects -      LENGTH sent as n, not n - 1
+lenn          7    fail     fail   8/14    objects  objects -      LENGTH sent as n, not n - 1
+lenn          11   fail     fail   13/14   objects  objects -      LENGTH sent as n, not n - 1
+rxwrong       1    fail     fail   11/14   -        -       objects the last rx word has its lowest bit inverted
+rxwrong       2    fail     fail   10/14   -        -       objects the last rx word has its lowest bit inverted
+rxwrong       3    fail     fail   13/14   -        -       objects the last rx word has its lowest bit inverted
+rxwrong       7    fail     fail   13/14   -        -       objects the last rx word has its lowest bit inverted
+rxwrong       11   fail     fail   12/14   -        -       objects the last rx word has its lowest bit inverted
+rxmissing     1    fail     fail   11/14   -        -       objects the last rx word is not pushed
+rxmissing     2    fail     fail   10/14   -        -       objects the last rx word is not pushed
+rxmissing     3    fail     fail   13/14   -        -       objects the last rx word is not pushed
+rxmissing     7    fail     fail   13/14   -        -       objects the last rx word is not pushed
+rxmissing     11   fail     fail   12/14   -        -       objects the last rx word is not pushed
+rxextra       1    fail     fail   14/14   -        -       objects one extra rx word, 0, after the last
+rxextra       2    fail     fail   14/14   -        -       objects one extra rx word, 0, after the last
+rxextra       3    fail     fail   14/14   -        -       objects one extra rx word, 0, after the last
+rxextra       7    fail     fail   14/14   -        -       objects one extra rx word, 0, after the last
+rxextra       11   fail     fail   14/14   -        -       objects one extra rx word, 0, after the last
+rxhigh        1    fail     fail   11/14   -        -       objects rx words with bits 15..8 set
+rxhigh        2    fail     fail   10/14   -        -       objects rx words with bits 15..8 set
+rxhigh        3    fail     fail   13/14   -        -       objects rx words with bits 15..8 set
+rxhigh        7    fail     fail   13/14   -        -       objects rx words with bits 15..8 set
+rxhigh        11   fail     fail   12/14   -        -       objects rx words with bits 15..8 set
+readatedge    1    fail     fail   11/14   -        -       objects the device's bits read in the cycle of the rising edge, before the device answers
+readatedge    2    fail     fail   10/14   -        -       objects the device's bits read in the cycle of the rising edge, before the device answers
+readatedge    3    fail     fail   13/14   -        -       objects the device's bits read in the cycle of the rising edge, before the device answers
+readatedge    7    fail     fail   13/14   -        -       objects the device's bits read in the cycle of the rising edge, before the device answers
+readatedge    11   fail     fail   12/14   -        -       objects the device's bits read in the cycle of the rising edge, before the device answers
+late3         1    fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles late
+late3         2    fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles late
+late3         3    fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles late
+late3         7    fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles late
+late3         11   fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles late
+early3        1    fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles early
+early3        2    fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles early
+early3        3    fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles early
+early3        7    fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles early
+early3        11   fail     fail   14/14   objects  -       -      the sixth strobe (its fall and rise) 3 cycles early
+slot51        1    fail     fail   14/14   objects  objects objects slots of 51 cycles: the error adds up
+slot51        2    fail     fail   14/14   objects  objects objects slots of 51 cycles: the error adds up
+slot51        3    fail     fail   14/14   objects  objects objects slots of 51 cycles: the error adds up
+slot51        7    fail     fail   14/14   objects  objects objects slots of 51 cycles: the error adds up
+slot51        11   fail     fail   14/14   objects  objects objects slots of 51 cycles: the error adds up
+low3          1    fail     fail   14/14   objects  -       -      strobes low 3 cycles
+low3          2    fail     fail   14/14   objects  -       -      strobes low 3 cycles
+low3          3    fail     fail   14/14   objects  -       -      strobes low 3 cycles
+low3          7    fail     fail   14/14   objects  -       -      strobes low 3 cycles
+low3          11   fail     fail   14/14   objects  -       -      strobes low 3 cycles
+low41         1    fail     fail   14/14   objects  -       -      strobes low 41 cycles
+low41         2    fail     fail   14/14   objects  -       -      strobes low 41 cycles
+low41         3    fail     fail   14/14   objects  -       -      strobes low 41 cycles
+low41         7    fail     fail   14/14   objects  -       -      strobes low 41 cycles
+low41         11   fail     fail   14/14   objects  -       -      strobes low 41 cycles
+reset1099     1    fail     fail   14/14   objects  -       -      reset low for 1099 cycles (cycle 1 to 1100)
+reset1099     2    fail     fail   14/14   objects  -       -      reset low for 1099 cycles (cycle 1 to 1100)
+reset1099     3    fail     fail   14/14   objects  -       -      reset low for 1099 cycles (cycle 1 to 1100)
+reset1099     7    fail     fail   14/14   objects  -       -      reset low for 1099 cycles (cycle 1 to 1100)
+reset1099     11   fail     fail   14/14   objects  -       -      reset low for 1099 cycles (cycle 1 to 1100)
+resetfall301  1    fail     fail   14/14   objects  -       -      reset falls at cycle 301
+resetfall301  2    fail     fail   14/14   objects  -       -      reset falls at cycle 301
+resetfall301  3    fail     fail   14/14   objects  -       -      reset falls at cycle 301
+resetfall301  7    fail     fail   14/14   objects  -       -      reset falls at cycle 301
+resetfall301  11   fail     fail   14/14   objects  -       -      reset falls at cycle 301
+resetrise1801 1    fail     fail   14/14   objects  -       -      reset rises at cycle 1801
+resetrise1801 2    fail     fail   14/14   objects  -       -      reset rises at cycle 1801
+resetrise1801 3    fail     fail   14/14   objects  -       -      reset rises at cycle 1801
+resetrise1801 7    fail     fail   14/14   objects  -       -      reset rises at cycle 1801
+resetrise1801 11   fail     fail   14/14   objects  -       -      reset rises at cycle 1801
+noreset       1    fail     fail   14/14   objects  objects -      no device reset
+noreset       2    fail     fail   14/14   objects  objects -      no device reset
+noreset       3    fail     fail   14/14   objects  objects -      no device reset
+noreset       7    fail     fail   14/14   objects  objects -      no device reset
+noreset       11   fail     fail   14/14   objects  objects -      no device reset
+holdbad       1    fail     fail   14/14   objects  objects -      chip bits changed in the cycle of the rising edge before
+holdbad       2    fail     fail   14/14   objects  objects -      chip bits changed in the cycle of the rising edge before
+holdbad       3    fail     fail   14/14   objects  objects -      chip bits changed in the cycle of the rising edge before
+holdbad       7    fail     fail   14/14   objects  objects -      chip bits changed in the cycle of the rising edge before
+holdbad       11   fail     fail   14/14   objects  objects -      chip bits changed in the cycle of the rising edge before
+setupbad      1    fail     fail   14/14   objects  -       -      chip bits put out in the cycle C2CK falls
+setupbad      2    fail     fail   14/14   objects  -       -      chip bits put out in the cycle C2CK falls
+setupbad      3    fail     fail   14/14   objects  -       -      chip bits put out in the cycle C2CK falls
+setupbad      7    fail     fail   14/14   objects  -       -      chip bits put out in the cycle C2CK falls
+setupbad      11   fail     fail   14/14   objects  -       -      chip bits put out in the cycle C2CK falls
+contend       1    fail     fail   11/14   objects  -       -      C2D released one cycle after C2CK falls for the strobe after the chip's field
+contend       2    fail     fail   12/14   objects  -       -      C2D released one cycle after C2CK falls for the strobe after the chip's field
+contend       3    fail     fail   11/14   objects  -       -      C2D released one cycle after C2CK falls for the strobe after the chip's field
+contend       7    fail     fail   10/14   objects  -       -      C2D released one cycle after C2CK falls for the strobe after the chip's field
+contend       11   fail     fail   12/14   objects  -       -      C2D released one cycle after C2CK falls for the strobe after the chip's field
+startpull     1    fail     fail   14/14   objects  -       -      the chip pulls C2D low for 5 cycles while C2CK is low in every START strobe
+startpull     2    fail     fail   14/14   objects  -       -      the chip pulls C2D low for 5 cycles while C2CK is low in every START strobe
+startpull     3    fail     fail   14/14   objects  -       -      the chip pulls C2D low for 5 cycles while C2CK is low in every START strobe
+startpull     7    fail     fail   14/14   objects  -       -      the chip pulls C2D low for 5 cycles while C2CK is low in every START strobe
+startpull     11   fail     fail   14/14   objects  -       -      the chip pulls C2D low for 5 cycles while C2CK is low in every START strobe
+strayclk      1    fail     fail   14/14   objects  objects -      an extra strobe in the first idle slot
+strayclk      2    fail     fail   14/14   objects  objects -      an extra strobe in the first idle slot
+strayclk      3    fail     fail   14/14   objects  objects -      an extra strobe in the first idle slot
+strayclk      7    fail     fail   14/14   objects  objects -      an extra strobe in the first idle slot
+strayclk      11   fail     fail   14/14   objects  objects -      an extra strobe in the first idle slot
+nostop        1    fail     fail   14/14   objects  objects -      the last frame has no STOP strobe
+nostop        2    fail     fail   14/14   objects  objects -      the last frame has no STOP strobe
+nostop        3    fail     fail   14/14   objects  objects -      the last frame has no STOP strobe
+nostop        7    fail     fail   14/14   objects  objects -      the last frame has no STOP strobe
+nostop        11   fail     fail   14/14   objects  objects -      the last frame has no STOP strobe
+nowait        1    fail     fail   10/14   objects  objects objects WAIT fields left out (no strobe)
+nowait        2    fail     fail   10/14   objects  objects objects WAIT fields left out (no strobe)
+nowait        3    fail     fail   11/14   objects  objects objects WAIT fields left out (no strobe)
+nowait        7    fail     fail   8/14    objects  objects objects WAIT fields left out (no strobe)
+nowait        11   fail     fail   13/14   objects  objects objects WAIT fields left out (no strobe)
+gap2          1    fail     fail   10/14   objects  objects objects two idle slots between frames
+gap2          2    fail     fail   11/14   objects  objects objects two idle slots between frames
+gap2          3    fail     fail   11/14   objects  objects objects two idle slots between frames
+gap2          7    fail     fail   10/14   objects  objects objects two idle slots between frames
+gap2          11   fail     fail   13/14   objects  objects objects two idle slots between frames
+dropframe     1    fail     fail   14/14   objects  objects objects the last frame is not sent
+dropframe     2    fail     fail   14/14   objects  objects objects the last frame is not sent
+dropframe     3    fail     fail   14/14   objects  objects objects the last frame is not sent
+dropframe     7    fail     fail   14/14   objects  objects objects the last frame is not sent
+dropframe     11   fail     fail   14/14   objects  objects objects the last frame is not sent
+extraframe    1    fail     fail   14/14   objects  objects objects the last frame is sent twice
+extraframe    2    fail     fail   14/14   objects  objects objects the last frame is sent twice
+extraframe    3    fail     fail   14/14   objects  objects objects the last frame is sent twice
+extraframe    7    fail     fail   14/14   objects  objects objects the last frame is sent twice
+extraframe    11   fail     fail   14/14   objects  objects objects the last frame is sent twice
+clkglitch     1    fail     fail   14/14   objects  objects -      a one-cycle low pulse on C2CK in the first idle slot
+clkglitch     2    fail     fail   14/14   objects  objects -      a one-cycle low pulse on C2CK in the first idle slot
+clkglitch     3    fail     fail   14/14   objects  objects -      a one-cycle low pulse on C2CK in the first idle slot
+clkglitch     7    fail     fail   14/14   objects  objects -      a one-cycle low pulse on C2CK in the first idle slot
+clkglitch     11   fail     fail   14/14   objects  objects -      a one-cycle low pulse on C2CK in the first idle slot
+endlow        1    fail     fail   14/14   objects  objects -      C2CK falls in the slot after the last idle slot and stays low
+endlow        2    fail     fail   14/14   objects  objects -      C2CK falls in the slot after the last idle slot and stays low
+endlow        3    fail     fail   14/14   objects  objects -      C2CK falls in the slot after the last idle slot and stays low
+endlow        7    fail     fail   14/14   objects  objects -      C2CK falls in the slot after the last idle slot and stays low
+endlow        11   fail     fail   14/14   objects  objects -      C2CK falls in the slot after the last idle slot and stays low
+datlowend     1    fail     fail   14/14   objects  -       -      the chip pulls C2D low after the last frame and leaves it there
+datlowend     2    fail     fail   14/14   objects  -       -      the chip pulls C2D low after the last frame and leaves it there
+datlowend     3    fail     fail   14/14   objects  -       -      the chip pulls C2D low after the last frame and leaves it there
+datlowend     7    fail     fail   14/14   objects  -       -      the chip pulls C2D low after the last frame and leaves it there
+datlowend     11   fail     fail   14/14   objects  -       -      the chip pulls C2D low after the last frame and leaves it there
+
+ok    run_args.txt '-mode 0=pp -mode 1=od\n': accepted
+ok    run_args.txt '-mode 1=od -mode 0=pp -config clkdiv=5,set_base=0\n': accepted
+ok    run_args.txt '-mo 0=pp -mo 1=od\n': accepted
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=in\n': accepted
+ok    run_args.txt '-mode 0=pp -mode 1=pp\n': setup: FAIL: pin modes must be P0 pp (C2CK) and P1 od (C2D); got P1=pp
+ok    run_args.txt '-mode 0=od -mode 1=od\n': setup: FAIL: pin modes must be P0 pp (C2CK) and P1 od (C2D); got P0=od
+ok    run_args.txt '-mode 0=pp\n': setup: FAIL: pin modes must be P0 pp (C2CK) and P1 od (C2D); got P1=in
+ok    run_args.txt '-mode 0=pp -mode 1=od -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -stimulus s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -inputs 0xff\n': setup: FAIL: run_args.txt must not give -inputs: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-mode 1=od\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode 0=pp -mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, real_idle: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 2 frames, 2 bytes): FAIL: waveform: C2CK does not fall for the device reset by cycle 3)
+ok    real pe_sim, real_clk_low: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 2 frames, 2 bytes): FAIL: waveform: C2CK does not rise at the end of the device reset )
+SELFTEST PASS

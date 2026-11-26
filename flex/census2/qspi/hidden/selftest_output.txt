@@ -1,0 +1,220 @@
+ok    interface: the task sheet's example gives the 18 words printed in the sheet
+ok    interface: three address bytes high first, bit 8 only on the last data byte
+ok    example: the judge's bits for the sheet's first page are the sheet's table
+ok    example: the generator wants the judge's bits, and reads the judge's words back into the same pages, on 50 random runs
+ok    run length: the judge's -cycles is the sheet's formula
+
+waveform    seed expected judge  cases   waveform qspi   smart  
+                                 failed  check                  what it is
+none        1    pass     pass   0/14    -        -      -      ideal: SCK 12.5 MHz (2 cycles low, 2 high), data set at each SCK fall, CS# high 10 cycles between WREN and QPP, 160000 cycles after each QPP
+
+ok    seed 1: RATE bytes=388 cycles=325619, as the generator's events give
+
+none        2    pass     pass   0/14    -        -      -      ideal: SCK 12.5 MHz (2 cycles low, 2 high), data set at each SCK fall, CS# high 10 cycles between WREN and QPP, 160000 cycles after each QPP
+
+ok    seed 2: RATE bytes=188 cycles=163847, as the generator's events give
+
+none        3    pass     pass   0/14    -        -      -      ideal: SCK 12.5 MHz (2 cycles low, 2 high), data set at each SCK fall, CS# high 10 cycles between WREN and QPP, 160000 cycles after each QPP
+
+ok    seed 3: RATE bytes=264 cycles=164455, as the generator's events give
+
+none        7    pass     pass   0/14    -        -      -      ideal: SCK 12.5 MHz (2 cycles low, 2 high), data set at each SCK fall, CS# high 10 cycles between WREN and QPP, 160000 cycles after each QPP
+
+ok    seed 7: RATE bytes=48 cycles=2555, as the generator's events give
+
+none        11   pass     pass   0/14    -        -      -      ideal: SCK 12.5 MHz (2 cycles low, 2 high), data set at each SCK fall, CS# high 10 cycles between WREN and QPP, 160000 cycles after each QPP
+
+ok    seed 11: RATE bytes=364 cycles=165255, as the generator's events give
+
+fast        1    pass     pass   0/14    -        -      -      SCK 25 MHz: 1 cycle low, 1 high, data changing in the cycle SCK falls
+fast        2    pass     pass   0/14    -        -      -      SCK 25 MHz: 1 cycle low, 1 high, data changing in the cycle SCK falls
+fast        3    pass     pass   0/14    -        -      -      SCK 25 MHz: 1 cycle low, 1 high, data changing in the cycle SCK falls
+fast        7    pass     pass   0/14    -        -      -      SCK 25 MHz: 1 cycle low, 1 high, data changing in the cycle SCK falls
+fast        11   pass     pass   0/14    -        -      -      SCK 25 MHz: 1 cycle low, 1 high, data changing in the cycle SCK falls
+slow20      1    pass     pass   0/14    -        -      -      SCK period 20 cycles (19 low, 1 high), data set 1 cycle before each rise (the limits)
+slow20      2    pass     pass   0/14    -        -      -      SCK period 20 cycles (19 low, 1 high), data set 1 cycle before each rise (the limits)
+slow20      3    pass     pass   0/14    -        -      -      SCK period 20 cycles (19 low, 1 high), data set 1 cycle before each rise (the limits)
+slow20      7    pass     pass   0/14    -        -      -      SCK period 20 cycles (19 low, 1 high), data set 1 cycle before each rise (the limits)
+slow20      11   pass     pass   0/14    -        -      -      SCK period 20 cycles (19 low, 1 high), data set 1 cycle before each rise (the limits)
+skew        1    pass     pass   0/14    -        -      -      SCK 3 cycles low and 4 high, data changing 1 cycle after each rise (hold 1 cycle)
+skew        2    pass     pass   0/14    -        -      -      SCK 3 cycles low and 4 high, data changing 1 cycle after each rise (hold 1 cycle)
+skew        3    pass     pass   0/14    -        -      -      SCK 3 cycles low and 4 high, data changing 1 cycle after each rise (hold 1 cycle)
+skew        7    pass     pass   0/14    -        -      -      SCK 3 cycles low and 4 high, data changing 1 cycle after each rise (hold 1 cycle)
+skew        11   pass     pass   0/14    -        -      -      SCK 3 cycles low and 4 high, data changing 1 cycle after each rise (hold 1 cycle)
+cs3         1    pass     pass   0/14    -        -      -      CS# high exactly 3 cycles between WREN and QPP
+cs3         2    pass     pass   0/14    -        -      -      CS# high exactly 3 cycles between WREN and QPP
+cs3         3    pass     pass   0/14    -        -      -      CS# high exactly 3 cycles between WREN and QPP
+cs3         7    pass     pass   0/14    -        -      -      CS# high exactly 3 cycles between WREN and QPP
+cs3         11   pass     pass   0/14    -        -      -      CS# high exactly 3 cycles between WREN and QPP
+cs1000      1    pass     pass   0/14    -        -      -      CS# high exactly 1000 cycles between WREN and QPP
+cs1000      2    pass     pass   0/14    -        -      -      CS# high exactly 1000 cycles between WREN and QPP
+cs1000      3    pass     pass   0/14    -        -      -      CS# high exactly 1000 cycles between WREN and QPP
+cs1000      7    pass     pass   0/14    -        -      -      CS# high exactly 1000 cycles between WREN and QPP
+cs1000      11   pass     pass   0/14    -        -      -      CS# high exactly 1000 cycles between WREN and QPP
+gap150000   1    pass     pass   0/14    -        -      -      exactly 150000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+gap150000   2    pass     pass   0/14    -        -      -      exactly 150000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+gap150000   3    pass     pass   0/14    -        -      -      exactly 150000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+gap150000   7    pass     pass   0/14    -        -      -      exactly 150000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+gap150000   11   pass     pass   0/14    -        -      -      exactly 150000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+gap200000   1    pass     pass   0/14    -        -      -      exactly 200000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+gap200000   2    pass     pass   0/14    -        -      -      exactly 200000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+gap200000   3    pass     pass   0/14    -        -      -      exactly 200000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+gap200000   7    pass     pass   0/14    -        -      -      exactly 200000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+gap200000   11   pass     pass   0/14    -        -      -      exactly 200000 cycles from a QPP's CS# rise to the next WREN's CS# fall
+start10000  1    pass     pass   0/14    -        -      -      first CS# fall at cycle 10000 (the limit)
+start10000  2    pass     pass   0/14    -        -      -      first CS# fall at cycle 10000 (the limit)
+start10000  3    pass     pass   0/14    -        -      -      first CS# fall at cycle 10000 (the limit)
+start10000  7    pass     pass   0/14    -        -      -      first CS# fall at cycle 10000 (the limit)
+start10000  11   pass     pass   0/14    -        -      -      first CS# fall at cycle 10000 (the limit)
+sck100      1    pass     pass   0/14    -        -      -      SCK driven low at cycle 100 (the limit), first CS# fall at cycle 101
+sck100      2    pass     pass   0/14    -        -      -      SCK driven low at cycle 100 (the limit), first CS# fall at cycle 101
+sck100      3    pass     pass   0/14    -        -      -      SCK driven low at cycle 100 (the limit), first CS# fall at cycle 101
+sck100      7    pass     pass   0/14    -        -      -      SCK driven low at cycle 100 (the limit), first CS# fall at cycle 101
+sck100      11   pass     pass   0/14    -        -      -      SCK driven low at cycle 100 (the limit), first CS# fall at cycle 101
+csatfall    1    pass     pass   0/14    -        -      -      CS# rises in the same cycle as the last SCK fall
+csatfall    2    pass     pass   0/14    -        -      -      CS# rises in the same cycle as the last SCK fall
+csatfall    3    pass     pass   0/14    -        -      -      CS# rises in the same cycle as the last SCK fall
+csatfall    7    pass     pass   0/14    -        -      -      CS# rises in the same cycle as the last SCK fall
+csatfall    11   pass     pass   0/14    -        -      -      CS# rises in the same cycle as the last SCK fall
+dontcare    1    pass     pass   0/14    -        -      -      IO1..IO3 random during command and address, IO0..IO3 moving while CS# is high
+dontcare    2    pass     pass   0/14    -        -      -      IO1..IO3 random during command and address, IO0..IO3 moving while CS# is high
+dontcare    3    pass     pass   0/14    -        -      -      IO1..IO3 random during command and address, IO0..IO3 moving while CS# is high
+dontcare    7    pass     pass   0/14    -        -      -      IO1..IO3 random during command and address, IO0..IO3 moving while CS# is high
+dontcare    11   pass     pass   0/14    -        -      -      IO1..IO3 random during command and address, IO0..IO3 moving while CS# is high
+flipbit     1    fail     fail   14/14   objects  obj    obj    one data bit of the last page inverted
+flipbit     2    fail     fail   14/14   objects  obj    obj    one data bit of the last page inverted
+flipbit     3    fail     fail   14/14   objects  obj    obj    one data bit of the last page inverted
+flipbit     7    fail     fail   14/14   objects  obj    obj    one data bit of the last page inverted
+flipbit     11   fail     fail   14/14   objects  obj    obj    one data bit of the last page inverted
+flipaddr    1    fail     fail   14/14   objects  obj    obj    one address bit of the first page inverted
+flipaddr    2    fail     fail   14/14   objects  obj    obj    one address bit of the first page inverted
+flipaddr    3    fail     fail   14/14   objects  obj    obj    one address bit of the first page inverted
+flipaddr    7    fail     fail   14/14   objects  obj    obj    one address bit of the first page inverted
+flipaddr    11   fail     fail   14/14   objects  obj    obj    one address bit of the first page inverted
+lownibble   1    fail     fail   12/14   objects  obj    obj    each data byte's low nibble sent first
+lownibble   2    fail     fail   12/14   objects  obj    obj    each data byte's low nibble sent first
+lownibble   3    fail     fail   12/14   objects  obj    obj    each data byte's low nibble sent first
+lownibble   7    fail     fail   12/14   objects  obj    obj    each data byte's low nibble sent first
+lownibble   11   fail     fail   12/14   objects  obj    obj    each data byte's low nibble sent first
+revlines    1    fail     fail   12/14   objects  obj    obj    IO3 carries the nibble's bit 0 and IO0 its bit 3
+revlines    2    fail     fail   12/14   objects  obj    obj    IO3 carries the nibble's bit 0 and IO0 its bit 3
+revlines    3    fail     fail   12/14   objects  obj    obj    IO3 carries the nibble's bit 0 and IO0 its bit 3
+revlines    7    fail     fail   12/14   objects  obj    obj    IO3 carries the nibble's bit 0 and IO0 its bit 3
+revlines    11   fail     fail   12/14   objects  obj    obj    IO3 carries the nibble's bit 0 and IO0 its bit 3
+cmd02       1    fail     fail   14/14   objects  obj    obj    command 0x02 (single-line Page Program) in place of 0x32
+cmd02       2    fail     fail   14/14   objects  obj    obj    command 0x02 (single-line Page Program) in place of 0x32
+cmd02       3    fail     fail   14/14   objects  obj    obj    command 0x02 (single-line Page Program) in place of 0x32
+cmd02       7    fail     fail   14/14   objects  obj    obj    command 0x02 (single-line Page Program) in place of 0x32
+cmd02       11   fail     fail   14/14   objects  obj    obj    command 0x02 (single-line Page Program) in place of 0x32
+addrquad    1    fail     fail   14/14   objects  obj    obj    the address sent on four lines (1-4-4) instead of on IO0
+addrquad    2    fail     fail   14/14   objects  obj    obj    the address sent on four lines (1-4-4) instead of on IO0
+addrquad    3    fail     fail   14/14   objects  obj    obj    the address sent on four lines (1-4-4) instead of on IO0
+addrquad    7    fail     fail   14/14   objects  obj    obj    the address sent on four lines (1-4-4) instead of on IO0
+addrquad    11   fail     fail   14/14   objects  obj    obj    the address sent on four lines (1-4-4) instead of on IO0
+nowren      1    fail     fail   14/14   objects  obj    obj    no WREN frame before each QPP
+nowren      2    fail     fail   14/14   objects  obj    obj    no WREN frame before each QPP
+nowren      3    fail     fail   14/14   objects  obj    obj    no WREN frame before each QPP
+nowren      7    fail     fail   14/14   objects  obj    obj    no WREN frame before each QPP
+nowren      11   fail     fail   14/14   objects  obj    obj    no WREN frame before each QPP
+merged      1    fail     fail   14/14   objects  obj    obj    WREN and QPP in one CS# frame, CS# never rising between them
+merged      2    fail     fail   14/14   objects  obj    obj    WREN and QPP in one CS# frame, CS# never rising between them
+merged      3    fail     fail   14/14   objects  obj    obj    WREN and QPP in one CS# frame, CS# never rising between them
+merged      7    fail     fail   14/14   objects  obj    obj    WREN and QPP in one CS# frame, CS# never rising between them
+merged      11   fail     fail   14/14   objects  obj    obj    WREN and QPP in one CS# frame, CS# never rising between them
+datarise    1    fail     fail   14/14   objects  -      -      one data change in the same cycle as an SCK rise
+datarise    2    fail     fail   14/14   objects  -      -      one data change in the same cycle as an SCK rise
+datarise    3    fail     fail   14/14   objects  -      -      one data change in the same cycle as an SCK rise
+datarise    7    fail     fail   14/14   objects  -      -      one data change in the same cycle as an SCK rise
+datarise    11   fail     fail   14/14   objects  -      -      one data change in the same cycle as an SCK rise
+cs2         1    fail     fail   14/14   objects  -      -      CS# high only 2 cycles between WREN and QPP
+cs2         2    fail     fail   14/14   objects  -      -      CS# high only 2 cycles between WREN and QPP
+cs2         3    fail     fail   14/14   objects  -      -      CS# high only 2 cycles between WREN and QPP
+cs2         7    fail     fail   14/14   objects  -      -      CS# high only 2 cycles between WREN and QPP
+cs2         11   fail     fail   14/14   objects  -      -      CS# high only 2 cycles between WREN and QPP
+cs1001      1    fail     fail   14/14   objects  -      -      CS# high 1001 cycles between WREN and QPP
+cs1001      2    fail     fail   14/14   objects  -      -      CS# high 1001 cycles between WREN and QPP
+cs1001      3    fail     fail   14/14   objects  -      -      CS# high 1001 cycles between WREN and QPP
+cs1001      7    fail     fail   14/14   objects  -      -      CS# high 1001 cycles between WREN and QPP
+cs1001      11   fail     fail   14/14   objects  -      -      CS# high 1001 cycles between WREN and QPP
+gap149999   1    fail     fail   9/14    objects  -      -      149999 cycles from a QPP's CS# rise to the next WREN
+gap149999   2    fail     fail   7/14    objects  -      -      149999 cycles from a QPP's CS# rise to the next WREN
+gap149999   3    fail     fail   10/14   objects  -      -      149999 cycles from a QPP's CS# rise to the next WREN
+gap149999   7    fail     fail   7/14    objects  -      -      149999 cycles from a QPP's CS# rise to the next WREN
+gap149999   11   fail     fail   9/14    objects  -      -      149999 cycles from a QPP's CS# rise to the next WREN
+gap200001   1    fail     fail   9/14    objects  -      -      200001 cycles from a QPP's CS# rise to the next WREN
+gap200001   2    fail     fail   7/14    objects  -      -      200001 cycles from a QPP's CS# rise to the next WREN
+gap200001   3    fail     fail   10/14   objects  -      -      200001 cycles from a QPP's CS# rise to the next WREN
+gap200001   7    fail     fail   7/14    objects  -      -      200001 cycles from a QPP's CS# rise to the next WREN
+gap200001   11   fail     fail   9/14    objects  -      -      200001 cycles from a QPP's CS# rise to the next WREN
+start10001  1    fail     fail   14/14   objects  -      -      first CS# fall at cycle 10001
+start10001  2    fail     fail   14/14   objects  -      -      first CS# fall at cycle 10001
+start10001  3    fail     fail   14/14   objects  -      -      first CS# fall at cycle 10001
+start10001  7    fail     fail   14/14   objects  -      -      first CS# fall at cycle 10001
+start10001  11   fail     fail   14/14   objects  -      -      first CS# fall at cycle 10001
+sck101      1    fail     fail   14/14   objects  -      -      SCK driven low only at cycle 101
+sck101      2    fail     fail   14/14   objects  -      -      SCK driven low only at cycle 101
+sck101      3    fail     fail   14/14   objects  -      -      SCK driven low only at cycle 101
+sck101      7    fail     fail   14/14   objects  -      -      SCK driven low only at cycle 101
+sck101      11   fail     fail   14/14   objects  -      -      SCK driven low only at cycle 101
+mode3       1    fail     fail   14/14   objects  -      -      SPI mode 3: SCK idles high while CS# is high
+mode3       2    fail     fail   14/14   objects  -      -      SPI mode 3: SCK idles high while CS# is high
+mode3       3    fail     fail   14/14   objects  -      -      SPI mode 3: SCK idles high while CS# is high
+mode3       7    fail     fail   14/14   objects  -      -      SPI mode 3: SCK idles high while CS# is high
+mode3       11   fail     fail   14/14   objects  -      -      SPI mode 3: SCK idles high while CS# is high
+sckhighcs   1    fail     fail   14/14   objects  -      -      CS# rises while SCK is still high (SCK falls one cycle later)
+sckhighcs   2    fail     fail   14/14   objects  -      -      CS# rises while SCK is still high (SCK falls one cycle later)
+sckhighcs   3    fail     fail   14/14   objects  -      -      CS# rises while SCK is still high (SCK falls one cycle later)
+sckhighcs   7    fail     fail   14/14   objects  -      -      CS# rises while SCK is still high (SCK falls one cycle later)
+sckhighcs   11   fail     fail   14/14   objects  -      -      CS# rises while SCK is still high (SCK falls one cycle later)
+slow21      1    fail     fail   14/14   objects  -      -      one SCK rise 21 cycles after the one before it
+slow21      2    fail     fail   14/14   objects  -      -      one SCK rise 21 cycles after the one before it
+slow21      3    fail     fail   14/14   objects  -      -      one SCK rise 21 cycles after the one before it
+slow21      7    fail     fail   14/14   objects  -      -      one SCK rise 21 cycles after the one before it
+slow21      11   fail     fail   14/14   objects  -      -      one SCK rise 21 cycles after the one before it
+extraclk    1    fail     fail   14/14   objects  -      -      one extra SCK clock at the end of the last QPP
+extraclk    2    fail     fail   14/14   objects  -      -      one extra SCK clock at the end of the last QPP
+extraclk    3    fail     fail   14/14   objects  -      -      one extra SCK clock at the end of the last QPP
+extraclk    7    fail     fail   14/14   objects  -      -      one extra SCK clock at the end of the last QPP
+extraclk    11   fail     fail   14/14   objects  -      -      one extra SCK clock at the end of the last QPP
+dropbyte    1    fail     fail   14/14   objects  obj    obj    the last 4 data bytes of the last page not sent
+dropbyte    2    fail     fail   14/14   objects  obj    obj    the last 4 data bytes of the last page not sent
+dropbyte    3    fail     fail   14/14   objects  obj    obj    the last 4 data bytes of the last page not sent
+dropbyte    7    fail     fail   14/14   objects  obj    obj    the last 4 data bytes of the last page not sent
+dropbyte    11   fail     fail   14/14   objects  obj    obj    the last 4 data bytes of the last page not sent
+straysck    1    fail     fail   14/14   objects  -      -      an SCK pulse while CS# is high, after the last page
+straysck    2    fail     fail   14/14   objects  -      -      an SCK pulse while CS# is high, after the last page
+straysck    3    fail     fail   14/14   objects  -      -      an SCK pulse while CS# is high, after the last page
+straysck    7    fail     fail   14/14   objects  -      -      an SCK pulse while CS# is high, after the last page
+straysck    11   fail     fail   14/14   objects  -      -      an SCK pulse while CS# is high, after the last page
+csglitch    1    fail     fail   14/14   objects  obj    obj    CS# high for one cycle in the middle of a QPP's data
+csglitch    2    fail     fail   14/14   objects  obj    obj    CS# high for one cycle in the middle of a QPP's data
+csglitch    3    fail     fail   14/14   objects  obj    obj    CS# high for one cycle in the middle of a QPP's data
+csglitch    7    fail     fail   14/14   objects  obj    obj    CS# high for one cycle in the middle of a QPP's data
+csglitch    11   fail     fail   14/14   objects  obj    obj    CS# high for one cycle in the middle of a QPP's data
+droppage    1    fail     fail   14/14   objects  obj    obj    the last page not sent
+droppage    2    fail     fail   14/14   objects  obj    obj    the last page not sent
+droppage    3    fail     fail   14/14   objects  obj    obj    the last page not sent
+droppage    7    fail     fail   14/14   objects  obj    obj    the last page not sent
+droppage    11   fail     fail   14/14   objects  obj    obj    the last page not sent
+extrapage   1    fail     fail   14/14   objects  obj    obj    the last page sent twice
+extrapage   2    fail     fail   14/14   objects  obj    obj    the last page sent twice
+extrapage   3    fail     fail   14/14   objects  obj    obj    the last page sent twice
+extrapage   7    fail     fail   14/14   objects  obj    obj    the last page sent twice
+extrapage   11   fail     fail   14/14   objects  obj    obj    the last page sent twice
+
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp\n': accepted
+ok    run_args.txt '-config sideset_base=4,sideset_count=1,out_count=4 -mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp\n': accepted
+ok    run_args.txt '-mo 0=pp -mo 1=pp -mo 2=pp -mo 3=pp -mo 4=pp -mo 5=pp -mo 6=in\n': accepted
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp\n': setup: FAIL: run_args.txt must make P0..P5 push-pull (not: P5)
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=od -mode 5=pp\n': setup: FAIL: run_args.txt must make P0..P5 push-pull (not: P4)
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp -inputs 0xff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp -mode 3=pp -mode 4=pp -mode 5=pp -mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, real_idle: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 2 pages, 12 data bytes): FAIL: waveform: SCK is not driven low by cycle 100; decoder: )
+ok    real pe_sim, real_sck_low_only: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 2 pages, 12 data bytes): FAIL: waveform: 0 CS# frames, wanted 4 (a WREN and a QPP per )
+SELFTEST PASS

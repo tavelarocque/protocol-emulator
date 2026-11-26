@@ -1,0 +1,214 @@
+ok    interface: the sheet's two examples give the twenty words it prints
+ok    interface: word 0 is flag 1 << 8 | receiver, word 1 extra << 8 | flag 2, then channels
+ok    interface: the sheet says the host sends payload only
+ok    CRC: the judge's table (register run bit by bit) equals the sheet's carry-less products on all 256 values
+ok    CRC: the values the sheet prints (T[0..15], T[16], T[128], T[255]) are the judge's
+ok    CRC: the table is CRC-16/KERMIT's (check value 0x2189 when used reflected), and PXX1's CRC differs from it
+ok    example first: bytes 03 00 00 00 04 40 00 04 40 00 04 40 00 04 40 00 and CRC 0x21A3 as the sheet prints them
+ok    example second: bytes 1F 11 00 FF 17 F8 00 04 40 00 04 40 00 04 40 04 and CRC 0xFF54 as the sheet prints them
+ok    example first: no stuffed bit, 160 bits, the sheet's opening and closing bits are the judge's
+ok    example second: the sheet's 164 bits with four stuffed 0s are the judge's
+ok    example first: the generator puts the edges where the sheet says (0, 400, 800, 1200, 2000)
+ok    the fixed case with a stuffed 0 straight after the CRC has one
+
+waveform     seed expected judge  cases   waveform decoder 
+                                  failed  check    check   what it is
+none         1    pass     pass   0/15    -        -       ideal: first frame at cycle 100000, frames every 9 ms, pulses 8 us, bits 16/24 us
+
+ok    seed 1: RATE bytes=16 cycles=168400, as the generator's edges give
+
+none         2    pass     pass   0/15    -        -       ideal: first frame at cycle 100000, frames every 9 ms, pulses 8 us, bits 16/24 us
+
+ok    seed 2: RATE bytes=16 cycles=176400, as the generator's edges give
+
+none         3    pass     pass   0/15    -        -       ideal: first frame at cycle 100000, frames every 9 ms, pulses 8 us, bits 16/24 us
+
+ok    seed 3: RATE bytes=48 cycles=1061200, as the generator's edges give
+
+none         7    pass     pass   0/15    -        -       ideal: first frame at cycle 100000, frames every 9 ms, pulses 8 us, bits 16/24 us
+
+ok    seed 7: RATE bytes=32 cycles=612800, as the generator's edges give
+
+none         11   pass     pass   0/15    -        -       ideal: first frame at cycle 100000, frames every 9 ms, pulses 8 us, bits 16/24 us
+
+ok    seed 11: RATE bytes=16 cycles=163600, as the generator's edges give
+
+jitter25     1    pass     pass   0/15    -        -       every low pulse and every period 25 cycles (0.5 us) off, alternately long and short (the limit)
+jitter25     2    pass     pass   0/15    -        -       every low pulse and every period 25 cycles (0.5 us) off, alternately long and short (the limit)
+jitter25     3    pass     pass   0/15    -        -       every low pulse and every period 25 cycles (0.5 us) off, alternately long and short (the limit)
+jitter25     7    pass     pass   0/15    -        -       every low pulse and every period 25 cycles (0.5 us) off, alternately long and short (the limit)
+jitter25     11   pass     pass   0/15    -        -       every low pulse and every period 25 cycles (0.5 us) off, alternately long and short (the limit)
+period8ms    1    pass     pass   0/15    -        -       frames every 8 ms (the limit)
+period8ms    2    pass     pass   0/15    -        -       frames every 8 ms (the limit)
+period8ms    3    pass     pass   0/15    -        -       frames every 8 ms (the limit)
+period8ms    7    pass     pass   0/15    -        -       frames every 8 ms (the limit)
+period8ms    11   pass     pass   0/15    -        -       frames every 8 ms (the limit)
+period10ms   1    pass     pass   0/15    -        -       frames every 10 ms (the limit)
+period10ms   2    pass     pass   0/15    -        -       frames every 10 ms (the limit)
+period10ms   3    pass     pass   0/15    -        -       frames every 10 ms (the limit)
+period10ms   7    pass     pass   0/15    -        -       frames every 10 ms (the limit)
+period10ms   11   pass     pass   0/15    -        -       frames every 10 ms (the limit)
+fixedgap     1    pass     pass   0/15    -        -       a fixed 5.5 ms of idle line after each frame instead of a fixed 9 ms period
+fixedgap     2    pass     pass   0/15    -        -       a fixed 5.5 ms of idle line after each frame instead of a fixed 9 ms period
+fixedgap     3    pass     pass   0/15    -        -       a fixed 5.5 ms of idle line after each frame instead of a fixed 9 ms period
+fixedgap     7    pass     pass   0/15    -        -       a fixed 5.5 ms of idle line after each frame instead of a fixed 9 ms period
+fixedgap     11   pass     pass   0/15    -        -       a fixed 5.5 ms of idle line after each frame instead of a fixed 9 ms period
+start5000    1    pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start5000    2    pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start5000    3    pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start5000    7    pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start5000    11   pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start500000  1    pass     pass   0/15    -        -       first frame at cycle 500000 (the limit)
+start500000  2    pass     pass   0/15    -        -       first frame at cycle 500000 (the limit)
+start500000  3    pass     pass   0/15    -        -       first frame at cycle 500000 (the limit)
+start500000  7    pass     pass   0/15    -        -       first frame at cycle 500000 (the limit)
+start500000  11   pass     pass   0/15    -        -       first frame at cycle 500000 (the limit)
+flipbit      1    fail     fail   15/15   objects  objects one channel bit of the last frame inverted (the CRC still the right one for the sent bytes)
+flipbit      2    fail     fail   15/15   objects  objects one channel bit of the last frame inverted (the CRC still the right one for the sent bytes)
+flipbit      3    fail     fail   15/15   objects  objects one channel bit of the last frame inverted (the CRC still the right one for the sent bytes)
+flipbit      7    fail     fail   15/15   objects  objects one channel bit of the last frame inverted (the CRC still the right one for the sent bytes)
+flipbit      11   fail     fail   15/15   objects  objects one channel bit of the last frame inverted (the CRC still the right one for the sent bytes)
+flipdata     1    fail     fail   15/15   objects  objects one channel value of the last frame off by one, CRC computed on the wrong bytes
+flipdata     2    fail     fail   15/15   objects  objects one channel value of the last frame off by one, CRC computed on the wrong bytes
+flipdata     3    fail     fail   15/15   objects  objects one channel value of the last frame off by one, CRC computed on the wrong bytes
+flipdata     7    fail     fail   15/15   objects  objects one channel value of the last frame off by one, CRC computed on the wrong bytes
+flipdata     11   fail     fail   15/15   objects  objects one channel value of the last frame off by one, CRC computed on the wrong bytes
+badcrc       1    fail     fail   14/15   objects  objects the CRC of the standard CRC-16/KERMIT instead of PXX1's
+badcrc       2    fail     fail   14/15   objects  objects the CRC of the standard CRC-16/KERMIT instead of PXX1's
+badcrc       3    fail     fail   14/15   objects  objects the CRC of the standard CRC-16/KERMIT instead of PXX1's
+badcrc       7    fail     fail   14/15   objects  objects the CRC of the standard CRC-16/KERMIT instead of PXX1's
+badcrc       11   fail     fail   14/15   objects  objects the CRC of the standard CRC-16/KERMIT instead of PXX1's
+crcswap      1    fail     fail   14/15   objects  objects CRC bytes sent low byte first
+crcswap      2    fail     fail   14/15   objects  objects CRC bytes sent low byte first
+crcswap      3    fail     fail   14/15   objects  objects CRC bytes sent low byte first
+crcswap      7    fail     fail   14/15   objects  objects CRC bytes sent low byte first
+crcswap      11   fail     fail   14/15   objects  objects CRC bytes sent low byte first
+nostuff      1    fail     fail   13/15   objects  objects no bit stuffing at all
+nostuff      2    fail     fail   13/15   objects  objects no bit stuffing at all
+nostuff      3    fail     fail   12/15   objects  objects no bit stuffing at all
+nostuff      7    fail     fail   13/15   objects  objects no bit stuffing at all
+nostuff      11   fail     fail   13/15   objects  objects no bit stuffing at all
+stuff6       1    fail     fail   13/15   objects  objects a 0 stuffed after six 1s instead of five
+stuff6       2    fail     fail   13/15   objects  objects a 0 stuffed after six 1s instead of five
+stuff6       3    fail     fail   12/15   objects  objects a 0 stuffed after six 1s instead of five
+stuff6       7    fail     fail   13/15   objects  objects a 0 stuffed after six 1s instead of five
+stuff6       11   fail     fail   13/15   objects  objects a 0 stuffed after six 1s instead of five
+stuffhead    1    fail     fail   15/15   objects  objects the header and closing 0x7E stuffed as well
+stuffhead    2    fail     fail   15/15   objects  objects the header and closing 0x7E stuffed as well
+stuffhead    3    fail     fail   15/15   objects  objects the header and closing 0x7E stuffed as well
+stuffhead    7    fail     fail   15/15   objects  objects the header and closing 0x7E stuffed as well
+stuffhead    11   fail     fail   15/15   objects  objects the header and closing 0x7E stuffed as well
+nocrcstuff   1    fail     fail   1/15    objects  objects no stuffed 0 after the CRC's last bit when it ends a run of five 1s
+nocrcstuff   2    fail     fail   1/15    objects  objects no stuffed 0 after the CRC's last bit when it ends a run of five 1s
+nocrcstuff   3    fail     fail   1/15    objects  objects no stuffed 0 after the CRC's last bit when it ends a run of five 1s
+nocrcstuff   7    fail     fail   1/15    objects  objects no stuffed 0 after the CRC's last bit when it ends a run of five 1s
+nocrcstuff   11   fail     fail   1/15    objects  objects no stuffed 0 after the CRC's last bit when it ends a run of five 1s
+stuffreset   1    fail     fail   12/15   objects  objects the run of 1s counted again from zero at the start of every byte
+stuffreset   2    fail     fail   10/15   objects  objects the run of 1s counted again from zero at the start of every byte
+stuffreset   3    fail     fail   10/15   objects  objects the run of 1s counted again from zero at the start of every byte
+stuffreset   7    fail     fail   11/15   objects  objects the run of 1s counted again from zero at the start of every byte
+stuffreset   11   fail     fail   10/15   objects  objects the run of 1s counted again from zero at the start of every byte
+lsbfirst     1    fail     fail   14/15   objects  objects bytes sent least significant bit first
+lsbfirst     2    fail     fail   14/15   objects  objects bytes sent least significant bit first
+lsbfirst     3    fail     fail   14/15   objects  objects bytes sent least significant bit first
+lsbfirst     7    fail     fail   14/15   objects  objects bytes sent least significant bit first
+lsbfirst     11   fail     fail   14/15   objects  objects bytes sent least significant bit first
+nibbles      1    fail     fail   13/15   objects  objects the shared middle byte of each channel pair with its nibbles swapped
+nibbles      2    fail     fail   13/15   objects  objects the shared middle byte of each channel pair with its nibbles swapped
+nibbles      3    fail     fail   13/15   objects  objects the shared middle byte of each channel pair with its nibbles swapped
+nibbles      7    fail     fail   13/15   objects  objects the shared middle byte of each channel pair with its nibbles swapped
+nibbles      11   fail     fail   13/15   objects  objects the shared middle byte of each channel pair with its nibbles swapped
+notail       1    fail     fail   15/15   objects  objects no closing 0x7E
+notail       2    fail     fail   15/15   objects  objects no closing 0x7E
+notail       3    fail     fail   15/15   objects  objects no closing 0x7E
+notail       7    fail     fail   15/15   objects  objects no closing 0x7E
+notail       11   fail     fail   15/15   objects  objects no closing 0x7E
+inverted     1    fail     fail   15/15   objects  objects the whole line inverted: idle low, high pulses
+inverted     2    fail     fail   15/15   objects  objects the whole line inverted: idle low, high pulses
+inverted     3    fail     fail   15/15   objects  objects the whole line inverted: idle low, high pulses
+inverted     7    fail     fail   15/15   objects  objects the whole line inverted: idle low, high pulses
+inverted     11   fail     fail   15/15   objects  objects the whole line inverted: idle low, high pulses
+long26       1    fail     fail   15/15   objects  -       one period 26 cycles too long
+long26       2    fail     fail   15/15   objects  -       one period 26 cycles too long
+long26       3    fail     fail   15/15   objects  -       one period 26 cycles too long
+long26       7    fail     fail   15/15   objects  -       one period 26 cycles too long
+long26       11   fail     fail   15/15   objects  -       one period 26 cycles too long
+short26      1    fail     fail   15/15   objects  -       one period 26 cycles too short
+short26      2    fail     fail   15/15   objects  -       one period 26 cycles too short
+short26      3    fail     fail   15/15   objects  -       one period 26 cycles too short
+short26      7    fail     fail   15/15   objects  -       one period 26 cycles too short
+short26      11   fail     fail   15/15   objects  -       one period 26 cycles too short
+pulse9us     1    fail     fail   15/15   objects  -       every low pulse 9 us
+pulse9us     2    fail     fail   15/15   objects  -       every low pulse 9 us
+pulse9us     3    fail     fail   15/15   objects  -       every low pulse 9 us
+pulse9us     7    fail     fail   15/15   objects  -       every low pulse 9 us
+pulse9us     11   fail     fail   15/15   objects  -       every low pulse 9 us
+pulse7us     1    fail     fail   15/15   objects  -       one low pulse 7 us
+pulse7us     2    fail     fail   15/15   objects  -       one low pulse 7 us
+pulse7us     3    fail     fail   15/15   objects  -       one low pulse 7 us
+pulse7us     7    fail     fail   15/15   objects  -       one low pulse 7 us
+pulse7us     11   fail     fail   15/15   objects  -       one low pulse 7 us
+bit17us      1    fail     fail   15/15   objects  -       zeros of 17 us (the decoder still reads them)
+bit17us      2    fail     fail   15/15   objects  -       zeros of 17 us (the decoder still reads them)
+bit17us      3    fail     fail   15/15   objects  -       zeros of 17 us (the decoder still reads them)
+bit17us      7    fail     fail   15/15   objects  -       zeros of 17 us (the decoder still reads them)
+bit17us      11   fail     fail   15/15   objects  -       zeros of 17 us (the decoder still reads them)
+period7999   1    fail     fail   6/15    objects  -       frames every 7.99 ms
+period7999   2    fail     fail   6/15    objects  -       frames every 7.99 ms
+period7999   3    fail     fail   7/15    objects  -       frames every 7.99 ms
+period7999   7    fail     fail   6/15    objects  -       frames every 7.99 ms
+period7999   11   fail     fail   7/15    objects  -       frames every 7.99 ms
+period10001  1    fail     fail   6/15    objects  -       frames every 10.0002 ms
+period10001  2    fail     fail   6/15    objects  -       frames every 10.0002 ms
+period10001  3    fail     fail   7/15    objects  -       frames every 10.0002 ms
+period10001  7    fail     fail   6/15    objects  -       frames every 10.0002 ms
+period10001  11   fail     fail   7/15    objects  -       frames every 10.0002 ms
+start4999    1    fail     fail   15/15   objects  -       first frame at cycle 4999
+start4999    2    fail     fail   15/15   objects  -       first frame at cycle 4999
+start4999    3    fail     fail   15/15   objects  -       first frame at cycle 4999
+start4999    7    fail     fail   15/15   objects  -       first frame at cycle 4999
+start4999    11   fail     fail   15/15   objects  -       first frame at cycle 4999
+start500001  1    fail     fail   15/15   objects  -       first frame at cycle 500001
+start500001  2    fail     fail   15/15   objects  -       first frame at cycle 500001
+start500001  3    fail     fail   15/15   objects  -       first frame at cycle 500001
+start500001  7    fail     fail   15/15   objects  -       first frame at cycle 500001
+start500001  11   fail     fail   15/15   objects  -       first frame at cycle 500001
+glitch       1    fail     fail   15/15   objects  objects a 1-cycle low glitch 1 ms after the last frame
+glitch       2    fail     fail   15/15   objects  objects a 1-cycle low glitch 1 ms after the last frame
+glitch       3    fail     fail   15/15   objects  objects a 1-cycle low glitch 1 ms after the last frame
+glitch       7    fail     fail   15/15   objects  objects a 1-cycle low glitch 1 ms after the last frame
+glitch       11   fail     fail   15/15   objects  objects a 1-cycle low glitch 1 ms after the last frame
+endlow       1    fail     fail   15/15   objects  -       the line driven low after the last frame
+endlow       2    fail     fail   15/15   objects  -       the line driven low after the last frame
+endlow       3    fail     fail   15/15   objects  -       the line driven low after the last frame
+endlow       7    fail     fail   15/15   objects  -       the line driven low after the last frame
+endlow       11   fail     fail   15/15   objects  -       the line driven low after the last frame
+dropframe    1    fail     fail   15/15   objects  objects the last frame is not sent
+dropframe    2    fail     fail   15/15   objects  objects the last frame is not sent
+dropframe    3    fail     fail   15/15   objects  objects the last frame is not sent
+dropframe    7    fail     fail   15/15   objects  objects the last frame is not sent
+dropframe    11   fail     fail   15/15   objects  objects the last frame is not sent
+extraframe   1    fail     fail   15/15   objects  objects the last frame is sent twice
+extraframe   2    fail     fail   15/15   objects  objects the last frame is sent twice
+extraframe   3    fail     fail   15/15   objects  objects the last frame is sent twice
+extraframe   7    fail     fail   15/15   objects  objects the last frame is sent twice
+extraframe   11   fail     fail   15/15   objects  objects the last frame is sent twice
+
+ok    run_args.txt '-mode 0=pp -config clkdiv=50\n': accepted
+ok    run_args.txt '-mo 0=pp\n': accepted
+ok    run_args.txt '-mode 0=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    run_args.txt '-config clkdiv=1\n': setup: FAIL: run_args.txt must make P0 push-pull (-mode 0=pp), as the task sheet says; it 
+ok    run_args.txt '-mode 0=od\n': setup: FAIL: run_args.txt must make P0 push-pull (-mode 0=pp), as the task sheet says; it 
+ok    run_args.txt '-mode 1=pp\n': setup: FAIL: run_args.txt must make P0 push-pull (-mode 0=pp), as the task sheet says; it 
+ok    run_args.txt '-mode 0=pp -mode 0=in\n': setup: FAIL: run_args.txt must make P0 push-pull (-mode 0=pp), as the task sheet says; it 
+ok    real pe_sim, real_idle_high: every case fails cleanly, no RATE line (case 0 (all zero: 1 frame): FAIL: waveform: 0 separate bursts of pulses on P0, wanted 1 frames; decoder: bits row: 0 ann)
+ok    real pe_sim, real_low_only: every case fails cleanly, no RATE line (case 0 (all zero: 1 frame): FAIL: waveform: P0 is low at the end of the run (cycle 1 on); waveform: the first frame begi)
+SELFTEST PASS
+exit 0

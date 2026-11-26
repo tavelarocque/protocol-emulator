@@ -1,0 +1,207 @@
+ok    interface: the sheet's example is the words printed in it (0x01E1, 0x01E1, 0x41E1), and the sheet says the host sends only them
+ok    interface: one word per burst, the word itself; N as the sheet states
+ok    example: the sheet's 22 rises for 0x01E1 are the judge's ideal
+ok    example: the generator's rises for 0x01E1 are the judge's ideal
+ok    example: generator and judge agree on eight more words
+ok    decoder: sigrok reads every word of the ideal waveform, all 15 cases, seed 1
+ok    decoder: sigrok reads every word of the ideal waveform, all 15 cases, seed 2
+ok    decoder: sigrok reads every word of the ideal waveform, all 15 cases, seed 3
+ok    decoder: sigrok reads every word of the ideal waveform, all 15 cases, seed 7
+ok    decoder: sigrok reads every word of the ideal waveform, all 15 cases, seed 11
+
+waveform     seed expected judge  cases   waveform decoder 
+                                  failed  check    check   what it is
+none         1    pass     pass   0/15    -        -       ideal: pins low at cycle 1, first burst at 5 ms, bursts 16 ms apart, pulses 100 ns
+ok    seed 1: RATE bytes=2 cycles=280003, as the generator's pin changes give
+none         2    pass     pass   0/15    -        -       ideal: pins low at cycle 1, first burst at 5 ms, bursts 16 ms apart, pulses 100 ns
+ok    seed 2: RATE bytes=8 cycles=2200003, as the generator's pin changes give
+none         3    pass     pass   0/15    -        -       ideal: pins low at cycle 1, first burst at 5 ms, bursts 16 ms apart, pulses 100 ns
+ok    seed 3: RATE bytes=4 cycles=920003, as the generator's pin changes give
+none         7    pass     pass   0/15    -        -       ideal: pins low at cycle 1, first burst at 5 ms, bursts 16 ms apart, pulses 100 ns
+ok    seed 7: RATE bytes=14 cycles=4120003, as the generator's pin changes give
+none         11   pass     pass   0/15    -        -       ideal: pins low at cycle 1, first burst at 5 ms, bursts 16 ms apart, pulses 100 ns
+ok    seed 11: RATE bytes=2 cycles=280003, as the generator's pin changes give
+jitter40     1    pass     pass   0/15    -        -       every pulse after a burst's first alternately 40 cycles late and 40 early (the limit)
+jitter40     2    pass     pass   0/15    -        -       every pulse after a burst's first alternately 40 cycles late and 40 early (the limit)
+jitter40     3    pass     pass   0/15    -        -       every pulse after a burst's first alternately 40 cycles late and 40 early (the limit)
+jitter40     7    pass     pass   0/15    -        -       every pulse after a burst's first alternately 40 cycles late and 40 early (the limit)
+jitter40     11   pass     pass   0/15    -        -       every pulse after a burst's first alternately 40 cycles late and 40 early (the limit)
+width3       1    pass     pass   0/15    -        -       pulses 3 cycles (75 ns) wide
+width3       2    pass     pass   0/15    -        -       pulses 3 cycles (75 ns) wide
+width3       3    pass     pass   0/15    -        -       pulses 3 cycles (75 ns) wide
+width3       7    pass     pass   0/15    -        -       pulses 3 cycles (75 ns) wide
+width3       11   pass     pass   0/15    -        -       pulses 3 cycles (75 ns) wide
+width5       1    pass     pass   0/15    -        -       pulses 5 cycles (125 ns) wide
+width5       2    pass     pass   0/15    -        -       pulses 5 cycles (125 ns) wide
+width5       3    pass     pass   0/15    -        -       pulses 5 cycles (125 ns) wide
+width5       7    pass     pass   0/15    -        -       pulses 5 cycles (125 ns) wide
+width5       11   pass     pass   0/15    -        -       pulses 5 cycles (125 ns) wide
+apart8ms     1    pass     pass   0/15    -        -       bursts 320,000 cycles (8 ms) apart, the least allowed
+apart8ms     2    pass     pass   0/15    -        -       bursts 320,000 cycles (8 ms) apart, the least allowed
+apart8ms     3    pass     pass   0/15    -        -       bursts 320,000 cycles (8 ms) apart, the least allowed
+apart8ms     7    pass     pass   0/15    -        -       bursts 320,000 cycles (8 ms) apart, the least allowed
+apart8ms     11   pass     pass   0/15    -        -       bursts 320,000 cycles (8 ms) apart, the least allowed
+apart24ms    1    pass     pass   0/15    -        -       bursts 960,000 cycles (24 ms) apart, the most allowed
+apart24ms    2    pass     pass   0/15    -        -       bursts 960,000 cycles (24 ms) apart, the most allowed
+apart24ms    3    pass     pass   0/15    -        -       bursts 960,000 cycles (24 ms) apart, the most allowed
+apart24ms    7    pass     pass   0/15    -        -       bursts 960,000 cycles (24 ms) apart, the most allowed
+apart24ms    11   pass     pass   0/15    -        -       bursts 960,000 cycles (24 ms) apart, the most allowed
+start1ms     1    pass     pass   0/15    -        -       first burst at cycle 40,000 (1 ms), the earliest allowed
+start1ms     2    pass     pass   0/15    -        -       first burst at cycle 40,000 (1 ms), the earliest allowed
+start1ms     3    pass     pass   0/15    -        -       first burst at cycle 40,000 (1 ms), the earliest allowed
+start1ms     7    pass     pass   0/15    -        -       first burst at cycle 40,000 (1 ms), the earliest allowed
+start1ms     11   pass     pass   0/15    -        -       first burst at cycle 40,000 (1 ms), the earliest allowed
+start16ms    1    pass     pass   0/15    -        -       first burst at cycle 640,000 (16 ms), the latest allowed
+start16ms    2    pass     pass   0/15    -        -       first burst at cycle 640,000 (16 ms), the latest allowed
+start16ms    3    pass     pass   0/15    -        -       first burst at cycle 640,000 (16 ms), the latest allowed
+start16ms    7    pass     pass   0/15    -        -       first burst at cycle 640,000 (16 ms), the latest allowed
+start16ms    11   pass     pass   0/15    -        -       first burst at cycle 640,000 (16 ms), the latest allowed
+low100       1    pass     pass   0/15    -        -       P0 and P1 driven low at cycle 100 (the limit)
+low100       2    pass     pass   0/15    -        -       P0 and P1 driven low at cycle 100 (the limit)
+low100       3    pass     pass   0/15    -        -       P0 and P1 driven low at cycle 100 (the limit)
+low100       7    pass     pass   0/15    -        -       P0 and P1 driven low at cycle 100 (the limit)
+low100       11   pass     pass   0/15    -        -       P0 and P1 driven low at cycle 100 (the limit)
+flipbit      1    fail     fail   15/15   objects  objects one bit (D9) of the last word inverted
+flipbit      2    fail     fail   15/15   objects  objects one bit (D9) of the last word inverted
+flipbit      3    fail     fail   15/15   objects  objects one bit (D9) of the last word inverted
+flipbit      7    fail     fail   15/15   objects  objects one bit (D9) of the last word inverted
+flipbit      11   fail     fail   15/15   objects  objects one bit (D9) of the last word inverted
+msbfirst     1    fail     fail   13/15   objects  objects each word sent D15 first
+msbfirst     2    fail     fail   13/15   objects  objects each word sent D15 first
+msbfirst     3    fail     fail   13/15   objects  objects each word sent D15 first
+msbfirst     7    fail     fail   13/15   objects  objects each word sent D15 first
+msbfirst     11   fail     fail   13/15   objects  objects each word sent D15 first
+inverted     1    fail     fail   15/15   objects  objects a data pulse for each 0 and none for each 1
+inverted     2    fail     fail   15/15   objects  objects a data pulse for each 0 and none for each 1
+inverted     3    fail     fail   15/15   objects  objects a data pulse for each 0 and none for each 1
+inverted     7    fail     fail   15/15   objects  objects a data pulse for each 0 and none for each 1
+inverted     11   fail     fail   15/15   objects  objects a data pulse for each 0 and none for each 1
+noclose      1    fail     fail   15/15   objects  objects no 17th clock pulse at the end of a burst
+noclose      2    fail     fail   15/15   objects  objects no 17th clock pulse at the end of a burst
+noclose      3    fail     fail   15/15   objects  objects no 17th clock pulse at the end of a burst
+noclose      7    fail     fail   15/15   objects  objects no 17th clock pulse at the end of a burst
+noclose      11   fail     fail   15/15   objects  objects no 17th clock pulse at the end of a burst
+extraclock   1    fail     fail   15/15   objects  objects an 18th clock pulse at the end of a burst
+extraclock   2    fail     fail   15/15   objects  objects an 18th clock pulse at the end of a burst
+extraclock   3    fail     fail   15/15   objects  objects an 18th clock pulse at the end of a burst
+extraclock   7    fail     fail   15/15   objects  objects an 18th clock pulse at the end of a burst
+extraclock   11   fail     fail   15/15   objects  objects an 18th clock pulse at the end of a burst
+late41       1    fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles late
+late41       2    fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles late
+late41       3    fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles late
+late41       7    fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles late
+late41       11   fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles late
+early41      1    fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles early
+early41      2    fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles early
+early41      3    fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles early
+early41      7    fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles early
+early41      11   fail     fail   15/15   objects  -       one pulse of the first burst 41 cycles early
+slow5003     1    fail     fail   15/15   objects  -       clock pulses 5,003 cycles apart: the error adds up along a burst
+slow5003     2    fail     fail   15/15   objects  -       clock pulses 5,003 cycles apart: the error adds up along a burst
+slow5003     3    fail     fail   15/15   objects  -       clock pulses 5,003 cycles apart: the error adds up along a burst
+slow5003     7    fail     fail   15/15   objects  -       clock pulses 5,003 cycles apart: the error adds up along a burst
+slow5003     11   fail     fail   15/15   objects  -       clock pulses 5,003 cycles apart: the error adds up along a burst
+data60       1    fail     fail   14/15   objects  -       every data pulse 60 cycles (1.5 us) late
+data60       2    fail     fail   14/15   objects  -       every data pulse 60 cycles (1.5 us) late
+data60       3    fail     fail   14/15   objects  -       every data pulse 60 cycles (1.5 us) late
+data60       7    fail     fail   14/15   objects  -       every data pulse 60 cycles (1.5 us) late
+data60       11   fail     fail   14/15   objects  -       every data pulse 60 cycles (1.5 us) late
+width2       1    fail     fail   15/15   objects  -       pulses 2 cycles (50 ns) wide
+width2       2    fail     fail   15/15   objects  -       pulses 2 cycles (50 ns) wide
+width2       3    fail     fail   15/15   objects  -       pulses 2 cycles (50 ns) wide
+width2       7    fail     fail   15/15   objects  -       pulses 2 cycles (50 ns) wide
+width2       11   fail     fail   15/15   objects  -       pulses 2 cycles (50 ns) wide
+width6       1    fail     fail   15/15   objects  -       pulses 6 cycles (150 ns) wide
+width6       2    fail     fail   15/15   objects  -       pulses 6 cycles (150 ns) wide
+width6       3    fail     fail   15/15   objects  -       pulses 6 cycles (150 ns) wide
+width6       7    fail     fail   15/15   objects  -       pulses 6 cycles (150 ns) wide
+width6       11   fail     fail   15/15   objects  -       pulses 6 cycles (150 ns) wide
+width40      1    fail     fail   15/15   objects  -       pulses 40 cycles (1 us) wide
+width40      2    fail     fail   15/15   objects  -       pulses 40 cycles (1 us) wide
+width40      3    fail     fail   15/15   objects  -       pulses 40 cycles (1 us) wide
+width40      7    fail     fail   15/15   objects  -       pulses 40 cycles (1 us) wide
+width40      11   fail     fail   15/15   objects  -       pulses 40 cycles (1 us) wide
+apart7ms     1    fail     fail   9/15    objects  -       bursts 319,999 cycles apart
+apart7ms     2    fail     fail   11/15   objects  -       bursts 319,999 cycles apart
+apart7ms     3    fail     fail   10/15   objects  -       bursts 319,999 cycles apart
+apart7ms     7    fail     fail   11/15   objects  -       bursts 319,999 cycles apart
+apart7ms     11   fail     fail   11/15   objects  -       bursts 319,999 cycles apart
+apart25ms    1    fail     fail   9/15    objects  -       bursts 960,001 cycles apart
+apart25ms    2    fail     fail   11/15   objects  -       bursts 960,001 cycles apart
+apart25ms    3    fail     fail   10/15   objects  -       bursts 960,001 cycles apart
+apart25ms    7    fail     fail   11/15   objects  -       bursts 960,001 cycles apart
+apart25ms    11   fail     fail   11/15   objects  -       bursts 960,001 cycles apart
+start39999   1    fail     fail   15/15   objects  -       first burst at cycle 39,999
+start39999   2    fail     fail   15/15   objects  -       first burst at cycle 39,999
+start39999   3    fail     fail   15/15   objects  -       first burst at cycle 39,999
+start39999   7    fail     fail   15/15   objects  -       first burst at cycle 39,999
+start39999   11   fail     fail   15/15   objects  -       first burst at cycle 39,999
+start640001  1    fail     fail   15/15   objects  -       first burst at cycle 640,001
+start640001  2    fail     fail   15/15   objects  -       first burst at cycle 640,001
+start640001  3    fail     fail   15/15   objects  -       first burst at cycle 640,001
+start640001  7    fail     fail   15/15   objects  -       first burst at cycle 640,001
+start640001  11   fail     fail   15/15   objects  -       first burst at cycle 640,001
+low101       1    fail     fail   15/15   objects  -       P0 driven low only at cycle 101
+low101       2    fail     fail   15/15   objects  -       P0 driven low only at cycle 101
+low101       3    fail     fail   15/15   objects  -       P0 driven low only at cycle 101
+low101       7    fail     fail   15/15   objects  -       P0 driven low only at cycle 101
+low101       11   fail     fail   15/15   objects  -       P0 driven low only at cycle 101
+tdminus101   1    fail     fail   15/15   objects  -       P1 (TD-) driven low only at cycle 101
+tdminus101   2    fail     fail   15/15   objects  -       P1 (TD-) driven low only at cycle 101
+tdminus101   3    fail     fail   15/15   objects  -       P1 (TD-) driven low only at cycle 101
+tdminus101   7    fail     fail   15/15   objects  -       P1 (TD-) driven low only at cycle 101
+tdminus101   11   fail     fail   15/15   objects  -       P1 (TD-) driven low only at cycle 101
+tdminushigh  1    fail     fail   15/15   objects  -       P1 (TD-) left high from reset
+tdminushigh  2    fail     fail   15/15   objects  -       P1 (TD-) left high from reset
+tdminushigh  3    fail     fail   15/15   objects  -       P1 (TD-) left high from reset
+tdminushigh  7    fail     fail   15/15   objects  -       P1 (TD-) left high from reset
+tdminushigh  11   fail     fail   15/15   objects  -       P1 (TD-) left high from reset
+tdminuspulse 1    fail     fail   15/15   objects  -       a 4-cycle pulse on P1 (TD-) between two bursts
+tdminuspulse 2    fail     fail   15/15   objects  -       a 4-cycle pulse on P1 (TD-) between two bursts
+tdminuspulse 3    fail     fail   15/15   objects  -       a 4-cycle pulse on P1 (TD-) between two bursts
+tdminuspulse 7    fail     fail   15/15   objects  -       a 4-cycle pulse on P1 (TD-) between two bursts
+tdminuspulse 11   fail     fail   15/15   objects  -       a 4-cycle pulse on P1 (TD-) between two bursts
+glitch       1    fail     fail   15/15   objects  objects a pulse one cycle long on P0 between the first two bursts
+glitch       2    fail     fail   15/15   objects  objects a pulse one cycle long on P0 between the first two bursts
+glitch       3    fail     fail   15/15   objects  objects a pulse one cycle long on P0 between the first two bursts
+glitch       7    fail     fail   15/15   objects  objects a pulse one cycle long on P0 between the first two bursts
+glitch       11   fail     fail   15/15   objects  objects a pulse one cycle long on P0 between the first two bursts
+tail         1    fail     fail   15/15   objects  objects a lone pulse on P0 4 ms after the last burst
+tail         2    fail     fail   15/15   objects  objects a lone pulse on P0 4 ms after the last burst
+tail         3    fail     fail   15/15   objects  objects a lone pulse on P0 4 ms after the last burst
+tail         7    fail     fail   15/15   objects  objects a lone pulse on P0 4 ms after the last burst
+tail         11   fail     fail   15/15   objects  objects a lone pulse on P0 4 ms after the last burst
+stuckhigh    1    fail     fail   15/15   objects  -       P0 left high after the last burst
+stuckhigh    2    fail     fail   15/15   objects  -       P0 left high after the last burst
+stuckhigh    3    fail     fail   15/15   objects  -       P0 left high after the last burst
+stuckhigh    7    fail     fail   15/15   objects  -       P0 left high after the last burst
+stuckhigh    11   fail     fail   15/15   objects  -       P0 left high after the last burst
+dropword     1    fail     fail   15/15   objects  objects the last word is not sent
+dropword     2    fail     fail   15/15   objects  objects the last word is not sent
+dropword     3    fail     fail   15/15   objects  objects the last word is not sent
+dropword     7    fail     fail   15/15   objects  objects the last word is not sent
+dropword     11   fail     fail   15/15   objects  objects the last word is not sent
+extraword    1    fail     fail   15/15   objects  objects the last burst is sent twice
+extraword    2    fail     fail   15/15   objects  objects the last burst is sent twice
+extraword    3    fail     fail   15/15   objects  objects the last burst is sent twice
+extraword    7    fail     fail   15/15   objects  objects the last burst is sent twice
+extraword    11   fail     fail   15/15   objects  objects the last burst is sent twice
+
+ok    hand-in rules: run_args.txt with -tx is refused
+ok    hand-in rules: run_args.txt with -cycles is refused
+ok    hand-in rules: run_args.txt with -stimulus is refused
+ok    hand-in rules: run_args.txt with -inputs is refused
+ok    hand-in rules: run_args.txt with ambiguous -c is refused
+ok    hand-in rules: run_args.txt with two lines is refused
+ok    hand-in rules: run_args.txt with a flag with no value is refused
+ok    hand-in rules: run_args.txt with P1 not push-pull is refused
+ok    hand-in rules: run_args.txt with P0 open-drain is refused
+ok    hand-in rules: run_args.txt with P2 an output is refused
+ok    hand-in rules: run_args.txt with pin 9 is refused
+ok    hand-in rules: run_args.txt '-mode 0=pp -mode 1=pp' is accepted
+ok    hand-in rules: run_args.txt '-config clkdiv=4,set_base=0,set_count=2 -mode 1=pp -mode 0=pp -mode 2=in' is accepted
+
+ok    real simulator: a program that drives no pin fails every case cleanly
+      | case 0 (all zeros: 1 word): FAIL: waveform: P1 (TD-) is not driven low by cycle 100; waveform: P0 (TD+) is not driven low by cycle 100; decoder: decoded 0 pages, wanted 1
+
+SELFTEST PASS

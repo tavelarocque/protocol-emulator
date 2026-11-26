@@ -1,0 +1,308 @@
+diff --git a/C2/pd.py b/C2/pd.py
+index fecd2bd..038dca9 100644
+--- a/C2/pd.py
++++ b/C2/pd.py
+@@ -45,8 +45,8 @@ class Decoder(srd.Decoder):
+     )
+     optional_channels = ()
+     annotations = (
+-        ('106', 'raw-Data', 'raw data'),
+-        ('106', 'c2-data', 'c2 data'),
++        ('raw-Data', 'raw data'),
++        ('c2-data', 'c2 data'),
+         ('warnings', 'Warnings'),
+     )
+     annotation_rows = (
+diff --git a/MIPI_DSI/pd.py b/MIPI_DSI/pd.py
+index 15b58da..01bef7e 100644
+--- a/MIPI_DSI/pd.py
++++ b/MIPI_DSI/pd.py
+@@ -77,19 +77,19 @@ class Decoder(srd.Decoder):
+ 
+     )
+     annotations = (
+-        ('111', 'LP-00', 'LP-00'),
+-        ('110', 'LP-01', 'LP-01'),
+-        ('109', 'LP-10', 'LP-10'),
+-        ('108', 'LP-11', 'LP-11'),
+-        ('7', 'EscapeMode', 'Escape mode'),
+-        ('6', 'BTA', 'Bi-directional Data Lane Turnaround'),
+-        ('112', 'LPDT', 'LPDT'),
+-        ('0', 'DI', 'Data identifier'),
+-        ('12', 'ECC', 'ECC'),
+-        ('11', 'WC', 'Word count'),
+-        ('107', 'CRC', 'CheckSUM'),
+-        ('5', 'Stop', 'Stop condition'),
+-        ('1', 'Idle', 'Idle'),
++        ('LP-00', 'LP-00'),
++        ('LP-01', 'LP-01'),
++        ('LP-10', 'LP-10'),
++        ('LP-11', 'LP-11'),
++        ('EscapeMode', 'Escape mode'),
++        ('BTA', 'Bi-directional Data Lane Turnaround'),
++        ('LPDT', 'LPDT'),
++        ('DI', 'Data identifier'),
++        ('ECC', 'ECC'),
++        ('WC', 'Word count'),
++        ('CRC', 'CheckSUM'),
++        ('Stop', 'Stop condition'),
++        ('Idle', 'Idle'),
+     )
+     annotation_rows = (
+         ('LPData', 'LPData', (0, 1, 2, 3,)),
+@@ -210,7 +210,7 @@ class Decoder(srd.Decoder):
+                 (d0n, d0p) = self.wait([{0: 'h', 1: 'l'}, {0: 'l', 1: 'h'}])
+                 self.wait([{0: 'l', 1: 'l'}, {0: 'h', 1: 'h'}])
+                 
+-                if (self.matched & (0b1 << 0)):
++                if self.matched[0]:
+                     self.handle_data(d0n, d0p)
+                 else :
+                     self.handle_stop()
+diff --git a/can-fd/pd.py b/can-fd/pd.py
+index 0ad2203..9e27685 100644
+--- a/can-fd/pd.py
++++ b/can-fd/pd.py
+@@ -24,7 +24,17 @@
+ ## 2024/3/28 DreamSourceLab : Display data when zooming out 
+ ##
+ 
+-from common.srdhelper import bitpack_msb
++from common.srdhelper import bitpack
++
++# Port to sigrok-cli 0.7.2: its common.srdhelper has no bitpack_msb. This is
++# DSView's own definition (libsigrokdecode4DSL common/srdhelper/mod.py).
++def bitpack_msb(bits, idx=None):
++    '''Conversion from MSB first bit sequence to integer.'''
++    bits = bits[:]
++    if idx is not None:
++        bits = [b[idx] for b in bits]
++    bits.reverse()
++    return bitpack(bits)
+ import sigrokdecode as srd
+ 
+ class SamplerateError(Exception):
+@@ -614,7 +624,7 @@ class Decoder(srd.Decoder):
+                 
+                 pos = self.get_sample_point(self.curbit)
+                 (can_rx,) = self.wait([{'skip': pos - self.samplenum}, {0: 'f'}])
+-                if (self.matched & (0b1 << 1)):
++                if self.matched[1]:  # port: sigrok 0.7.2 gives a tuple, DSView a bitmask
+                     self.dom_edge_seen()
+-                if (self.matched & (0b1 << 0)):
++                if self.matched[0]:  # port: as above
+                     self.handle_bit(can_rx)
+diff --git a/mipi_rffe/pd.py b/mipi_rffe/pd.py
+index 0df9a81..b9b082a 100644
+--- a/mipi_rffe/pd.py
++++ b/mipi_rffe/pd.py
+@@ -92,25 +92,25 @@ class Decoder(srd.Decoder):
+             'default': 'display', 'values': ('display', 'not_display'), 'idn':'dec_mipi_rffe_opt_error_display'},
+     )
+     annotations = (
+-        ('7', 'ssc', 'Sequence Start Condition'),
+-        ('6', 'sa', 'Slave Address'),
+-        ('1', 'erw', 'Extended register write'),
+-        ('5', 'err', 'Extended register read'),
+-        ('0', 'erwl', 'Extended register write long'),
+-        ('112', 'errl', 'Extended register read long'),
+-        ('111', 'rw', 'Register write'),
+-        ('110', 'rr', 'Register read'),
+-        ('109', 'r0w', 'Register 0 write'),
+-        ('108', 'bc', 'Byte'),
+-        ('7', 'p', 'Parity'),
+-        ('75', 'address', 'Address'),
+-        ('70', 'bp', 'Bus pack'),
+-        ('65', 'data', 'DATA'),
+-        ('1000', 'Command warnings', 'Command warnings'),
+-        ('50', 'Bus Idle Condition ', 'Bus Idle Condition '),
+-        ('1000', 'BC warnings', 'BC warnings'),
+-        ('1000', 'Illegal Jump Edge', 'IJE_WAEN'),
+-        ('1000', 'Parity warnings', 'Parity warnings'),
++        ('ssc', 'Sequence Start Condition'),
++        ('sa', 'Slave Address'),
++        ('erw', 'Extended register write'),
++        ('err', 'Extended register read'),
++        ('erwl', 'Extended register write long'),
++        ('errl', 'Extended register read long'),
++        ('rw', 'Register write'),
++        ('rr', 'Register read'),
++        ('r0w', 'Register 0 write'),
++        ('bc', 'Byte'),
++        ('p', 'Parity'),
++        ('address', 'Address'),
++        ('bp', 'Bus pack'),
++        ('data', 'DATA'),
++        ('Command warnings', 'Command warnings'),
++        ('Bus Idle Condition ', 'Bus Idle Condition '),
++        ('BC warnings', 'BC warnings'),
++        ('Illegal Jump Edge', 'IJE_WAEN'),
++        ('Parity warnings', 'Parity warnings'),
+     )
+     annotation_rows = (
+         ('command-data', 'Command/Data', (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 , 11, 12, 13 ,15)),
+@@ -195,20 +195,20 @@ class Decoder(srd.Decoder):
+             while True :
+                 if self._display :
+                     (sclk, sdata) = self.wait([{0: 'f'},{0: 'l', 1: 'e'}])
+-                    if (self.matched & (0b1 << 0)):
++                    if self.matched[0]:
+                         self.databyte <<= 1
+                         self.databyte |= sdata
+                         break
+-                    if (self.matched & (0b1 << 1)):
++                    if self.matched[1]:
+                         self.ss = self.samplenum
+                         (sclk, sdata) = self.wait([{0: 'f'},{0: 'l', 1: 'e'}])
+-                        if (self.matched & (0b1 << 0)):
++                        if self.matched[0]:
+                             self.es = self.samplenum
+                             self.putx([proto['IJE'][0], proto['IJE'][1:]])
+                             self.databyte <<= 1
+                             self.databyte |= sdata
+                             break
+-                        if (self.matched & (0b1 << 1)):
++                        if self.matched[1]:
+                             self.es = self.samplenum                        
+                             self.putx([proto['IJE'][0], proto['IJE'][1:]])
+                 else :
+@@ -223,20 +223,20 @@ class Decoder(srd.Decoder):
+         while True :
+             if self._display :
+                 (sclk, sdata) = self.wait([{0: 'f'},{0: 'l', 1: 'e'}])
+-                if (self.matched & (0b1 << 0)):
++                if self.matched[0]:
+                     self.databyte <<= 1
+                     self.databyte |= sdata
+                     break
+-                if (self.matched & (0b1 << 1)):
++                if self.matched[1]:
+                     self.ss = self.samplenum
+                     (sclk, sdata) = self.wait([{0: 'f'},{0: 'l', 1: 'e'}])
+-                    if (self.matched & (0b1 << 0)):
++                    if self.matched[0]:
+                         self.es = self.samplenum
+                         self.putx([proto['IJE'][0], proto['IJE'][1:]])
+                         self.databyte <<= 1
+                         self.databyte |= sdata
+                         break
+-                    if (self.matched & (0b1 << 1)):
++                    if self.matched[1]:
+                         self.es = self.samplenum                        
+                         self.putx([proto['IJE'][0], proto['IJE'][1:]])
+             else :
+@@ -353,16 +353,16 @@ class Decoder(srd.Decoder):
+             while True :
+                 if self._display :
+                     (sclk,self.sdata) = self.wait([{0: 'f'},{0: 'l', 1: 'e'}])
+-                    if (self.matched & (0b1 << 0)):
++                    if self.matched[0]:
+                         break
+-                    if (self.matched & (0b1 << 1)):
++                    if self.matched[1]:
+                         self.ss = self.samplenum
+                         (sclk,self.sdata) = self.wait([{0: 'f'},{0: 'l', 1: 'e'}])
+-                        if (self.matched & (0b1 << 0)):
++                        if self.matched[0]:
+                             self.es = self.samplenum
+                             self.putx([proto['IJE'][0], proto['IJE'][1:]])
+                             break
+-                        if (self.matched & (0b1 << 1)):
++                        if self.matched[1]:
+                             self.es = self.samplenum
+                             self.putx([proto['IJE'][0], proto['IJE'][1:]])
+                 else :
+@@ -403,13 +403,13 @@ class Decoder(srd.Decoder):
+                 self.wait({0: 'l', 1: 'r'})
+                 self.BPss = self.samplenum   
+                 self.wait([{0: 'h'},{0: 'l', 1: 'f'}])
+-                if (self.matched & (0b1 << 0)):
++                if self.matched[0]:
+                     continue
+-                if (self.matched & (0b1 << 1)):
++                if self.matched[1]:
+                     self.wait([{0: 'l', 1: 'e'},{0: 'r'}])
+-                    if (self.matched & (0b1 << 0)):
++                    if self.matched[0]:
+                         continue
+-                    if (self.matched & (0b1 << 1)):
++                    if self.matched[1]:
+                         self.ss,self.es = self.BPss,self.samplenum
+                         self.putx([proto['SSC'][0], proto['SSC'][1:]])
+                         self.state = 'FIND SLAVE ADDRESS'
+diff --git a/qspi/pd.py b/qspi/pd.py
+index 2723842..fdb0205 100644
+--- a/qspi/pd.py
++++ b/qspi/pd.py
+@@ -68,7 +68,7 @@ class Decoder(srd.Decoder):
+         {'id': 'wordsize', 'desc': 'Word size', 'default': 8, 'idn':'dec_qspi_opt_wordsize'},
+     )
+     annotations = (
+-        ('106', 'data', 'data'),
++        ('data', 'data'),
+     )
+     annotation_rows = (
+         ('data', 'data', (0,)),
+@@ -171,7 +171,7 @@ class Decoder(srd.Decoder):
+         self.reset_decoder_state()
+ 
+     def find_clk_edge(self, datapins, clk, cs, first):
+-        if self.have_cs and (first or (self.matched & (0b1 << self.have_cs))):
++        if self.have_cs and (first or self.matched[self.have_cs]):
+             # Send all CS# pin value changes.
+             oldcs = None if first else 1 - cs
+ 
+@@ -183,7 +183,7 @@ class Decoder(srd.Decoder):
+             return
+ 
+         # Ignore sample if the clock pin hasn't changed.
+-        if first or not (self.matched & (0b1 << 0)):
++        if first or not self.matched[0]:
+             return
+ 
+         # Found the correct clock edge, now get the SPI bit(s).
+diff --git a/smart_qspi/pd.py b/smart_qspi/pd.py
+index 0668b08..b67e63d 100644
+--- a/smart_qspi/pd.py
++++ b/smart_qspi/pd.py
+@@ -219,14 +219,14 @@ class Decoder(srd.Decoder):
+ 
+     )
+     annotations = (
+-        ('6', 'data-transfer', 'data transfer'),
+-        ('108', 'Quad data', 'Q-Data'),
+-        ('108', 'Dual data', 'D-Data'),
+-        ('106', 'd0', 'IO0 data'),
+-        ('106', 'd1', 'IO1 data'),
+-        ('106', 'd2', 'IO2 data'),
+-        ('106', 'd3', 'IO3 data'),
+-        ('1000', 'other', 'Human-readable warnings'),
++        ('data-transfer', 'data transfer'),
++        ('Quad data', 'Q-Data'),
++        ('Dual data', 'D-Data'),
++        ('d0', 'IO0 data'),
++        ('d1', 'IO1 data'),
++        ('d2', 'IO2 data'),
++        ('d3', 'IO3 data'),
++        ('other', 'Human-readable warnings'),
+     )
+     annotation_rows = (
+         ('data-transfer', 'data transfer', (0,)),
+@@ -571,7 +571,7 @@ class Decoder(srd.Decoder):
+ 
+     def find_clk_edge(self, datapins, clk, cs, first,frame):
+ 
+-        if self.have_cs and (first or (self.matched & (0b1 << self.have_cs))):
++        if self.have_cs and (first or self.matched[self.have_cs]):
+             # Send all CS# pin value changes.
+             oldcs = None if first else 1 - cs
+             self.put(self.samplenum, self.samplenum, self.out_python,
+@@ -604,7 +604,7 @@ class Decoder(srd.Decoder):
+             return
+ 
+         # Ignore sample if the clock pin hasn't changed.
+-        if first or not (self.matched & (0b1 << 0)):
++        if first or not self.matched[0]:
+             return
+ 
+         # Found the correct clock edge, now get the SPI bit(s).

@@ -1,0 +1,46 @@
+diff --git a/MIPI_DSI/pd.py b/MIPI_DSI/pd.py
+index 15b58da..01bef7e 100644
+--- a/MIPI_DSI/pd.py
++++ b/MIPI_DSI/pd.py
+@@ -77,19 +77,19 @@ class Decoder(srd.Decoder):
+ 
+     )
+     annotations = (
+-        ('111', 'LP-00', 'LP-00'),
+-        ('110', 'LP-01', 'LP-01'),
+-        ('109', 'LP-10', 'LP-10'),
+-        ('108', 'LP-11', 'LP-11'),
+-        ('7', 'EscapeMode', 'Escape mode'),
+-        ('6', 'BTA', 'Bi-directional Data Lane Turnaround'),
+-        ('112', 'LPDT', 'LPDT'),
+-        ('0', 'DI', 'Data identifier'),
+-        ('12', 'ECC', 'ECC'),
+-        ('11', 'WC', 'Word count'),
+-        ('107', 'CRC', 'CheckSUM'),
+-        ('5', 'Stop', 'Stop condition'),
+-        ('1', 'Idle', 'Idle'),
++        ('LP-00', 'LP-00'),
++        ('LP-01', 'LP-01'),
++        ('LP-10', 'LP-10'),
++        ('LP-11', 'LP-11'),
++        ('EscapeMode', 'Escape mode'),
++        ('BTA', 'Bi-directional Data Lane Turnaround'),
++        ('LPDT', 'LPDT'),
++        ('DI', 'Data identifier'),
++        ('ECC', 'ECC'),
++        ('WC', 'Word count'),
++        ('CRC', 'CheckSUM'),
++        ('Stop', 'Stop condition'),
++        ('Idle', 'Idle'),
+     )
+     annotation_rows = (
+         ('LPData', 'LPData', (0, 1, 2, 3,)),
+@@ -210,7 +210,7 @@ class Decoder(srd.Decoder):
+                 (d0n, d0p) = self.wait([{0: 'h', 1: 'l'}, {0: 'l', 1: 'h'}])
+                 self.wait([{0: 'l', 1: 'l'}, {0: 'h', 1: 'h'}])
+                 
+-                if (self.matched & (0b1 << 0)):
++                if self.matched[0]:
+                     self.handle_data(d0n, d0p)
+                 else :
+                     self.handle_stop()

@@ -1,0 +1,189 @@
+ok    interface: the example's TX words are the sheet's (0x0000, 0x0000, 0x0C10, 0x00A5, 0x001D, 0x001F, 0xFFFE)
+ok    interface: the example's rx words are the sheet's (0x0000, 0x0000, 0x5AC3)
+ok    interface: 4-byte data is two words, high half first; an ERR read gives only its code
+ok    example: the sheet's table of bits and clocks is the judge's (4-44 chip; 61-69 slave; 90-122 chip; 145-169 slave)
+ok    example: the next START would be clock 190 and N = 3900
+ok    example: the sheet's stimulus file is the judge's (19 lines)
+ok    example: a 4-byte access sends address bits 1..0 as 01
+ok    crc: bit by bit (judge) and Linux's nibble table (stand-in) agree on 2000 messages
+ok    crc: the stand-in's command bits equal the judge's for every transaction
+ok    stimulus: the decoder reads the ideal link of all 14 cases on 5 seeds as wanted
+
+waveform    seed expected judge  cases   waveform decoder rx   
+                                 failed  check    check        what it is
+none        1    pass     pass   0/14    -        -       -    ideal: DATA changes at each falling edge, clock stops after the last rising edge of the run
+
+ok    seed 1: RATE bytes=17 cycles=16670, as the stand-in's own pin changes give
+
+none        2    pass     pass   0/14    -        -       -    ideal: DATA changes at each falling edge, clock stops after the last rising edge of the run
+
+ok    seed 2: RATE bytes=1 cycles=2010, as the stand-in's own pin changes give
+
+none        3    pass     pass   0/14    -        -       -    ideal: DATA changes at each falling edge, clock stops after the last rising edge of the run
+
+ok    seed 3: RATE bytes=18 cycles=17630, as the stand-in's own pin changes give
+
+none        7    pass     pass   0/14    -        -       -    ideal: DATA changes at each falling edge, clock stops after the last rising edge of the run
+
+ok    seed 7: RATE bytes=13 cycles=12870, as the stand-in's own pin changes give
+
+none        11   pass     pass   0/14    -        -       -    ideal: DATA changes at each falling edge, clock stops after the last rising edge of the run
+
+ok    seed 11: RATE bytes=5 cycles=8010, as the stand-in's own pin changes give
+
+jitter_a    1    pass     pass   0/14    -        -       -    every falling edge 2 cycles late and every rising edge 2 early (clock low 6 cycles)
+jitter_a    2    pass     pass   0/14    -        -       -    every falling edge 2 cycles late and every rising edge 2 early (clock low 6 cycles)
+jitter_a    3    pass     pass   0/14    -        -       -    every falling edge 2 cycles late and every rising edge 2 early (clock low 6 cycles)
+jitter_a    7    pass     pass   0/14    -        -       -    every falling edge 2 cycles late and every rising edge 2 early (clock low 6 cycles)
+jitter_a    11   pass     pass   0/14    -        -       -    every falling edge 2 cycles late and every rising edge 2 early (clock low 6 cycles)
+jitter_b    1    pass     pass   0/14    -        -       -    every falling edge 2 cycles early and every rising edge 2 late (clock high 6 cycles)
+jitter_b    2    pass     pass   0/14    -        -       -    every falling edge 2 cycles early and every rising edge 2 late (clock high 6 cycles)
+jitter_b    3    pass     pass   0/14    -        -       -    every falling edge 2 cycles early and every rising edge 2 late (clock high 6 cycles)
+jitter_b    7    pass     pass   0/14    -        -       -    every falling edge 2 cycles early and every rising edge 2 late (clock high 6 cycles)
+jitter_b    11   pass     pass   0/14    -        -       -    every falling edge 2 cycles early and every rising edge 2 late (clock high 6 cycles)
+earlydata   1    pass     pass   0/14    -        -       -    DATA changes 1 cycle after the rising edge before (the earliest; 'none' is the latest)
+earlydata   2    pass     pass   0/14    -        -       -    DATA changes 1 cycle after the rising edge before (the earliest; 'none' is the latest)
+earlydata   3    pass     pass   0/14    -        -       -    DATA changes 1 cycle after the rising edge before (the earliest; 'none' is the latest)
+earlydata   7    pass     pass   0/14    -        -       -    DATA changes 1 cycle after the rising edge before (the earliest; 'none' is the latest)
+earlydata   11   pass     pass   0/14    -        -       -    DATA changes 1 cycle after the rising edge before (the earliest; 'none' is the latest)
+runon       1    pass     pass   0/14    -        -       -    the clock keeps running to the end of the simulation
+runon       2    pass     pass   0/14    -        -       -    the clock keeps running to the end of the simulation
+runon       3    pass     pass   0/14    -        -       -    the clock keeps running to the end of the simulation
+runon       7    pass     pass   0/14    -        -       -    the clock keeps running to the end of the simulation
+runon       11   pass     pass   0/14    -        -       -    the clock keeps running to the end of the simulation
+flipaddr    1    fail     fail   14/14   objects  objects -    one address bit of the last command inverted, its CRC that of the right address
+flipaddr    2    fail     fail   14/14   objects  objects -    one address bit of the last command inverted, its CRC that of the right address
+flipaddr    3    fail     fail   14/14   objects  objects -    one address bit of the last command inverted, its CRC that of the right address
+flipaddr    7    fail     fail   14/14   objects  objects -    one address bit of the last command inverted, its CRC that of the right address
+flipaddr    11   fail     fail   14/14   objects  objects -    one address bit of the last command inverted, its CRC that of the right address
+addrlsb     1    fail     fail   13/14   objects  objects -    the address sent least significant bit first
+addrlsb     2    fail     fail   13/14   objects  objects -    the address sent least significant bit first
+addrlsb     3    fail     fail   13/14   objects  objects -    the address sent least significant bit first
+addrlsb     7    fail     fail   13/14   objects  objects -    the address sent least significant bit first
+addrlsb     11   fail     fail   13/14   objects  objects -    the address sent least significant bit first
+idlsb       1    fail     fail   8/14    objects  objects -    the slave ID sent least significant bit first
+idlsb       2    fail     fail   8/14    objects  objects -    the slave ID sent least significant bit first
+idlsb       3    fail     fail   9/14    objects  objects -    the slave ID sent least significant bit first
+idlsb       7    fail     fail   9/14    objects  objects -    the slave ID sent least significant bit first
+idlsb       11   fail     fail   7/14    objects  objects -    the slave ID sent least significant bit first
+noinvert    1    fail     fail   14/14   objects  objects -    FSI_DAT not inverted: the chip pulls low for a 0
+noinvert    2    fail     fail   14/14   objects  objects -    FSI_DAT not inverted: the chip pulls low for a 0
+noinvert    3    fail     fail   14/14   objects  objects -    FSI_DAT not inverted: the chip pulls low for a 0
+noinvert    7    fail     fail   14/14   objects  objects -    FSI_DAT not inverted: the chip pulls low for a 0
+noinvert    11   fail     fail   14/14   objects  objects -    FSI_DAT not inverted: the chip pulls low for a 0
+crcnostart  1    fail     fail   14/14   objects  objects -    the command CRC computed without the START bit
+crcnostart  2    fail     fail   14/14   objects  objects -    the command CRC computed without the START bit
+crcnostart  3    fail     fail   14/14   objects  objects -    the command CRC computed without the START bit
+crcnostart  7    fail     fail   14/14   objects  objects -    the command CRC computed without the START bit
+crcnostart  11   fail     fail   14/14   objects  objects -    the command CRC computed without the START bit
+word00      1    fail     fail   10/14   objects  objects -    4-byte accesses sent with address bits 1..0 = 00
+word00      2    fail     fail   7/14    objects  objects -    4-byte accesses sent with address bits 1..0 = 00
+word00      3    fail     fail   12/14   objects  objects -    4-byte accesses sent with address bits 1..0 = 00
+word00      7    fail     fail   11/14   objects  objects -    4-byte accesses sent with address bits 1..0 = 00
+word00      11   fail     fail   11/14   objects  objects -    4-byte accesses sent with address bits 1..0 = 00
+dsbyte      1    fail     fail   10/14   objects  objects -    the data size bit sent as 1 for 1-byte accesses
+dsbyte      2    fail     fail   11/14   objects  objects -    the data size bit sent as 1 for 1-byte accesses
+dsbyte      3    fail     fail   9/14    objects  objects -    the data size bit sent as 1 for 1-byte accesses
+dsbyte      7    fail     fail   11/14   objects  objects -    the data size bit sent as 1 for 1-byte accesses
+dsbyte      11   fail     fail   8/14    objects  objects -    the data size bit sent as 1 for 1-byte accesses
+rxbit       1    fail     fail   4/14    -        -       obj  one rx data bit inverted
+rxbit       2    fail     fail   6/14    -        -       obj  one rx data bit inverted
+rxbit       3    fail     fail   4/14    -        -       obj  one rx data bit inverted
+rxbit       7    fail     fail   7/14    -        -       obj  one rx data bit inverted
+rxbit       11   fail     fail   6/14    -        -       obj  one rx data bit inverted
+rxswap      1    fail     fail   5/14    -        -       obj  a 4-byte read's two rx words in the wrong order
+rxswap      2    fail     fail   3/14    -        -       obj  a 4-byte read's two rx words in the wrong order
+rxswap      3    fail     fail   6/14    -        -       obj  a 4-byte read's two rx words in the wrong order
+rxswap      7    fail     fail   8/14    -        -       obj  a 4-byte read's two rx words in the wrong order
+rxswap      11   fail     fail   4/14    -        -       obj  a 4-byte read's two rx words in the wrong order
+rxnocode    1    fail     fail   14/14   -        -       obj  no response-code word
+rxnocode    2    fail     fail   14/14   -        -       obj  no response-code word
+rxnocode    3    fail     fail   14/14   -        -       obj  no response-code word
+rxnocode    7    fail     fail   14/14   -        -       obj  no response-code word
+rxnocode    11   fail     fail   14/14   -        -       obj  no response-code word
+rxextra     1    fail     fail   14/14   -        -       obj  one extra rx word at the end
+rxextra     2    fail     fail   14/14   -        -       obj  one extra rx word at the end
+rxextra     3    fail     fail   14/14   -        -       obj  one extra rx word at the end
+rxextra     7    fail     fail   14/14   -        -       obj  one extra rx word at the end
+rxextra     11   fail     fail   14/14   -        -       obj  one extra rx word at the end
+ackonly     1    fail     fail   4/14    objects  -       obj  every response read as if it were ACK (data read after an ERR)
+ackonly     2    fail     fail   3/14    objects  -       obj  every response read as if it were ACK (data read after an ERR)
+ackonly     3    fail     fail   3/14    objects  -       obj  every response read as if it were ACK (data read after an ERR)
+ackonly     7    fail     fail   3/14    objects  -       obj  every response read as if it were ACK (data read after an ERR)
+ackonly     11   fail     fail   2/14    objects  -       obj  every response read as if it were ACK (data read after an ERR)
+fixeddelay  1    fail     fail   13/14   objects  objects obj  the slave's START assumed at D = 17 instead of found
+fixeddelay  2    fail     fail   13/14   objects  objects obj  the slave's START assumed at D = 17 instead of found
+fixeddelay  3    fail     fail   13/14   objects  objects obj  the slave's START assumed at D = 17 instead of found
+fixeddelay  7    fail     fail   13/14   objects  objects obj  the slave's START assumed at D = 17 instead of found
+fixeddelay  11   fail     fail   13/14   objects  objects obj  the slave's START assumed at D = 17 instead of found
+late1       1    fail     fail   14/14   objects  -       -    every command one clock late
+late1       2    fail     fail   14/14   objects  -       -    every command one clock late
+late1       3    fail     fail   14/14   objects  -       -    every command one clock late
+late1       7    fail     fail   14/14   objects  -       -    every command one clock late
+late1       11   fail     fail   14/14   objects  -       -    every command one clock late
+gap19       1    fail     fail   14/14   objects  -       -    19 idle clocks after a response instead of 20
+gap19       2    fail     fail   14/14   objects  -       -    19 idle clocks after a response instead of 20
+gap19       3    fail     fail   14/14   objects  -       -    19 idle clocks after a response instead of 20
+gap19       7    fail     fail   14/14   objects  -       -    19 idle clocks after a response instead of 20
+gap19       11   fail     fail   14/14   objects  -       -    19 idle clocks after a response instead of 20
+edge3       1    fail     fail   14/14   objects  -       -    one rising edge 3 cycles late
+edge3       2    fail     fail   14/14   objects  -       -    one rising edge 3 cycles late
+edge3       3    fail     fail   14/14   objects  -       -    one rising edge 3 cycles late
+edge3       7    fail     fail   14/14   objects  -       -    one rising edge 3 cycles late
+edge3       11   fail     fail   14/14   objects  -       -    one rising edge 3 cycles late
+period21    1    fail     fail   14/14   objects  objects obj  a clock period of 21 cycles
+period21    2    fail     fail   14/14   objects  objects obj  a clock period of 21 cycles
+period21    3    fail     fail   14/14   objects  objects obj  a clock period of 21 cycles
+period21    7    fail     fail   14/14   objects  objects obj  a clock period of 21 cycles
+period21    11   fail     fail   14/14   objects  objects obj  a clock period of 21 cycles
+afterfall   1    fail     fail   14/14   objects  objects -    every DATA change 1 cycle after its falling edge (clock already low)
+afterfall   2    fail     fail   14/14   objects  objects -    every DATA change 1 cycle after its falling edge (clock already low)
+afterfall   3    fail     fail   14/14   objects  objects -    every DATA change 1 cycle after its falling edge (clock already low)
+afterfall   7    fail     fail   14/14   objects  objects -    every DATA change 1 cycle after its falling edge (clock already low)
+afterfall   11   fail     fail   14/14   objects  objects -    every DATA change 1 cycle after its falling edge (clock already low)
+setup       1    fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle before its rising edge
+setup       2    fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle before its rising edge
+setup       3    fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle before its rising edge
+setup       7    fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle before its rising edge
+setup       11   fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle before its rising edge
+hold        1    fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle of its rising edge
+hold        2    fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle of its rising edge
+hold        3    fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle of its rising edge
+hold        7    fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle of its rising edge
+hold        11   fail     fail   14/14   objects  -       -    the first START bit put on DATA in the cycle of its rising edge
+glitch      1    fail     fail   14/14   objects  -       -    a one-cycle low pulse on DATA while the clock is high, in the turnaround after the first command
+glitch      2    fail     fail   14/14   objects  -       -    a one-cycle low pulse on DATA while the clock is high, in the turnaround after the first command
+glitch      3    fail     fail   14/14   objects  -       -    a one-cycle low pulse on DATA while the clock is high, in the turnaround after the first command
+glitch      7    fail     fail   14/14   objects  -       -    a one-cycle low pulse on DATA while the clock is high, in the turnaround after the first command
+glitch      11   fail     fail   14/14   objects  -       -    a one-cycle low pulse on DATA while the clock is high, in the turnaround after the first command
+clockearly  1    fail     fail   14/14   objects  -       -    FSI_CLK first falls at cycle 5
+clockearly  2    fail     fail   14/14   objects  -       -    FSI_CLK first falls at cycle 5
+clockearly  3    fail     fail   14/14   objects  -       -    FSI_CLK first falls at cycle 5
+clockearly  7    fail     fail   14/14   objects  -       -    FSI_CLK first falls at cycle 5
+clockearly  11   fail     fail   14/14   objects  -       -    FSI_CLK first falls at cycle 5
+stopearly   1    fail     fail   14/14   objects  -       -    the clock stops 6 clocks after the last response
+stopearly   2    fail     fail   14/14   objects  -       -    the clock stops 6 clocks after the last response
+stopearly   3    fail     fail   14/14   objects  -       -    the clock stops 6 clocks after the last response
+stopearly   7    fail     fail   14/14   objects  -       -    the clock stops 6 clocks after the last response
+stopearly   11   fail     fail   14/14   objects  -       -    the clock stops 6 clocks after the last response
+droplast    1    fail     fail   14/14   objects  objects obj  the last transaction is not performed
+droplast    2    fail     fail   14/14   objects  objects obj  the last transaction is not performed
+droplast    3    fail     fail   14/14   objects  objects obj  the last transaction is not performed
+droplast    7    fail     fail   14/14   objects  objects obj  the last transaction is not performed
+droplast    11   fail     fail   14/14   objects  objects obj  the last transaction is not performed
+
+ok    run_args.txt '-mode 0=od -mode 1=pp\n': accepted
+ok    run_args.txt '-mo 0=od -mo 1=pp -config clkdiv=1,sideset_base=1\n': accepted
+ok    run_args.txt '-mode 0=od -mode 1=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=od -mode 1=pp -stimulus s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=od -mode 1=pp -s s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=od -mode 1=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=od -mode 1=pp -inputs 0xff\n': setup: FAIL: run_args.txt must not give -inputs: the test does
+ok    run_args.txt '-mode 0=od -mode 1=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=od\n-mode 1=pp\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode 0=od -mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    run_args.txt '-mode 0=pp -mode 1=pp\n': setup: FAIL: pin modes must be P0 od (FSI_DAT), P1 pp (FSI_CLK); got P0=pp
+ok    run_args.txt '-mode 0=od -mode 1=od\n': setup: FAIL: pin modes must be P0 od (FSI_DAT), P1 pp (FSI_CLK); got P1=od
+ok    run_args.txt '-mode 0=od\n': setup: FAIL: pin modes must be P0 od (FSI_DAT), P1 pp (FSI_CLK); got P1=in
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 2 transactions): FAIL: waveform: FSI_CLK has 0 edges, the run needs 380 (eve)
+SELFTEST PASS
