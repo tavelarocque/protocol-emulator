@@ -51,7 +51,7 @@ it set on MISO.
 | 0x4A | STATUS: pc [15:8], enable [7], RX level [6:4], TX level [2:0] |
 | 0x4B | TIMEOUT: max cycles a timed wait stalls |
 | 0x4C | SIDESET: base pin [2:0], count [5:4] |
-| 0x4D | CLKDIV: the thread runs one cycle in every CLKDIV (0, 1: every cycle) |
+| 0x4D | CLKDIV [15:0]: the thread runs one cycle in every CLKDIV (0, 1: every cycle) |
 | 0x4E | SYNC_BYPASS (global): 1 bit per pin; set to read that pin without the 2-cycle input synchroniser |
 | 0x4F | SHIFT: bit 0 OUT most significant bit first, bit 1 IN most significant bit first; bit 2 autopull, bit 3 autopush; bit 4 the CRC register reads inverted, bit 5 it follows IN's bits, not OUT's |
 | 0x50 | LOAD (global): page that program writes go to [1:0]; bit 4 write thread 0's memory, bit 5 thread 1's. Resets to 0x30 |

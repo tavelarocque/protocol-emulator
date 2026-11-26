@@ -112,7 +112,7 @@ output, read back on a push-pull or open-drain pin, is never delayed.
 | `timeout_vector` | jump target when a `wait ... timeout` expires: a full address, so it can be in any page. PAGE is not changed by the jump |
 | `timeout` | cycles (0 to 65535) a `wait ... timeout` may stall before it expires |
 | `sideset_base`, `sideset_count` | first side-set pin, and how many of the delay field's top bits (0 to 3) are side-set values |
-| `clkdiv` | the thread runs one cycle in every `clkdiv` (0 and 1: every cycle). Between those ticks it does nothing at all, so delays and wait timeouts count in ticks |
+| `clkdiv` | 16 bits, 0 to 65535: the thread runs one cycle in every `clkdiv` (0 and 1: every cycle). Between those ticks it does nothing at all, so delays and wait timeouts count in ticks |
 | `out_msb_first`, `in_msb_first` | shift direction (SHIFT register). OUT: take bits from the top of the OSR and shift it left. IN: shift the ISR left, new bits entering at the bottom. Off by default, which is least significant bit first |
 | `autopull`, `autopush` | the OSR refills and the ISR empties by themselves (see `out` and `in`). Off by default |
 | `crc_poly`, `crc_init` | the CRC register's polynomial, written low power first, and the value it starts from; 32 bits each |
@@ -152,6 +152,29 @@ CRC-16) and CAN (its 15-bit polynomial reversed, from zero, with the bytes
 shifted most significant bit first). A CRC narrower than 32 bits uses the
 register's low bits. The register starts from `crc_init` whenever the
 thread is disabled. `mov` reads it and restarts it (see `mov`).
+
+A read gives 16 bits, the low half first: CRC-32 of `123456789`
+(0xCBF43926) reads 0x3926, then 0xCBF4, then 0 (0xFFFF with
+`crc_invert`). Because the register shifts right, its bit 0 holds the
+coefficient of the remainder's highest power. For a CRC sent least
+significant bit first (Ethernet, USB) that is the usual value. For one
+defined most significant bit first (CAN, CRC-8 0x07, CRC-16/XMODEM) the
+register's low bits are the usual value bit-reversed, with the first bit
+to send in bit 0: CRC-8 0x07 of `123456789` (check value 0xF4), with
+`crc_poly` 0xE0 and the bytes shifted MSB first, reads 0x2F. A thread
+that shifts OUT least significant bit first sends it as it is. With
+`out_msb_first`, or to give the host the usual value, reverse it through
+the ISR, which shifts the other way by default:
+
+```
+        mov osr, crc      ; 0x002F
+        out null, 8       ; MSB first: the CRC's 8 bits now on top
+        set y, 7
+rev:    out x, 1          ; the register's bit 7 first
+        in x, 1           ; IN LSB first: the first bit in ends lowest
+        jmp y-- rev
+        push              ; 0x00F4
+```
 
 ### The packet buffer
 
@@ -370,20 +393,33 @@ per line. `pe_sim run FILE.s` runs the program on thread 0:
 
 - `-config k=v,...` sets the thread's configuration, with the field names
   of the per-thread configuration table. What is not set is 0 or off, except `out_count` 1,
-  `set_count` 1 and `threshold` 8.
+  `set_count` 1 and `threshold` 8. Values are decimal or `0x` hex. The
+  on/off fields take 0 for off and any other number for on:
+  `autopull=1`, not `autopull=true`.
 - `-mode P=pp|od|in`, once per pin, makes pin P push-pull, open-drain or
   an input (the default): `-mode 0=pp`.
 - `-tx FILE` gives the host's TX words, one per line, decimal or `0x` hex.
   A word is pushed as soon as the FIFO has room.
-- `-inputs HEX` is what the input pins read (bit k is pin Pk), and
-  `-stimulus FILE` changes that over time: each line is `CYCLE HEX`, in
-  increasing cycle order, and holds until the next line's cycle.
-- `-cycles N` is how long to run.
+- `-inputs 0xNN` is what the input pins read (bit k is pin Pk; 0xFF if
+  not given). Write the `0x`: without it the number is decimal, so
+  `-inputs 10` is 0x0A. `-stimulus FILE` changes the levels over time:
+  each line is `CYCLE HEX` (here the `0x` may be left out), in increasing
+  cycle order, and holds until the next line's cycle.
+- `-cycles N` is how long to run (100,000 if not given).
 
-It prints `pins CYCLE XX` whenever the pins' output changes, the levels
-being those at the start of that cycle: a write made by the instruction
-that runs in cycle c shows as `pins c+1`. It prints `rx CYCLE WORD` for
-every word the thread pushes.
+It prints one line per event, CYCLE in decimal:
+
+- `pins CYCLE XX`: the output register in hex, bit k for pin Pk. The first
+  line, `pins 0 ff`, is the starting state, not a change; after it a line
+  comes whenever the register changes. The value is the one at the start
+  of that cycle: a write made by the instruction that runs in cycle c
+  shows as `pins c+1`. It is what the chip drives, not the level on the
+  line: a 1 on an open-drain pin is released whatever the line does, and
+  an input pin shows its bit of the register, which drives nothing. What
+  a thread reads (`in pins`, `wait`, `mov x, pins`) is the line, as in
+  the table of pin levels.
+- `rx CYCLE WORD`: a word the thread pushed in that cycle, in decimal:
+  `rx 7 770` is 0x0302.
 
 ## Instructions
 
@@ -417,7 +453,9 @@ page boundary and means the same of that page.
 
 A loop `l: jmp x-- l` entered with X = n takes exactly n + 1 cycles.
 
-**`wait pol pin n [timeout]`** stalls until pin `n` reads `pol`.
+**`wait pol pin n [timeout]`** stalls until pin `n` reads `pol`. `n` is
+the pin's own number, 0 to 7, not counted from `in_base`: `wait 0 pin 2`
+waits for P2 whatever `in_base` is.
 
 - Without `timeout`, it can stall forever.
 - With `timeout`, a hidden per-thread counter is the budget. It loads from
@@ -428,14 +466,22 @@ A loop `l: jmp x-- l` entered with X = n takes exactly n + 1 cycles.
   after (with T = 0, at once). X and Y are untouched, so firmware can keep using them for
   bit timing, and every timed wait starts with a fresh budget.
 
-**`in src, count`** shifts `count` bits right into the ISR. `src` is one of:
+**`in src, count`** shifts the low `count` bits of `src` into the ISR.
+`src` is one of:
 
-- `pins`: from `in_base` up
+- `pins`: from `in_base` up, bit k being pin `in_base + k`
 - `x` or `y`
 - `null`: zeros
 
-Bits arrive least significant bit first by default; with `in_msb_first`
-the ISR shifts left instead and new bits enter at the bottom.
+By default the ISR shifts right and the new bits enter at the top, so the
+first bit in ends lowest once pushed: after `set x, 5` and `in x, 4` the
+ISR holds 0x5000. With `in_msb_first` it shifts left instead and new bits
+enter at the bottom (0x0005). `push` right-justifies either way; `mov`
+reads the register as it stands.
+
+The ISR's count goes up by `count` and stops at 16. Without `autopush`, an
+`in` at or past the threshold still shifts, the oldest bits falling out,
+and `!isrf` reads full until a `push` or a write of `isr`.
 
 With `autopush`, an `in` that brings the ISR's count to the threshold
 pushes it in the same cycle, as `push` would, and clears it. If the RX FIFO
@@ -460,10 +506,16 @@ With `autopull`, an `out` that empties the OSR refills it from the TX FIFO
 in the same cycle, if the FIFO has a word, so a program can shift bits
 without a gap and never execute a `pull`. An `out` that finds the OSR empty
 spends that tick fetching a word instead (or waiting for one), and runs on
-the next.
+the next. If the FIFO is empty, the OSR stays empty and that next `out`
+stalls until a word arrives, with no timeout. `jmp !osre` never stalls, so
+it can tell first whether a word came.
 
 **`push`** sends the bits shifted in since the last push to the RX FIFO,
 right-justified, then clears the ISR. It stalls while the RX FIFO is full.
+It sends as many bits as the ISR's count, whatever `threshold` is: 3 after
+`in x, 3`, and after 24 the last 16 (with threshold 8, `in x, 8` of 1, 2
+and 3 then `push` sends 0x0302). A write of `isr` also sets the count to
+0, so `mov isr, x` then `push` sends 0; `in x, 16` then `push` sends X.
 
 **`pull`** loads the OSR from the TX FIFO and marks it full. It stalls while
 the TX FIFO is empty. It always takes a new word, also with `autopull` on
@@ -478,7 +530,10 @@ and bits still in the OSR.
   so a second read gives those, and it stops following the data. Writing
   `crc`, from any source, starts it again from `crc_init`.
 - Writing `pins` writes `out_count` pins from `out_base`.
-- Writing `isr` or `osr` resets that register's shift count.
+- Reading `isr` or `osr` gives all 16 bits as they stand (see `in`), and
+  leaves the register and its count alone.
+- Writing `isr` or `osr` resets that register's shift count to 0: the ISR
+  then counts as empty, the OSR as full.
 
 **`set dst, value`** writes a 5-bit immediate to `pins` (`set_count` pins
 from `set_base`), `x`, `y` or `page` (the value modulo 4).
