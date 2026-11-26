@@ -40,7 +40,6 @@ nextpnr-himbaechel -l "$out/$name.pnr.log" -q --json "$out/$name.json" --write "
 gowin_pack -d GW2A-18C -o "$out/$name.fs" "$out/$name.pnr.json"
 
 echo "== $name"
-grep -E "^Info:\s+\w+:\s+[0-9]+/\s*[0-9]+\s+[0-9]+%" "$out/$name.pnr.log" | grep -v " 0%$" || true
+# The whole utilisation table (cells in use only), whatever its spacing.
+sed -n '/Device utilisation/,/^Info: *$/p' "$out/$name.pnr.log" | grep -E "[0-9]+%" | grep -vE "[^0-9]0%$" || true
 grep -E "Max frequency for clock" "$out/$name.pnr.log" | tail -1 || true
-# The memories must be block RAM: in flip-flops they would not fit.
-grep -E "BSRAM|SDPB|DPB|SP\b" "$out/$name.synth.log" | tail -5 || true
