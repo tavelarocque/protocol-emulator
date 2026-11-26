@@ -2,51 +2,78 @@
 
 # protocol-emulator
 
-An open-source protocol emulator ASIC for the
+Tave La Rocque
+
+A programmable I/O chip for the
 [Jane Street protocol emulator competition](https://blog.janestreet.com/protocol-emulator-asic-competition/):
-a tiny CPU whose instructions read pins, write pins and count cycles, so UART,
-SPI, I2C and 91 other protocols, 10 Mbit Ethernet among them, are
-implemented in firmware loaded after fabrication rather than in fixed
-logic. Written in Hardcaml, designed for tapeout through
-[Tiny Tapeout](https://tinytapeout.com) on IHP 130nm CMOS5L (8x4 tiles).
+a two-thread CPU in the style of the RP2040's PIO, whose instructions read
+pins, write pins and count cycles, so every protocol it speaks is firmware
+loaded over SPI at run time. Written in Hardcaml and designed for tapeout
+through [Tiny Tapeout](https://tinytapeout.com) on IHP 130 nm CMOS5L (8x4
+tiles). It passes the Tiny Tapeout precheck, and timing closes at 50 MHz at
+every corner.
+
+## Protocols nobody here chose
+
+Can the chip be programmed for protocols it was not designed for? To answer
+that without choosing the protocols, a census was run under rules pushed
+before it started ([`flex/PREREG.md`](flex/PREREG.md)). Twenty protocols
+were drawn from sigrok's decoder list, which this project did not write,
+leaving out those the chip already had, in an order set by a public
+randomness beacon. Each went to an AI agent in a fresh session that had
+never seen the project, with only a task sheet,
+[`docs/isa.md`](docs/isa.md) and the simulator. A hidden test it never saw
+handed the recorded pins to sigrok's own decoder for that protocol and
+checked the timing limits the decoder does not.
+
+| Census | |
+|---|---|
+| Drawn | 20 |
+| Out of reach: the Z80 and Intel 8048 memory buses need 11 and 14 parallel lines, and the chip has 8 protocol pins | 2 |
+| Attempted | 18 |
+| Passed, on the first and only hand-in | 18 of 18 |
+| Predicted before the draw | 12 to 16 of 20 |
+| Second question: the first 8 again, once on the full chip and twice each on chips without the delay field and without side-set | 40 of 40 pass |
+
+Removing a feature never made a protocol impossible. Without the delay
+field some programs doubled in length; without side-set one protocol that
+moves two lines at once was 31 to 64 percent slower. The programmers were
+AI agents, not people, and everything ran on the reference model. The
+draw, every task sheet, hidden test and hand-in, and every departure from
+the rules are in [`flex/RESULTS.md`](flex/RESULTS.md).
+
+## What else runs
+
+Apart from the census, 94 protocols run in this repository's chip-level
+tests. **45 have firmware of their own.** Four more are framed by the
+host driver on two senders that know no code (RC-6 on an infrared burst
+sender; Qi, EM4100 and Morse on a sender of levels at a fixed rate). The
+other 45 are device protocols, MIDI, LIN, Modbus RTU and 42 devices (a TPM
+2.0 among them), on the I2C, SPI, Microwire, UART, 1-Wire, JTAG and MDIO
+engines with the framing in the driver. Of the 120 chip-level tests, 92
+hand the recorded pins to a protocol decoder this project did not write,
+and in 90 of those a fault forced on the wire must change the decoder's
+verdict. Every protocol and its judge is in the [table below](#protocols).
+
+**In ten minutes:** [`docs/submission.md`](docs/submission.md) is the
+summary for judges. This page is the map.
 
 > **This is v2.3.** Branches `v2.2`, `v2.1` and `v2` (v2.0) hold the
 > earlier versions, each a complete chip, laid out and passing its own
 > checks.
-
-**In ten minutes:** [`docs/submission.md`](docs/submission.md) is the
-one-page summary for judges. This page is the map.
 
 ## Status
 
 - **Complete chip, laid out.** Two threads, each with 256 words of program
   memory in its own SRAM macro, a 1024-word packet buffer in a third, 8
   protocol pins (input, push-pull or open-drain each), loaded over an SPI
-  host port. LVS and the Tiny Tapeout precheck pass, and timing is met at
-  50 MHz at every corner ([`docs/metrics.md`](docs/metrics.md)).
-- **94 protocols as firmware**, two running at a time. UART, SPI and I2C as
-  required, in both roles for SPI and I2C; both stretch goals, low-speed
-  USB as a host and 10 Mbit Ethernet, sending and receiving; JTAG, SWD,
-  1-Wire, WS2812, PS/2 and CAN; I2S, DMX512, Wiegand, NEC and RC-5
-  infrared, MDIO, DALI, PWM and a NES gamepad; Microwire, HDMI-CEC and
-  RC-6 infrared; step and direction for stepper drivers, a DHT22 sensor
-  reader, TDM audio, a TLC5620 DAC, Qi packets, EM4100 tags and Morse;
-  then SAE J2716 SENT and J1850 VPW from cars, DShot and SBUS from drones
-  and radio control, XY2-100 laser scanners, a caliper's data port, MIPI
-  I3C with dynamic address assignment, compact JTAG, PJON over PJDL, NXP
-  LFAST with SIPI, Sony infrared and an SLE 4442 card reader; then
-  MIL-STD-1553, ARINC 429 and SpaceWire from aircraft and spacecraft, an
-  ISO 7816 smart card reader, KNX building automation, the MVB train bus
-  and SMPTE timecode.
-  Forty-five have firmware of their own. Four are framed by the driver
-  on two senders that know no code (RC-6 on an infrared burst sender; Qi,
-  EM4100 and Morse on a sender of levels at a fixed rate), and forty-five
-  more (MIDI, LIN, Modbus RTU and forty-two devices, a TPM 2.0 among them, on I2C, SPI,
-  Microwire, UART, 1-Wire, JTAG and MDIO) run on the other engines with
-  framing in the host driver.
+  host port. It passes LVS as well as the precheck; the layout's figures
+  are under [Metrics](#metrics) and in [`docs/metrics.md`](docs/metrics.md).
 - **Hardware that did not need to know the protocols.** Nine engines were
   added to v1.4 with no RTL change. v2.0 changed one thing, the program
   memory, and eleven more engines followed, again with no RTL change.
+  The hardware has been frozen at v2.3 since, and 58 of the 94 protocols
+  came after it, 25 of them with firmware of their own.
 - **Ethernet is where the hardware had to grow, and it grew by parts that
   are not Ethernet's.** A bit lasts four clocks, too few for a thread to
   fetch its data, compute a CRC or time an edge. So v2.1 added a packet
@@ -65,14 +92,11 @@ one-page summary for judges. This page is the map.
   independent specification; after every layout the gate netlist equals
   the RTL; and the memories those proofs assume equal IHP's own models of
   the SRAM macros.
-- **Judged by tools this project did not write.** Device models by other
-  people where one exists; for 92 tests the recorded pins go to a protocol
-  decoder: sigrok's, or one published by others.
 - **The real driver, unchanged**, runs against the chip in simulation and
   in MicroPython on an emulated demo board.
-- **Not yet done:** no FPGA or silicon run; and an Ethernet receiver that
-  stands less jitter than the standard asks, so it needs a short cable.
-  The full list is "What is not shown" in
+- **Not shown:** nothing has run on an FPGA or on silicon; and the
+  Ethernet receiver stands less jitter than the standard asks, so it
+  needs a short cable. The full list is "Limits" in
   [`docs/submission.md`](docs/submission.md).
 
 ## See it run
@@ -83,9 +107,9 @@ node, a whole Ethernet frame, step and direction, an RC servo, Morse code,
 and two protocols at once. Each shows the pins as a logic analyser would,
 the firmware listing, and a drawing of the bench those pins would be
 wired to. Every run is checked when the page is built, and the build
-fails if a check does. It is simulation only: no board has been built
-and nothing here has run on hardware. It is one self-contained file with
-no network access: download it and open it in a browser, or
+fails if a check does. It is simulation only: nothing here has run on
+hardware. It is one self-contained file with no network access: download
+it and open it in a browser, or
 [view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/demo.html).
 
 ## Architecture
@@ -162,6 +186,9 @@ history.
 Assembly for each is in [`examples/`](examples); descriptions and limits
 are in [`docs/firmware.md`](docs/firmware.md). Each thread has 256 words;
 the largest engine, the MVB train bus, uses 112, and Ethernet transmit 70.
+The 18 census protocols are not in this table: their programs, task
+sheets and hidden tests are in [`flex/census/`](flex/census), and they ran
+on the reference model only.
 
 | Protocol | Role | Instructions | Checked against |
 |---|---|---|---|
@@ -276,7 +303,7 @@ a bug.
 | Question | Answer | How |
 |---|---|---|
 | Does the RTL match the specification? | Proven, for the whole chip | SAT equivalence (Hardcaml_verify + Z3) of one clock of the top level against an independent spec, for every state and every input |
-| Does the silicon netlist match the RTL? | Proven, after every layout | Yosys equivalence over every output, all 1,107 flip-flops and every pin of the three memories ([`gl_equiv/`](gl_equiv)) |
+| Does the gate netlist match the RTL? | Proven, after every layout | Yosys equivalence over every output, all 1,107 flip-flops and every pin of the three memories ([`gl_equiv/`](gl_equiv)) |
 | Is the memory in the proofs the memory on the chip? | Proven against IHP's models of the macros | Yosys: the flip-flop description the tests and proofs use, at both sizes, equals IHP's behavioural model of each SRAM, tied off as the chip ties it ([`formal/`](formal)). That the silicon macros match IHP's models is IHP's to guarantee |
 | Is every instruction defined? | Yes, all 65,536 words | exhaustive round trips, and the spec's datapath matched on every word |
 | Do the protocols work? | Each judged by an independent oracle | third-party device models and sigrok's decoders in cocotb, on the RTL and the gate netlist |
@@ -315,8 +342,9 @@ sim/     OCaml tests: ISA, lockstep harness, random and directed differential te
          formal proof, firmware, chip-level tests
 host/    MicroPython driver for the demo board, RP2040 or RP2350 (tested in cocotb, unchanged,
          and in MicroPython on an emulated board: test/board_emu)
-         more_protocols.py, extra_protocols.py: the drivers for the protocols added
-         since v2.0, modules of their own so that each fits the Pico's memory when compiled
+         protocol_emulator.py is the driver; more_protocols.py and the other
+         *_protocols.py files hold the drivers for the protocols added since v2.0,
+         modules of their own so that each fits the Pico's memory when compiled
 src/     Verilog for Tiny Tapeout: project.v (pin map) + generated protocol_emulator.v;
          config.json, pdn_cfg.tcl and sram_bb.v place and power the SRAM macros
          (from Tiny Tapeout's SRAM example, Apache-2.0)
@@ -327,7 +355,9 @@ test/    cocotb testbench (RTL and gate-level) + generated firmware .hex;
 gl_equiv/ Yosys proof that the post-layout netlist equals the RTL (run in CI)
 formal/  Yosys proof that the memories the tests and proofs use equal IHP's
          models of the SRAM macros (run in CI)
-docs/    submission.md (one-page summary), design-and-verification.md (the report),
+flex/    the flexibility census: PREREG.md (its rules, pushed first), RESULTS.md,
+         census/ (every task sheet, hidden test and hand-in), pilot/
+docs/    submission.md (the summary for judges), design-and-verification.md (the report),
          figures.py and img/ (diagrams drawn from the reference model),
          chip.html (the layout in 3D, one self-contained page),
          demo.html (firmware running on recorded pins, one self-contained page),
@@ -369,9 +399,9 @@ then `node run_usb.mjs` there (see `test/board_emu/README.md`).
 The v2.3 layout, on Tiny Tapeout's ttihp27a flow (8x4 tiles, 20 ns
 target): 15,065 standard cells and three SRAM macros, 23.8% utilisation
 at floorplanning, 0.76 m of wire, setup and hold met at every corner with
-1.2 ns to spare at the slow one, no slew or capacitance violations, LVS
-and the Tiny Tapeout precheck passing, laid out in about 70 minutes. The
-firmware here runs the chip at 10 MHz, 12 MHz for USB and 40 MHz for
-Ethernet. The comparison with v1.4 and v2.0, the clock sweep, and the
+1.24 ns to spare at the slow one, no slew or capacitance violations, LVS
+and the Tiny Tapeout precheck passing, laid out in about 70 minutes. Most
+chip-level tests clock the chip at 10 MHz; USB runs at 12 MHz, Ethernet at
+40, MVB at 48 and LFAST at 50, and KNX and SMPTE timecode below 10. The comparison with v1.4 and v2.0, the clock sweep, and the
 signoff warnings of the earlier layouts, what caused them and what
 repairing them cost: [`docs/metrics.md`](docs/metrics.md).

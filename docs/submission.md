@@ -1,365 +1,148 @@
 # Submission summary
 
-For a reader with ten minutes. Every claim links to where it is
-shown; [`design-and-verification.md`](design-and-verification.md) is the
-full report.
+Tave La Rocque
 
-## The claim: protocols are programs
+The page to read first; every claim links to its evidence. The full report is
+[`design-and-verification.md`](design-and-verification.md).
+
+## The chip, and why it is flexible
+
+The chip is a small two-thread CPU in the style of the RP2040's PIO. Its
+instructions read pins, write pins and count clock cycles. Nothing in the
+hardware knows what UART, SPI or I2C is: every protocol is a program, loaded
+over an SPI port at run time, driving 8 protocol pins that are each input,
+push-pull or open-drain. It is written in Hardcaml and designed for tapeout on
+Tiny Tapeout's IHP 130 nm process, 8x4 tiles.
+
+The hardware changed only when a protocol could not be done without it, and
+then by a part that is not that protocol's. For 10 Mbit Ethernet, four clocks
+a bit, v2.1 and v2.2 added a packet buffer, self-refilling shift registers, a
+CRC register with any polynomial and a bit sampler that recovers a sender's
+clock; the frame itself is still a program. The hardware has been frozen at
+v2.3 since, and 58 of the 94 protocols in the repository came after that, as
+firmware or host framing alone ([`firmware.md`](firmware.md) has the history).
+
+## The census: protocols nobody here chose
+
+Protocols this project chose cannot show whether the chip handles ones it was
+not designed for. The census was built to answer that, under rules fixed and
+pushed before it ran ([`flex/PREREG.md`](../flex/PREREG.md)). Twenty protocols
+were drawn from sigrok's decoder list, which this project did not write,
+leaving out those the chip already had; a public randomness beacon (drand) set
+the order. Each went to an AI agent in a fresh session that had never seen the
+project, with only a task sheet, the instruction set ([`isa.md`](isa.md)) and
+the simulator. A hidden test it never saw gave the recorded pins to sigrok's
+own decoder for that protocol and checked the timing limits the decoder does
+not.
+
+| Census ([`flex/RESULTS.md`](../flex/RESULTS.md)) | |
+|---|---|
+| Drawn | 20 |
+| Out of reach: parallel buses of 11 and 14 lines (`z80`, `mcs48`) on 8 pins | 2 |
+| Attempted, and passed on the first and only hand-in | 18 of 18 |
+| Predicted before the draw | 12 to 16 of 20 |
+| Mutants of the passing programs rejected by the hidden tests | 77 of 90; the 13 survivors traced, all inside their task sheets' limits |
+
+FlexRay, LPC, AC'97 and the SD card's native bus, named in advance as the
+likeliest to fail, all passed. A second question asked what two features are
+worth: the first 8 passes were attempted again by new programmers, once on the
+full chip and twice each on chips without the delay field and without
+side-set. All 40 attempts passed. Without the delay field some programs
+doubled (`rc_encode`: 20 and 29 instructions on the full chip, 51 and 55
+without); without side-set, `maple_bus`, which moves two lines on nearly every
+step, was 31 to 64 percent slower on the wire.
+
+So the instruction set, as one document, was enough for programmers new to it
+to implement every protocol chance gave them that fits on 8 pins, as judged by
+tools this project did not write. The limits: the programmers were AI agents,
+not people, who know PIO, which this chip resembles; it all ran on the
+reference model, which the chip's own tests check against the RTL; and every
+departure from the rules is listed in the results.
+
+## What runs, and how it is judged
+
+| In the repository's tests | |
+|---|---|
+| Protocols with firmware of their own | 45 |
+| Framed by the driver on two senders that know no code (RC-6; Qi, EM4100, Morse) | 4 |
+| Device protocols on those engines (MIDI, LIN, Modbus RTU and 42 devices) | 45 |
+| Chip-level cocotb tests | 120 |
+| Of those, judged by a protocol decoder this project did not write | 92 |
+| Of the 92, with a fault forced on the wire that must change the verdict | 90 |
+
+The 94 include UART, SPI and I2C in both roles and both stretch goals,
+low-speed USB as a host and 10BASE-T Ethernet both ways. The decoders are
+sigrok's, or for 27 protocols ones it does not ship, fetched at fixed commits
+([`test/extra_decoders.sh`](../test/extra_decoders.sh)); device models by
+other people are used where they exist. The
+[README's protocol table](../README.md#protocols) gives every judge.
+
+## Architecture in brief
 
 ![Block diagram of the chip](img/architecture.svg)
 
-A laid-out chip in 3D, with the reference model running firmware on it:
-[`chip.html`](chip.html) (one self-contained file; download and open it, or
-[view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/chip.html)).
-It shows v1.4's layout; the layouts since, with the memories in SRAM
-macros, have not been rendered yet.
+Each thread has 256 words of program memory in an SRAM macro; a 1024-word
+packet buffer is in a third. The instruction set ([`isa.md`](isa.md)) departs
+from PIO where PIO is weakest for protocols: a wait can time out, open-drain is
+a pin mode, every 16-bit word is defined, and CHAIN feeds one thread into the
+other. The v2.3 layout passes LVS and the Tiny Tapeout precheck, and timing
+closes at 50 MHz at every corner ([`metrics.md`](metrics.md)). See it run in
+[`demo.html`](demo.html), recorded runs of the reference model.
 
-Firmware running, as eight recorded runs of the reference model with the
-pins on a logic analyser view: [`demo.html`](demo.html) (one
-self-contained file; download and open it, or
-[view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/demo.html)).
-Simulation only; each run is checked when the page is built.
+## How it was designed and verified
 
-The chip is a small CPU whose instructions read pins, write pins and count
-clock cycles. A protocol is a program, loaded over SPI after fabrication;
-the largest here is 112 instructions. Nothing in the hardware knows what
-UART, SPI or I2C is.
-
-The evidence that this is general is what happened after the hardware was
-frozen at v1.4. Nine protocol engines were then added, each as firmware alone, with
-no change to the RTL:
-
-| Added after the freeze | What it needed from the hardware | Instructions |
+| Question | Evidence | Where |
 |---|---|---|
-| I2C target, with clock stretching and repeated START | nothing new | 63 |
-| SPI device | nothing new | 23 |
-| JTAG controller | nothing new | 11 |
-| Arm SWD host | nothing new | 11 |
-| Low-speed USB host, with clock recovery (a stretch goal) | nothing new; a 12 MHz clock | 49 |
-| 1-Wire, with ROM search | nothing new | 25 |
-| PS/2 host, receiving and sending on the two threads | nothing new | 11 + 21 |
-| CAN transmitter and listen-only receiver, to 1 Mbit/s | nothing new | 19 + 27 (now a node, 59 + 89, on later hardware: see below) |
-| WS2812 LEDs | nothing new | 16 |
+| Does the RTL match the specification? | SAT proof that one clock of the whole chip equals an independent specification, from every state | `sim/test_formal.ml`, `ocaml` job |
+| Does the gate netlist match the RTL? | Yosys proof after every layout: every output, all 1,107 flip-flops, every input to the memories | [`gl_equiv/`](../gl_equiv), `gl_equiv` job |
+| Are the proofs' memories the chip's? | Yosys proof against IHP's models of the SRAM macros | [`formal/`](../formal), `ocaml` job |
+| Does the RTL behave like the reference model? | 400 random two-thread programs compared every cycle; coverage that fails the build on any zero | `sim/lockstep.ml`, [`coverage-closure.md`](coverage-closure.md) |
+| Do the protocols work on the gates? | The cocotb suite again on the post-layout netlist | `gl_test` job |
+| Would the tests notice a bug? | 400 planted bugs, kept as code; the build fails if one survives | [`verification-layers.md`](verification-layers.md) |
+| Does the real driver work? | The MicroPython driver, unchanged, in cocotb and on an emulated board | `test/board_emu`, `board` job |
 
-The last was a blind test. A programmer who had never seen the project (an
-AI agent in a fresh session) was given only [`isa.md`](isa.md) and the
-simulator, and wrote the driver in about five minutes. A hidden test, which
-decodes the pin the way the LED's data sheet says an LED does, passed on the
-first submission. The seven things the programmer found unclear in the
-document are fixed. Task, notes and hidden test:
-[`examples/ws2812`](../examples/ws2812).
+Each revision of the instruction set came from a protocol that did not fit,
+and each hardware change went in after its model, specifications, proofs and
+planted bugs. The reference model ([`model/isa.ml`](../model/isa.ml)) does not
+depend on the hardware, so the two cannot share a bug, and the protocols are
+judged by the outside decoders above. Thirteen real bugs, and the layer that
+found each, are told in [`bug-ledger.md`](bug-ledger.md).
 
-v2.0 then changed one thing in the hardware, the program memory: 256 words
-for each thread in an SRAM macro, where v1.4 had 64 words of flip-flops
-shared by both. Every v1.4 program runs on it unchanged. Eleven more
-engines followed, again as firmware alone: I2S, DMX512, Wiegand and NEC
-infrared in both directions, RC-5 infrared, MDIO, DALI, PWM and a NES
-gamepad. Sixteen further protocols needed no firmware at all, only framing
-in the host driver on an engine the chip already had: MIDI, LIN, Modbus
-RTU, and thirteen devices on I2C and SPI, among them four radios, an SD
-card and an Ethernet controller. That makes 35 protocols, every one with a
-test judged by something this project did not write.
+## Limits
 
-**Then Ethernet, where the hardware had to grow.** A 10 Mbit bit lasts
-four clocks at 40 MHz. That is too few for a thread to fetch a word,
-compute a CRC or time an edge, and the host port is too slow to supply a
-frame. Two revisions added four parts, and none of them is Ethernet's:
+- Everything is simulation, formal proof and an emulated board. Nothing has
+  run on an FPGA or on silicon, and 50 MHz rests on static timing analysis
+  alone.
+- The Ethernet receiver stands less jitter than the standard asks, so it needs
+  a clean, short link; it has been tested only against a sender written here.
+  The chip sends a frame or receives frames, not both.
+- USB is low speed and host only; the CAN node sends no error frames; I3C
+  keeps SDA open-drain, at 2 MHz. The rest: section 7 of the report.
 
-| Added | What it is | Who else can use it |
-|---|---|---|
-| Packet buffer (v2.1) | a 1024-word SRAM the chip plays into a thread's FIFO or records from one | any protocol whose data outruns the host |
-| Autopull, autopush (v2.1) | shift registers that refill and empty themselves | any engine short of cycles |
-| CRC register (v2.1) | 32 bits, any polynomial, follows the bits shifted | CRC-16/USB and CRC-15/CAN give their published check values on it |
-| Bit sampler (v2.2) | clock recovery for one pin from samples on both clock edges, timing in registers, with a sync word | other Manchester and NRZ codes up to a quarter of the clock |
+## How AI was used
 
-The preamble, the Manchester code, where the CRC goes and where the frame
-ends are still programs: 70 instructions to send, 14 to receive. Every
-earlier program runs unchanged, and no instruction changed its meaning.
-That makes 36 protocols, with both of the competition's stretch goals
-among them. Three more have followed as firmware alone, each judged by a
-sigrok decoder: Microwire with a 93C46 EEPROM, an HDMI-CEC initiator, and
-RC-6 infrared on a burst sender that serves any remote control code.
-And four more devices run on the I2C controller, read through the
-repeated START it can now send: an RTC-8564 clock, a TCA6408A port
-expander, an MXC6225XU accelerometer and a monitor's EDID. That is 43.
-Seven more, again as firmware alone and each judged by a sigrok decoder,
-make 50: step and direction for stepper motor drivers; a reader for
-AM2302 / DHT22 sensors, which tells a 0 from a 1 by how long the line
-stays high and tells the host when a sensor stops answering; TDM audio;
-the TLC5620 DAC's four-wire interface; and Qi packets, EM4100 tags and
-Morse, all three framed by the driver on a three-instruction program that
-puts out levels at a fixed rate.
+An AI model, working as an assistant in this repository, wrote most of the
+RTL, firmware, tests and documents; the commits it co-wrote say so. The author
+set the goals, chose what to build and what to leave out, and approved every
+change before it was pushed. Among his decisions: freezing the hardware at
+v2.3, so the remaining time went to verification and the write-up; repairing
+the layout's slew and capacitance warnings before submitting; making the
+pre-registered blind census the headline evidence; and the direction of the
+demo page.
 
-Seventeen more devices then followed on engines the chip already had,
-with no firmware change, each judged by sigrok's decoder for the part:
-on I2C an ATSHA204A crypto chip, a PCA9571 port expander, an XFP optical
-module and HDCP's handshake on an HDMI link; on MDIO a CFP optical
-module, in clause 45 frames the driver builds; on SPI the in-system
-programming of an ATmega168; on Microwire an ADE7758 energy meter and an
-X2444M NOVRAM; on the UART a PAN1321 Bluetooth module, an Amulet display
-and ARM ITM trace, bare and in TPIU frames; on 1-Wire a DS2408 switch, a
-DS2432 EEPROM and a DS28EA00 thermometer; and on JTAG an STM32's two
-chained TAPs and a MIPS EJTAG session. That makes 67.
+The census's examiners and programmers were AI agents, each in a fresh
+session; the programmers never saw the repository. In coverage closure the
+assistant wrote directed tests and the reference model judged them
+([`coverage-closure.md`](coverage-closure.md)). Correctness rests on judges
+written separately or by other people (section 6 of the report).
 
-**Nineteen more, judged by decoders the packaged sigrok does not ship.**
-Sigrok's own newer source has decoders its 0.7.2 release lacks, and other
-people have published three more; `test/extra_decoders.sh` fetches each at
-a fixed commit. Twelve of the nineteen are new firmware, each with a model
-test and planted bugs: SAE J2716 SENT and SAE J1850 VPW from cars; DShot
-and SBUS from drones and radio control (SBUS's line inverted, with the
-firmware making each bit's opposite, since no instruction inverts a pin);
-XY2-100 for laser scanners, one axis on each thread; a caliper's data
-port; MIPI I3C as an SDR controller, dynamic address assignment included;
-compact JTAG in OScan1; PJON over PJDL; NXP LFAST carrying SIPI frames;
-Sony infrared; and an SLE 4442 card reader. In each the host sends only
-the payload, and the chip makes the framing, the timing and any parity or
-CRC. Seven are devices on engines the chip had: an nRF905 radio, AD5626,
-AD7920, LTC2422 and LTC2607 converters, an MCP23017 port expander, and
-TI's SDQ, which shares 1-Wire's timing. That makes 86.
-
-**Eight more, judged by sigrok pull requests and others' decoders.**
-MIL-STD-1553B as a bus controller, with a second thread reading the remote
-terminal's answers; ARINC 429; SpaceWire; an ISO 7816-3 smart card reader
-whose other thread clocks the card; KNX TP1; the MVB train bus; and SMPTE
-timecode, all new firmware with model tests and planted bugs; and a TPM 2.0
-on the SPI controller. Where two independent decoders exist the test must
-pass both. That makes 94.
-
-I3C showed a real limit of the instruction set. Its data line should be
-push-pull for data and open-drain for acknowledgements within one frame,
-but only the host sets a pin's mode, so the controller keeps SDA
-open-drain throughout, at I3C's open-drain timing: 2 MHz, not 12.5.
-
-**Then CAN, from a transmitter to a node.** The v1.4 engine sent frames
-the host had made and listened. On v2.1's CRC register the transmitter
-makes the whole frame itself: bit stuffing, CRC-15, arbitration. A node
-must also acknowledge the frames of others, which means deciding within
-one bit time of a frame's last CRC bit whether the frame was good. v2.3
-gave the bit sampler three settings for that, and again none is CAN's: a
-prescaler (one sample every n clocks, so a slow line is sampled at a
-thread's own tick), a pin shift (the recovered bit shown on a pin other
-than the one it listens to) and stuff-bit removal (the bit after n equal
-bits dropped). With them a 59-instruction receiver reads a frame a bit at
-a time, checks the CRC on the CRC register and drives the ACK slot.
-
-The prescaler also takes the sampler down to slow codes. DALI at 1200
-bit/s and RC-5 infrared at 562 are received through the block that
-recovers 10 Mbit Ethernet, with 9 instructions each: RC-5 locked to the
-edge in the middle of each bit, as Ethernet is, and DALI, whose frames
-begin on an edge between bits, sampled every half bit.
-
-## What it is, and what is different
-
-Two threads run at once, each from its own 256-word program memory, over 8
-protocol pins that are each input, push-pull or open-drain, with a
-1024-word packet buffer beside them. Every
-instruction takes one clock plus a 0 to 15 clock delay. Written in
-Hardcaml; laid out on IHP 130 nm CMOS5L, 8x4 Tiny Tapeout tiles.
-
-The instruction set follows the RP2040's PIO and departs from it where PIO
-is weakest for emulating protocols:
-
-- **A wait can time out**, jumping to a per-thread vector. A device that
-  never answers cannot hang the chip; I2C clock stretching and UART framing
-  recovery are built on it.
-- **Open-drain is a pin mode**, in hardware, not emulated by toggling
-  direction.
-- **Threads can signal each other through a pin.** A thread reads another's
-  output with no delay; the PS/2 receiver uses a spare pin to tell the
-  transmitter a frame is under way.
-- **Every 16-bit word is a defined instruction.** No program can put the
-  chip in an undefined state.
-- **CHAIN** feeds one thread's output FIFO into the other's input, so the
-  I2C-to-SPI bridge runs with no host in the data path.
-- **Any host can load it**: the port is plain SPI.
-- **The chip does the fast parts of a fast protocol itself**: a CRC
-  register, a packet buffer and a bit sampler, each a general part set up
-  by registers.
-
-Each revision of the instruction set came from writing a protocol and
-finding what was missing; [`firmware.md`](firmware.md) tells that story.
-
-## What it runs
-
-| Protocol | Role | Instructions |
-|---|---|---|
-| UART | TX and RX, full duplex on the two threads | 15 + 15 |
-| SPI | controller (5 Mbit/s at 10 MHz) and device | 26, 23 |
-| I2C | controller and target, clock stretching, timeouts, repeated START | 30, 63 |
-| I2C-to-SPI bridge | both threads, no host in the data path | 30 + 26 |
-| JTAG and SWD | controller, host | 11, 11 |
-| Low-speed USB | host, with clock recovery | 49 |
-| 1-Wire | bus controller, ROM search | 25 |
-| PS/2 | host, both directions | 11 + 21 |
-| CAN | a node: sends with bit stuffing, CRC and arbitration; receives, checks the CRC and acknowledges | 59 + 89 |
-| 10BASE-T Ethernet, 10 Mbit/s | transmitter with link pulses; receiver with clock recovery | 70, 14 |
-| WS2812 LEDs | driver | 16 |
-| I2S | transmitter, 16-bit stereo | 11 |
-| DMX512 | transmitter | 26 |
-| Wiegand | transmitter and receiver | 17, 16 |
-| NEC infrared | transmitter with its 38 kHz carrier; receiver | 25, 33 |
-| RC-5 infrared | transmitter with its 36 kHz carrier; receiver through the bit sampler | 37, 9 |
-| MDIO | controller, reads and writes | 7 |
-| DALI | controller: transmitter on one thread, receiver through the bit sampler on the other | 17, 9 |
-| PWM, RC servo | generator, exact to the cycle | 8 |
-| Microwire | controller; a 93C46 EEPROM on it | 10 |
-| HDMI-CEC | initiator, with each block's acknowledgement | 38 |
-| RC-6 infrared | transmitter with its 36 kHz carrier, on a burst sender | 7 |
-| Step and direction | moves and ramps for stepper motor drivers | 10 |
-| AM2302 / DHT22, DHT11 | sensor reader | 27 |
-| TDM audio | transmitter, any number of slots | 18 |
-| TLC5620 DAC | its four-wire interface | 12 |
-| Qi, EM4100, Morse | on a sender of levels at a fixed rate, framed by the driver | 3 |
-| NES gamepad | host | 7 |
-| MIDI, Modbus RTU | on the UART transmitter | no new firmware |
-| LIN | master frames, on the DMX512 transmitter | no new firmware |
-| 24Cxx EEPROM, DS1307 clock, LM75 sensor | on the I2C controller | no new firmware |
-| SPI NOR flash, WS2801 LEDs, MAX7219 | on the SPI controller | no new firmware |
-| 17 more devices, from an ATSHA204A to MIPS EJTAG | on the I2C, MDIO, SPI, Microwire, UART, 1-Wire and JTAG controllers | no new firmware |
-| SENT, J1850 VPW, DShot, SBUS, XY2-100, a caliper, I3C, cJTAG, PJON over PJDL, LFAST with SIPI, Sony SIRC, SLE 4442 | new engines, judged by decoders the packaged sigrok does not ship | 19 to 63 each |
-| nRF905, AD5626, AD7920, LTC2422, LTC2607, MCP23017, TI SDQ | on the SPI, I2C and 1-Wire controllers | no new firmware |
-| MIL-STD-1553B, ARINC 429, SpaceWire, ISO 7816 card reader, KNX TP1, MVB, SMPTE timecode | new engines, judged by sigrok pull requests and others' decoders | 38 to 112 each |
-| TPM 2.0 over SPI | on the SPI controller | no new firmware |
-
-![SPI controller waveform from the reference model](img/spi.svg)
-
-Each is an assembly file in [`examples/`](../examples), generated from the
-firmware the tests run. The toolchain is the assembler and `pe_sim`, which
-runs a program on the reference model and prints the pins.
-
-## Why to believe it works
-
-1. **An executable specification.** A reference model with no dependency on
-   the hardware; the RTL is compared with it every cycle over 400 random
-   two-thread programs.
-2. **Three formal proofs.** The whole chip's RTL, pins to pins, is proven
-   equivalent to an independent specification (SAT, Z3). After every
-   layout, the post-layout gate netlist is proven equal to the RTL (Yosys:
-   every output pin, all 1,107 flip-flops and every pin of the three
-   memories). And the memories those two proofs assume are proven equal to
-   IHP's own models of the SRAM macros.
-3. **Judges written by other people.** Every protocol except Ethernet is
-   checked by something this project did not write. Device models:
-   picosoc's SPI flash, cocotbext's I2C, SPI, UART and JTAG, usbhostslave's
-   USB device, sockit_owm's 1-Wire slave. For USB, 1-Wire, WS2812, SWD, PS/2,
-   CAN and every protocol added after them but Ethernet, the recorded pins
-   go to a protocol decoder (sigrok's, or one
-   published by others), 92 tests in all, 90 of them with a
-   fault planted on the wire to show the decoder's verdict can change. Ethernet's sender and
-   receiver are written here from IEEE 802.3, with `zlib`'s CRC-32; the
-   sender has its own clock, 100 ppm off, and jitter on every edge.
-4. **Tests that are themselves tested.** 400 bugs are planted in the RTL,
-   firmware, drivers, specifications and netlist, kept in the repository,
-   and the build fails if any survives. Functional coverage also fails the
-   build on any zero.
-5. **The gates, not only the RTL.** All 120 chip-level tests pass on the
-   post-layout netlist, with IHP's models of the SRAMs in place of the
-   macros. That includes Ethernet at a 40 MHz clock, both ways.
-6. **The software that will run on the board.** The MicroPython driver is
-   tested unchanged in cocotb, and in MicroPython on an emulated demo
-   board, where a real timing bug in the USB handshake was found and
-   fixed, and where the driver was found too large to compile on the
-   board's microcontroller and was split.
-
-## Layout
-
-| | |
-|---|---|
-| Tiles | 8x4 |
-| Standard cells | 15,065, and three SRAM macros; 23.8% utilisation at floorplanning |
-| Flip-flops | 1,107 |
-| Clock target | 20 ns (50 MHz); the firmware here runs the chip at 10 MHz, 12 MHz for USB and 40 MHz for Ethernet |
-| Setup and hold, every corner | met; 1.24 ns of setup slack at the slow corner, 0.10 ns of hold slack at the fast one |
-| Slew and capacitance limits, every corner | met |
-| LVS, antenna | pass; Tiny Tapeout precheck (IHP's KLayout rule deck) passes |
-| Layout time | about 70 minutes |
-
-v2.0 was also laid out at 25 ns and at 16 ns and met timing at every
-corner both times; 20 ns keeps a margin. v1.4, with its program in
-flip-flops, was 17,925 cells and met 25 ns; v2.0 was 10,359. The
-comparison is in [`metrics.md`](metrics.md).
-
-## What is not shown
-
-Stated here so nobody has to find it.
-
-- **No silicon and no FPGA run yet.** Everything above is simulation, formal
-  proof and an emulated board.
-- **A layout with little to spare.** Every layout from v2.0 to the first
-  of v2.3 had maximum-slew and maximum-capacitance warnings. On v2.3 all
-  but one net of them were on the SRAM macros' pins: the repair step does
-  not count the capacitance between wires. Wider repair margins cleared
-  them at every corner. That cost half a nanosecond of setup slack at the
-  slow corner, and detailed routing did not clear its violations until
-  its 18th iteration, where the first layout did on its 7th
-  ([`metrics.md`](metrics.md)).
-- **Speed is static timing analysis only.** The Ethernet tests clock the
-  chip at 40 MHz, but a simulation has no gate delays in it.
-- **The Ethernet receiver needs a clean, short link.** It receives every
-  frame with each edge up to 6 ns from its place at 40 MHz (10 ns at
-  50 MHz); the standard asks a receiver for 13.5 ns, which samples
-  12.5 ns apart cannot give. It has been tested only against a sender
-  written here, never a real link.
-- **Ethernet is one way at a time.** One packet buffer: the chip sends a
-  frame or receives frames. It needs a transformer and a line receiver
-  outside the chip.
-- **The SRAM macros themselves are trusted.** The proofs and the tests use
-  IHP's behavioural models of them. That the silicon macros behave as
-  those models say is IHP's to guarantee.
-- **USB is low speed, host only**, and needs a 12 MHz core clock.
-- **CAN is a node with limits.** It sends data frames, and receives and
-  acknowledges other nodes' data and remote frames with 11-bit
-  identifiers. It sends no error frames (a frame it finds wrong it does
-  not acknowledge), it neither receives nor acknowledges 29-bit
-  identifiers, and it sends no remote frames. After losing arbitration
-  the chip tells the host, and the driver sends the frame again. The host
-  must take a word every 15 bit times while a frame arrives, or that frame
-  goes unacknowledged.
-- **One flip-flop's timing is shown by simulation, not proof.** The bit
-  sampler's falling-edge flip-flop is in both proofs as a register like
-  any other; that it samples half a cycle from the rest is exercised only
-  by the Ethernet receive test, on the RTL and the gates.
-- **Several of the v2.0 protocols transmit only:** I2S, DMX512, MIDI, LIN
-  and Modbus RTU. Wiegand, NEC and RC-5 infrared and DALI go both ways:
-  a DALI controller runs its transmitter and receiver together and reads
-  a gear's answers.
-- **The blind firmware test used an AI agent, not a person.**
-- More in section 7 of the report, "What is not covered".
-
-## How AI tools were used
-
-The project was built with an AI assistant throughout: RTL, firmware, tests
-and documents, with the commits marked. Three uses are part of the method,
-not only of the typing:
-
-- **Coverage closure.** The assistant read the coverage report and wrote
-  directed tests for the 16 rarely reached cases and the planted bugs. It never judged them: the
-  reference model did, every cycle, and a check rejected any test that
-  missed its own target. One was rejected
-  ([`coverage-closure.md`](coverage-closure.md)).
-- **The blind firmware test** above, where not having seen the project was
-  the point.
-- **Planted bugs**, which test the tests.
-
-What keeps one author's misreading from passing every layer: correctness
-rests on artefacts written separately (the reference model, the formal
-specifications), and on device models written by other people. Section 6 of
-the report sets out the rules.
-
-## Submission checklist
+## Where to find everything
 
 | Asked for | Where |
 |---|---|
 | RTL, tests, passing GDS and precheck | `hw/`, `sim/`, `test/`; the `gds` workflow |
-| Architecture and instruction set | [`isa.md`](isa.md), [`info.md`](info.md), README |
-| Assembler or toolchain, example programs | `model/asm.ml`, `bin/pe_sim.ml`, [`examples/`](../examples) |
-| Verification write-up | [`design-and-verification.md`](design-and-verification.md) |
-| Host and program loading | SPI port, [`info.md`](info.md); `host/protocol_emulator.py`, `host/more_protocols.py`, `host/extra_protocols.py` |
-| How AI tools were used | above, and section 6 of the report |
-
-## Reproduce
-
-`./reproduce.sh` runs all of the following and prints one line per claim.
-`dune build && dune runtest` for the OCaml suite and the whole-chip proof;
-`cd test && make` for cocotb. CI runs all of it, and the layout, on every
-push. Details: "Running" in the [README](../README.md).
+| Architecture and instruction set | [`isa.md`](isa.md), [`info.md`](info.md), [`firmware.md`](firmware.md) |
+| Assembler, simulator, example programs | `model/asm.ml`, `bin/pe_sim.ml`, [`examples/`](../examples) |
+| Flexibility evidence | [`flex/RESULTS.md`](../flex/RESULTS.md), [`flex/census/`](../flex/census) |
+| Host and program loading | [`info.md`](info.md); `host/protocol_emulator.py` and the other drivers in `host/` |
+| Reproducing | `./reproduce.sh`; "Running" in the [README](../README.md#running) |

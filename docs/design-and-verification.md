@@ -1,12 +1,13 @@
 # Design and verification report
 
-This report sets out why the chip should work when it comes back from the
-foundry. For each part of the argument it names the layer of evidence behind
-it and the classes of bug that layer can and cannot catch. It ends with what
-is not covered. The README lists what exists; this document is the argument
-that connects those pieces. The instruction set is in
-[`isa.md`](isa.md), the datasheet in [`info.md`](info.md), and the
-AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
+This report sets out why the chip should work if it is made. For each part
+of the argument it names the layer of evidence behind it and the classes of
+bug that layer can and cannot catch. It ends with what is not covered. The
+README lists what exists; this document is the argument that connects those
+pieces. The instruction set is in [`isa.md`](isa.md), the datasheet in
+[`info.md`](info.md), the AI-assisted coverage work in
+[`coverage-closure.md`](coverage-closure.md), and the census of protocols
+this project did not choose in [`flex/RESULTS.md`](../flex/RESULTS.md).
 
 ## 1. The claims
 
@@ -15,7 +16,7 @@ AI-assisted coverage work in [`coverage-closure.md`](coverage-closure.md).
 | C1 | The RTL does what the instruction set and register map say, in every state, including states no test reaches | SAT equivalence proof of the whole chip against an independent spec; the spec checked against the reference model | Proof, for the RTL. The spec's agreement with the reference model is tested, not proven (section 3) |
 | C2 | The firmware implements each protocol correctly at the pins | Protocol oracles on the model and the RTL; device models written by other people from real datasheets and standards | Tests, judged by independent oracles |
 | C3 | The gate-level netlist behaves like the RTL | Formal equivalence of the post-layout netlist and the generated Verilog (Yosys, in CI after every layout); the cocotb suite rerun on the netlist; LVS | Proof, from the first cycle after a reset, on every output pin and every pin of the three memories, whatever the memories hold; Hardcaml's Verilog generation and the SRAM macro itself are trusted (section 7) |
-| C4 | The chip meets timing at the 10 MHz the firmware runs it at (12 MHz for USB, 40 MHz for Ethernet), with room to 50 MHz | Static timing analysis of the 8x4 layout at a 20 ns target (50 MHz), three corners | Setup and hold met at every corner, with 1.24 ns of setup slack at the slow one, and no slew or capacitance violation at any (section 7). The Ethernet tests clock the chip at 40 MHz, but no simulation here has gate delays in it, so the speed rests on static timing analysis alone |
+| C4 | The chip meets timing at every clock the tests run it at: 10 MHz for most protocols, 12 MHz for USB, 40 for Ethernet, 48 for MVB and 50 for LFAST | Static timing analysis of the 8x4 layout at a 20 ns target (50 MHz), three corners | Setup and hold met at every corner, with 1.24 ns of setup slack at the slow one, and no slew or capacitance violation at any (section 7). The tests clock the chip at up to 50 MHz, but no simulation here has gate delays in it, so the speed rests on static timing analysis alone |
 | C5 | A real host can drive it | The demo board's MicroPython driver, run unchanged against the chip in cocotb, and in MicroPython on an emulated demo board (rp2040js running Tiny Tapeout's firmware) wired to the RTL: UART, I2C, SPI, JTAG, SWD and USB against the same devices (1-Wire's driver runs there on a simulated bus; PS/2 and CAN do not run there yet; the drivers added since v2.0 run there against a chip that only records what it is asked, and must ask the same as under CPython) | Tests in simulation and emulation; not yet run on hardware |
 
 ## 2. Design
@@ -168,6 +169,45 @@ use only instructions that existed before. What Ethernet does not have is an out
 the transmitter and the sender that feeds the receiver are written here
 from IEEE 802.3, and only the CRC-32 they check with is someone else's
 (`zlib`).
+
+**On v2.3, with the hardware frozen again.** The RTL has not changed
+since v2.3 (only the layout's repair settings have), and 58 of the 94
+protocols came after it: 25 engines of their own, the four protocols framed
+by the driver on the infrared burst sender and the level stream sender,
+and 29 devices on engines the chip had. They came in groups, each judged
+by a decoder this project did not write: Microwire, HDMI-CEC and RC-6;
+four devices read through the I2C controller's repeated START (above);
+step and direction, the DHT22 reader, TDM audio, the TLC5620, and Qi,
+EM4100 and Morse; seventeen devices on the I2C, MDIO, SPI, Microwire,
+UART, 1-Wire and JTAG controllers; then twelve engines judged by decoders
+the packaged sigrok does not ship (SENT, J1850 VPW, DShot, SBUS, XY2-100,
+a caliper's port, I3C, compact JTAG, PJON over PJDL, LFAST with SIPI,
+Sony SIRC and an SLE 4442 reader) with seven more devices; and last
+MIL-STD-1553B, ARINC 429, SpaceWire, an ISO 7816-3 card reader, KNX TP1,
+MVB and SMPTE timecode as engines, with a TPM 2.0 on the SPI controller.
+In the twelve the host sends only the payload, and the chip makes the
+framing, the timing and any parity or CRC. SBUS, whose line is inverted,
+shows how far that goes: no instruction inverts a pin, so the firmware
+sends each bit's opposite. I3C showed a
+real limit (section 7). [`firmware.md`](firmware.md) describes every
+engine.
+
+**The same test, run by someone else: the census.** Every protocol above
+was chosen by this project. The census in [`flex/`](../flex) takes the
+choice away. Its rules were pushed before it ran
+([`PREREG.md`](../flex/PREREG.md)): twenty protocols drawn from sigrok's
+decoder list in an order set by a public randomness beacon, each programmed
+by an AI agent in a fresh session that had never seen the project, from a
+task sheet, [`isa.md`](isa.md) and the simulator alone, and judged by a
+hidden test built on sigrok's decoder. Two needed parallel buses wider
+than 8 pins; the other 18 all passed on the first hand-in, against a
+prediction of 12 to 16 of 20. The first 8 were then programmed again on
+chips without the delay field or without side-set, and all 40 attempts
+passed ([`RESULTS.md`](../flex/RESULTS.md)). The WS2812 driver above was
+the first test of this kind; the seven points its programmer found
+unclear in `isa.md` were fixed ([`examples/ws2812`](../examples/ws2812)).
+The census ran on `isa.md` as it stood, and its programmers' points go
+into it afterwards.
 
 ## 3. How the evidence chains
 
@@ -492,10 +532,15 @@ Thirteen of these are told in full in [`bug-ledger.md`](bug-ledger.md).
 
 ## 6. AI-assisted verification, and independence
 
-This project was built with an AI assistant, and the commits say
-so. That raises a fair question: if one author writes the RTL, the spec, the
-firmware and the tests, can one misreading pass every layer? Four rules
-answer it.
+This project was built with an AI assistant, and the commits say so. An
+AI model wrote most of the RTL, firmware, tests and documents. The author
+set the goals, chose what to build and what to leave out, and approved
+every change before it was pushed; [`submission.md`](submission.md) names
+the decisions that were his. The census's examiners and programmers were
+AI agents too, each in a fresh session, and the programmers never saw the
+repository ([`flex/RESULTS.md`](../flex/RESULTS.md)). That raises a fair
+question: if one author writes the RTL, the spec, the firmware and the
+tests, can one misreading pass every layer? Four rules answer it.
 
 1. **The AI proposes stimulus; it never decides what is correct.** In
    coverage closure, the assistant read the cross-coverage report and wrote
@@ -550,27 +595,27 @@ answer it.
   whole one. A pin with SYNC_BYPASS set is
   the firmware author's responsibility. The host port requires each SCK
   phase to last at least 4 core clocks.
-- **Timing.** The firmware and the tests run the chip at 10 MHz, 12 MHz
-  for USB and 40 MHz for Ethernet. The layout targets 20 ns and meets
-  setup and hold at every corner. v2.0 had about 4 ns to spare between
+- **Timing.** The tests run the chip at 10 MHz for most protocols, 12 MHz
+  for USB, 40 for Ethernet, 48 for MVB and 50 for LFAST, and below 10 MHz
+  for the slow ones. The layout targets 20 ns and meets setup and hold at
+  every corner. v2.0 had about 4 ns to spare between
   flip-flops at the slow corner (1.08 V, 125 °C) and also met 25 ns and
   16 ns, the last with under 1 ns to spare. The v2.3 layout has 1.24 ns
   of setup slack at the slow corner, 4.40 ns at the typical one and
   4.92 ns at the fast one, and 0.10 ns of hold slack at the fast corner;
   its slowest path begins at a read of an SRAM macro. v1.4's builds showed that
   slack of about a nanosecond moves from one layout run to the next, so
-  nothing above 50 MHz is claimed. And 50 MHz, like the 40 MHz Ethernet
-  needs, rests on static timing analysis alone: the simulations that
-  clock the chip at 40 MHz have no gate delays in them. The maximum-slew
-  and maximum-capacitance warnings that arrived with the SRAM macros were
+  nothing above 50 MHz is claimed. And 50 MHz rests on static timing
+  analysis alone: the simulations that clock the chip at 40 to 50 MHz have
+  no gate delays in them. The maximum-slew and maximum-capacitance warnings that arrived with the SRAM macros were
   on the macros' pins, because the repair step does not count the
   capacitance between wires. The layout is now repaired with wider
   margins and has none at any corner, for half a nanosecond of slack at
   the slow corner and a harder routing run ([`metrics.md`](metrics.md)).
 - **Pads, reset and power** are Tiny Tapeout's and are not modelled beyond
   the gate-level simulation.
-- **Hardware.** Nothing has run on silicon yet. The host driver has run in
-  CPython against the simulated chip in cocotb, and in MicroPython on an
+- **Hardware.** Nothing has run on an FPGA or on silicon. The host driver
+  has run in CPython against the simulated chip in cocotb, and in MicroPython on an
   emulated demo board (`test/board_emu`): rp2040js running Tiny Tapeout's
   own firmware, its pins wired to the RTL and a device for each protocol
   (picosoc's SPI flash, the JTAG and SWD targets, usbhostslave's USB
@@ -624,6 +669,12 @@ answer it.
   the frame again. While a frame arrives the host must take a word every
   15 bit times. Of the protocols added on v2.0, I2S, DMX512, MIDI, LIN
   and Modbus RTU are transmit only.
+- **What the instruction set cannot do within a frame: change a pin's
+  mode.** Only the host sets whether a pin is push-pull or open-drain.
+  I3C's data line should be push-pull for data and open-drain for
+  acknowledgements within one frame, so the I3C controller keeps SDA
+  open-drain throughout, at I3C's open-drain timing: SCL at 2 MHz, not
+  SDR's 12.5 MHz.
 - **SWD's, PS/2's and CAN's device models, and WS2812's hidden test,** were
   written for this project. For all four, sigrok's protocol
   decoders also read the recorded pins (`test/sigrok.py`), which is

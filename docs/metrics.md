@@ -3,8 +3,8 @@
 From the GDS build reports. Timing is checked at each build's target clock
 at the worst (slow, hot) corner: 50 MHz (20 ns) for the 6x4 builds, 40 MHz
 (25 ns) for v1.4 on the ttihp27a flow, and 50 MHz again from v2.0 on. The
-firmware and the tests in this repository run the chip at 10 MHz, 12 MHz
-for USB and 40 MHz for Ethernet.
+tests in this repository run the chip at 10 MHz for most protocols, 12 MHz
+for USB, 40 MHz for Ethernet, 48 MHz for MVB and 50 MHz for LFAST.
 
 | Design | Std cells | Utilisation (6x4; last six rows 8x4) | Setup slack | Hold slack |
 |--------|-----------|-------------------|-------------|------------|
@@ -304,8 +304,9 @@ The flow repeats itself exactly: the first v2.3 layout and a second one
 of the same sources agreed in every pass's violation count and to the
 micrometre of wire (748,366 um). So a rebuild of these sources gives this
 layout again, and a change to the RTL starts from a routing run with
-little to spare and 1.24 ns at the slow corner. The firmware asks for
-40 MHz at most, which has 5 ns more.
+little to spare and 1.24 ns at the slow corner. Two tests run the chip
+at 48 and 50 MHz (MVB and LFAST); the rest ask for 40 MHz at most, which
+has 5 ns more.
 
 **What the reports also show.** They list 83 pins that drive more than
 the eight loads the flow aims for (140 on the first layout), nearly all
