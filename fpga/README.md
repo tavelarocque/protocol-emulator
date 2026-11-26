@@ -4,6 +4,8 @@ The chip's RTL, unchanged, as a bitstream for a Sipeed Tang Nano 20K, so its fir
 
 Status: the bitstream is built and timed in CI (`.github/workflows/fpga.yaml`). It has not yet been run on a board.
 
+The host side of the bench (the Pico's program, five demos, and capturing and judging them on a Mac) is in [`bench/`](bench/README.md).
+
 ## What is in the bitstream
 
 | File | What it is |
