@@ -19,3 +19,6 @@ _build/
 _opam
 *.install
 _reproduce/
+
+# FPGA build output
+fpga/build/

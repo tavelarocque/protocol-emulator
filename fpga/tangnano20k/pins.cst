@@ -1,0 +1,54 @@
+// Sipeed Tang Nano 20K (GW2AR-LV18QN88C8/I7): the pins of fpga/tangnano20k/board.v.
+// Header pin numbers as listed for this board in LiteX-Boards
+// (litex_boards/platforms/sipeed_tang_nano_20k.py, connectors J5 and J6).
+//
+// Kept off: 80 and 85 (TF card slot), 79 (WS2812 LED), 52 and 53 (HDMI EDID),
+// 51, 54, 55 and 56 (audio amplifier), 25 and 26 (HDMI CEC and hot plug).
+//
+// J5: the eight protocol pins.  J6: clock, reset, host port, status (on LED0 to LED5).
+
+IO_LOC "p[0]" 75;
+IO_LOC "p[1]" 42;
+IO_LOC "p[2]" 41;
+IO_LOC "p[3]" 48;
+IO_LOC "p[4]" 49;
+IO_LOC "p[5]" 86;
+IO_LOC "p[6]" 72;
+IO_LOC "p[7]" 71;
+
+IO_LOC "clk" 77;           // a global clock pin
+IO_LOC "rst_n" 76;
+IO_LOC "sck" 73;
+IO_LOC "cs_n" 74;
+IO_LOC "mosi" 27;
+IO_LOC "miso" 28;
+
+IO_LOC "status[0]" 15;     // uo_out[1] T0_RUNNING,  LED0
+IO_LOC "status[1]" 16;     // uo_out[2] T0_RX_READY, LED1
+IO_LOC "status[2]" 17;     // uo_out[3] T0_TX_FULL,  LED2
+IO_LOC "status[3]" 18;     // uo_out[4] T1_RUNNING,  LED3
+IO_LOC "status[4]" 19;     // uo_out[5] T1_RX_READY, LED4
+IO_LOC "status[5]" 20;     // uo_out[6] T1_TX_FULL,  LED5
+
+IO_PORT "p[0]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_PORT "p[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_PORT "p[2]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_PORT "p[3]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_PORT "p[4]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_PORT "p[5]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_PORT "p[6]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_PORT "p[7]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+
+IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_PORT "rst_n" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+IO_PORT "sck" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+IO_PORT "cs_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+IO_PORT "mosi" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+IO_PORT "miso" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+
+IO_PORT "status[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "status[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "status[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "status[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "status[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "status[5]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
