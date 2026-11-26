@@ -119,4 +119,14 @@ jobs:
       pages: write # to deploy to Pages
       id-token: write # to verify the deployment originates from an appropriate source
     steps:
+      # The viewer action uploads the folder gh-pages as the site, adding
+      # its files to what is already there: so docs/playground.html (the
+      # firmware playground) and docs/demo.html, which link to each other,
+      # go up beside the layout viewer.
+      - name: checkout repo
+        uses: actions/checkout@v6
+        with:
+          path: repo
+      - name: The playground and the demo, published beside the viewer
+        run: mkdir -p gh-pages && cp repo/docs/playground.html repo/docs/demo.html gh-pages/
       - uses: TinyTapeout/tt-gds-action/viewer@ttihp27a

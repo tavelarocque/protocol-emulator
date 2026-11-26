@@ -18,6 +18,16 @@
        line's cycle. Lines must be in increasing cycle order; blank lines
        and lines starting with # are skipped.
 
+       [-lines] prints the level on each wire instead, as "lines CYCLE XX":
+       inputs as the stimulus has them, open-drain pins as the wired AND.
+       [-bypass HEX] sets SYNC_BYPASS: those input pins are read without
+       the two-cycle synchroniser. [-thread1 PROGRAM.s] runs a second
+       program on thread 1, from its own program memory, with [-config1]
+       and [-tx1]; its RX words print as "rx1 CYCLE WORD".
+
+     The run itself is Pe_model.Sim_run (model/sim_run.ml), which the
+     playground (docs/playground.html) runs too, compiled to JavaScript.
+
    -config keys are the thread configuration's fields, as in docs/isa.md:
    start, out_base, out_count, set_base, set_count, in_base, threshold,
    timeout_vector, timeout, sideset_base, sideset_count, clkdiv,
@@ -26,63 +36,7 @@
 open! Core
 module Isa = Pe_model.Isa
 module Asm = Pe_model.Asm
-
-let parse_int s = Int.of_string (String.strip s)
-
-let config_of_string s =
-  List.fold
-    (String.split s ~on:',' |> List.filter ~f:(fun x -> not (String.is_empty x)))
-    ~init:Isa.Thread_config.default
-    ~f:(fun (c : Isa.Thread_config.t) kv ->
-      match String.lsplit2 kv ~on:'=' with
-      | None -> failwithf "-config: %s is not key=value" kv ()
-      | Some (k, v) ->
-        let n = parse_int v in
-        (match String.strip k with
-         | "start" -> { c with start = n }
-         | "out_base" -> { c with out_base = n }
-         | "out_count" -> { c with out_count = n }
-         | "set_base" -> { c with set_base = n }
-         | "set_count" -> { c with set_count = n }
-         | "in_base" -> { c with in_base = n }
-         | "threshold" -> { c with threshold = n }
-         | "timeout_vector" -> { c with timeout_vector = n }
-         | "timeout" -> { c with timeout = n }
-         | "sideset_base" -> { c with sideset_base = n }
-         | "sideset_count" -> { c with sideset_count = n }
-         | "clkdiv" -> { c with clkdiv = n }
-         | "out_msb_first" -> { c with out_msb_first = n <> 0 }
-         | "in_msb_first" -> { c with in_msb_first = n <> 0 }
-         | "autopull" -> { c with autopull = n <> 0 }
-         | "autopush" -> { c with autopush = n <> 0 }
-         | "crc_poly" -> { c with crc_poly = n }
-         | "crc_init" -> { c with crc_init = n }
-         | "crc_invert" -> { c with crc_invert = n <> 0 }
-         | "crc_in" -> { c with crc_in = n <> 0 }
-         | k ->
-           failwithf
-             "-config: unknown key %s (keys: start, out_base, out_count, set_base, \
-              set_count, in_base, threshold, timeout_vector, timeout, sideset_base, \
-              sideset_count, clkdiv, out_msb_first, in_msb_first, autopull, autopush, \
-              crc_poly, crc_init, crc_invert, crc_in)"
-             k
-             ()))
-;;
-
-let modes_of_flags flags =
-  let modes = Array.create ~len:Isa.num_pins Isa.Pin_mode.Input in
-  List.iter flags ~f:(fun f ->
-    match String.lsplit2 f ~on:'=' with
-    | Some (p, m) ->
-      modes.(parse_int p)
-      <- (match String.lowercase (String.strip m) with
-          | "pp" -> Push_pull
-          | "od" -> Open_drain
-          | "in" -> Input
-          | m -> failwithf "-mode: %s is not pp, od or in" m ())
-    | None -> failwithf "-mode: %s is not P=pp|od|in" f ());
-  modes
-;;
+module Sim_run = Pe_model.Sim_run
 
 let asm_cmd =
   Command.basic
@@ -95,7 +49,7 @@ let asm_cmd =
 
 let run_cmd =
   Command.basic
-    ~summary:"run a program on thread 0 of the reference model"
+    ~summary:"run a program on the reference model"
     (let%map_open.Command file = anon ("PROGRAM.s" %: string)
      and config =
        flag
@@ -114,63 +68,44 @@ let run_cmd =
          "-stimulus"
          (optional string)
          ~doc:"FILE input pin levels over time, one \"CYCLE HEX\" per line"
+     and lines =
+       flag
+         "-lines"
+         no_arg
+         ~doc:" print the level on each wire (\"lines CYCLE XX\") instead of the output register"
+     and bypass =
+       flag
+         "-bypass"
+         (optional_with_default "0" string)
+         ~doc:"HEX input pins read without the two-cycle synchroniser (SYNC_BYPASS)"
+     and thread1 =
+       flag "-thread1" (optional string) ~doc:"PROGRAM.s run this on thread 1 too, from its own memory"
+     and config1 =
+       flag "-config1" (optional_with_default "" string) ~doc:"k=v,... thread 1's config"
+     and tx1 = flag "-tx1" (optional string) ~doc:"FILE thread 1's TX words (its RX words print as rx1)"
      in
      fun () ->
-       let m =
-         Isa.create
-           ~program:(Asm.assemble (In_channel.read_all file))
-           ~pin_modes:(modes_of_flags modes)
-           ~threads:[ config_of_string config ]
+       let read_words = Option.value_map ~default:[] ~f:(fun f -> Sim_run.words_of_string (In_channel.read_all f)) in
+       let thread file config tx =
+         { Sim_run.program = Asm.assemble (In_channel.read_all file)
+         ; config = Sim_run.config_of_string config
+         ; tx = read_words tx
+         }
        in
-       let pending =
-         Queue.of_list
-           (match tx with
-            | None -> []
-            | Some f ->
-              In_channel.read_lines f
-              |> List.map ~f:String.strip
-              |> List.filter ~f:(fun l -> not (String.is_empty l || String.is_prefix l ~prefix:"#"))
-              |> List.map ~f:parse_int)
-       in
-       let inputs = ref (parse_int inputs) in
-       let changes =
-         Queue.of_list
-           (match stimulus with
-            | None -> []
-            | Some f ->
-              In_channel.read_lines f
-              |> List.map ~f:String.strip
-              |> List.filter ~f:(fun l -> not (String.is_empty l || String.is_prefix l ~prefix:"#"))
-              |> List.map ~f:(fun l ->
-                match String.split_on_chars l ~on:[ ' '; '\t' ] |> List.filter ~f:(Fn.non String.is_empty) with
-                | [ c; v ] ->
-                  let v = if String.is_prefix (String.lowercase v) ~prefix:"0x" then v else "0x" ^ v in
-                  parse_int c, parse_int v
-                | _ -> failwithf "-stimulus: expected \"CYCLE HEX\", got %S" l ()))
-       in
-       ignore
-         (Queue.fold changes ~init:(-1) ~f:(fun prev (c, _) ->
-            if c <= prev then failwithf "-stimulus: cycle %d is not after %d" c prev ();
-            c)
-          : int);
-       let last = ref (-1) in
-       for c = 0 to cycles - 1 do
-         (match Queue.peek pending with
-          | Some v -> if Isa.push_tx m ~thread:0 v then ignore (Queue.dequeue pending : int option)
-          | None -> ());
-         let pins = Isa.pin_out m land 0xFF in
-         if pins <> !last
-         then (
-           printf "pins %d %02x\n" c pins;
-           last := pins);
-         (match Queue.peek changes with
-          | Some (at, v) when at <= c ->
-            inputs := v;
-            ignore (Queue.dequeue changes : (int * int) option)
-          | _ -> ());
-         Isa.step m ~inputs:!inputs;
-         Option.iter (Isa.pop_rx m ~thread:0) ~f:(fun w -> printf "rx %d %d\n" c w)
-       done)
+       Sim_run.run
+         ~lines
+         ~sync_bypass:(Sim_run.parse_int bypass)
+         ~threads:
+           (thread file config tx
+            :: Option.value_map thread1 ~default:[] ~f:(fun f -> [ thread f config1 tx1 ]))
+         ~pin_modes:(Sim_run.modes_of_flags modes)
+         ~cycles
+         ~inputs:(Sim_run.parse_int inputs)
+         ~stimulus:
+           (Option.value_map stimulus ~default:[] ~f:(fun f ->
+              Sim_run.stimulus_of_string (In_channel.read_all f)))
+         ~emit:print_endline
+         ())
 ;;
 
 let () =

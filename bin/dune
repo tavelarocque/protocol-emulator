@@ -1,5 +1,12 @@
 (executables
- (names generate firmware_hex firmware_src pe_sim memory_verilog demo_traces)
+ (names
+  generate
+  firmware_hex
+  firmware_src
+  pe_sim
+  memory_verilog
+  demo_traces
+  playground_page)
  (libraries core core_unix.command_unix hardcaml pe_hw pe_model pe_test)
  (preprocess
   (pps ppx_jane)))

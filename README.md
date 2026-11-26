@@ -111,6 +111,10 @@ fails if a check does. It is simulation only: nothing here has run on
 hardware. It is one self-contained file with no network access: download
 it and open it in a browser, or
 [view it here](https://htmlpreview.github.io/?https://github.com/tavelarocque/protocol-emulator/blob/main/docs/demo.html).
+[`docs/playground.html`](docs/playground.html) lets you edit the firmware
+and run it: the reference model and the assembler compiled to JavaScript,
+in the page, also one file with no network access
+([open it here](https://tavelarocque.github.io/protocol-emulator/playground.html)).
 
 ## Architecture
 

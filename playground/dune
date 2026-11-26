@@ -1,0 +1,88 @@
+; docs/playground.html: the firmware the tests run, editable, run in the
+; browser on the reference model and the assembler compiled to JavaScript
+; (pe_js.ml, with js_of_ocaml). page.html is the page; bin/playground_page.ml
+; puts in the presets (presets.json, checked on the native model as it is
+; made), the model, and the type (demo/vendor/plex.css); the result is
+; promoted into docs/ so it cannot drift from the model and the firmware.
+; exact.js, run by `dune test`, requires the JavaScript build and the native
+; pe_sim to print the same lines for every preset.
+
+; Without js_of_ocaml installed, the JavaScript build, the page and the
+; check are skipped, and the rest of the project builds as before.
+
+(executable
+ (name pe_js)
+ (modes js)
+ (optional)
+ (libraries core pe_model js_of_ocaml)
+ (preprocess
+  (pps ppx_jane)))
+
+; One file the browser can load quickly: the whole program compiled at once,
+; so only the parts of Core the model uses are kept (about 600 KB), with no
+; source map. Two warnings are turned off: one about 32-bit constants in
+; modules that are then dropped (firmware.ml's CRCs; integers in JavaScript
+; have 32 bits, and exact.js is what shows the model is unaffected), and one
+; about a deprecated name in Core's and bin_prot's own runtime files.
+
+(env
+ (_
+  (js_of_ocaml
+   (compilation_mode whole_program)
+   (sourcemap no)
+   (flags
+    (-w no-integer-overflow -w no-deprecated-joo-global-object)))))
+
+(rule
+ (targets ws2812.tx)
+ (action
+  (with-stdout-to
+   ws2812.tx
+   (run python3 %{dep:ws2812_words.py} %{dep:../examples/ws2812/host.py}))))
+
+(rule
+ (targets presets.json)
+ (deps
+  (glob_files ../examples/*.s)
+  ../examples/ws2812/ws2812.s)
+ (action
+  (with-stdout-to
+   presets.json
+   (run
+    %{dep:../bin/playground_page.exe}
+    presets
+    ../examples
+    %{dep:../test/test.py}
+    %{dep:ws2812.tx}
+    %{dep:../examples/ws2812/run_args.txt}))))
+
+(rule
+ (targets playground.html)
+ (enabled_if %{lib-available:js_of_ocaml})
+ (mode
+  (promote
+   (into ../docs)))
+ (action
+  (with-stdout-to
+   playground.html
+   (run
+    %{dep:../bin/playground_page.exe}
+    page
+    %{dep:page.html}
+    %{dep:pe_js.bc.js}
+    %{dep:../demo/vendor/plex.css}
+    %{dep:presets.json}))))
+
+(rule
+ (alias runtest)
+ (enabled_if %{lib-available:js_of_ocaml})
+ (deps
+  (glob_files ../examples/*.s))
+ (action
+  (run
+   node
+   %{dep:exact.js}
+   %{dep:pe_js.bc.js}
+   %{dep:../bin/pe_sim.exe}
+   %{dep:presets.json}
+   ../examples)))

@@ -25,7 +25,9 @@ let word_mask = (1 lsl word_bits) - 1
    for the host at one end of one thread's FIFOs; see [Buffer_mode]. *)
 let buffer_size = 1024
 let crc_bits = 32
-let crc_mask = (1 lsl crc_bits) - 1
+(* All 32 bits set. Written so it is the same where an int has only 32
+   bits, as in JavaScript (the playground), where [(1 lsl 32) - 1] is 0. *)
+let crc_mask = (1 lsl (crc_bits - 1)) lor ((1 lsl (crc_bits - 1)) - 1)
 let mask n = (1 lsl n) - 1
 
 (* Small enums are encoded by their position in [all]. *)

@@ -10,7 +10,14 @@ jobs:
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.3"
-      - run: opam install -y hardcaml hardcaml_waveterm hardcaml_verify ppx_hardcaml ppx_jane core dune
+      - name: js_of_ocaml 6.2.0, pinned, for the playground (playground/, docs/playground.html)
+        run: |
+          opam pin add -n -y js_of_ocaml-compiler 6.2.0
+          opam pin add -n -y js_of_ocaml 6.2.0
+      - run: opam install -y hardcaml hardcaml_waveterm hardcaml_verify ppx_hardcaml ppx_jane core dune js_of_ocaml-compiler js_of_ocaml
+      - uses: actions/setup-node@v4  # dune runtest runs playground/exact.js with node
+        with:
+          node-version: "22"
       - run: opam exec -- dune build
       - run: opam exec -- dune runtest
       - name: Every example program assembles (examples/*.s)
@@ -27,5 +34,5 @@ jobs:
         run: |
           pip install yowasp-yosys==0.70.0.0.post1259
           python3 formal/sram_equiv.py
-      - name: Generated Verilog, firmware images and example programs match the committed copies
-        run: git diff --exit-code src/ test/ examples/
+      - name: Generated Verilog, firmware images, example programs and the playground page match the committed copies
+        run: git diff --exit-code src/ test/ examples/ docs/playground.html

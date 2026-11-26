@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Protocol Emulator: playground</title>
+<!--
+  docs/playground.html is generated: this page (playground/page.html) with
+  the presets (playground/presets.json, made and checked by
+  bin/playground_page.ml), the reference model and assembler compiled to
+  JavaScript (playground/pe_js.ml), and the type (demo/vendor/plex.css,
+  IBM Plex, SIL OFL 1.1). Edit playground/page.html and run `dune build`.
+
+  One self-contained file, nothing fetched. Its style is docs/demo.html's:
+  an application note, with numbered figures and captions that say where
+  the data came from.
+-->
+<style>
+/*FONTS*/
+:root {
+  --paper: #fbfbf9; --ink: #16181a; --ink2: #5b6166; --rule: #d4d7da; --wash: #f1f2f0; --now: #fff1b8; --bad: #b3261e; --badwash: #fbe9e7;
+  --sans: "Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cond: "Plex Sans Condensed", "Plex Sans", system-ui, sans-serif;
+  --mono: "Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); font-variant-numeric: tabular-nums slashed-zero; }
+a { color: inherit; text-decoration-color: var(--ink2); text-underline-offset: 2px; }
+.sheet { max-width: 1180px; margin: 0 auto; padding: 36px max(20px, env(safe-area-inset-right, 0px)) 72px max(20px, env(safe-area-inset-left, 0px)); }
+
+header { display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 16px 40px; align-items: end; padding-bottom: 20px; border-bottom: 1.5px solid var(--ink); }
+h1 { font: 600 39px/1.1 var(--sans); letter-spacing: -0.01em; margin: 0 0 10px; text-wrap: balance; }
+header p { margin: 0; max-width: 62ch; }
+.status { font: 500 13px/1.45 var(--cond); border-left: 1.5px solid var(--ink); padding-left: 14px; }
+.status b { display: block; font: 600 16px/1.3 var(--sans); margin-bottom: 2px; }
+
+.cols { display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 0 40px; margin-top: 28px; }
+h2 { font: 600 20px/1.3 var(--sans); margin: 0 0 10px; padding-top: 12px; border-top: 1.5px solid var(--ink); }
+h2 span { font-weight: 400; color: var(--ink2); }
+h3 { font: 600 16px/1.3 var(--sans); margin: 18px 0 4px; }
+h3 span { font-weight: 400; color: var(--ink2); }
+p { margin: 0 0 12px; text-wrap: pretty; }
+figure { margin: 0; }
+figcaption, .note { font: 500 13px/1.45 var(--cond); color: var(--ink2); margin-top: 8px; max-width: 86ch; }
+figcaption b { color: var(--ink); font-weight: 500; }
+section { margin-top: 40px; }
+
+/* the protocols */
+.scenes { list-style: none; margin: 0 0 22px; padding: 0; border-top: 1.5px solid var(--ink); }
+.scenes button { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 0 6px; width: 100%; text-align: left; font: 400 15px/1.3 var(--sans); color: var(--ink); background: none; border: 0; border-bottom: 1px solid var(--rule); border-left: 2px solid transparent; padding: 7px 4px 7px 8px; cursor: pointer; }
+.scenes button:hover { background: var(--wash); }
+.scenes button[aria-current="true"] { border-left-color: var(--ink); font-weight: 600; background: var(--wash); }
+.scenes .n { color: var(--ink2); font-weight: 400; }
+.scenes .spec { grid-column: 2; font: 500 13px/1.35 var(--cond); color: var(--ink2); }
+.links { list-style: none; padding: 0; margin: 0 0 12px; font: 500 13px/1.6 var(--cond); }
+
+/* the editors */
+.editor { display: grid; grid-template-columns: auto minmax(0, 1fr); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: #fff; height: 440px; overflow: hidden; }
+.gutter { font: 400 13.5px/1.5 var(--mono); color: #9aa0a5; text-align: right; padding: 6px 8px 6px 6px; user-select: none; overflow: hidden; white-space: pre; background: var(--paper); border-right: 1px solid var(--rule); min-width: 4.5ch; }
+.gutter .bad { color: var(--paper); background: var(--bad); font-weight: 600; display: inline-block; width: 100%; padding-right: 2px; }
+textarea { font: 400 13.5px/1.5 var(--mono); color: var(--ink); background: #fff; border: 0; padding: 6px 10px; margin: 0; resize: none; tab-size: 8; white-space: pre; overflow: auto; width: 100%; height: 100%; }
+textarea:focus { outline: none; }
+.editor:focus-within { box-shadow: inset 0 0 0 1.5px var(--ink); }
+.fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 16px; margin-top: 10px; }
+.fields label, .opts label { display: block; font: 500 13px/1.4 var(--cond); color: var(--ink2); }
+.fields input, .fields textarea.small, .opts input, .opts textarea.small { display: block; width: 100%; margin-top: 2px; font: 400 13px/1.45 var(--mono); color: var(--ink); background: #fff; border: 1px solid var(--rule); border-radius: 2px; padding: 5px 7px; }
+textarea.small { height: 118px; white-space: pre; }
+.fields .wide { grid-column: 1 / -1; }
+.opts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 16px; margin-top: 12px; }
+.opts .wide { grid-column: 1 / -1; }
+.fields input:focus, .opts input:focus, textarea.small:focus { outline: 1.5px solid var(--ink); outline-offset: 0; }
+
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 16px 0 8px; }
+.transport button { font: 500 13px/1 var(--cond); color: var(--ink); background: var(--paper); border: 1px solid var(--ink); border-radius: 2px; padding: 7px 10px; cursor: pointer; min-width: 30px; }
+.transport button:hover { background: var(--wash); }
+.transport button.play { background: var(--ink); color: var(--paper); min-width: 72px; }
+.transport button.play:hover { background: #2b2f33; }
+.transport .hint { font: 500 12px var(--cond); color: var(--ink2); }
+.meas { margin-left: auto; font: 400 13px/1.4 var(--mono); text-align: right; }
+.meas span { color: var(--ink2); }
+.error { display: none; margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--bad); background: var(--badwash); font: 400 13px/1.5 var(--mono); color: var(--bad); white-space: pre-wrap; }
+.error.on { display: block; }
+.edited { font: 500 12px var(--cond); color: var(--ink2); }
+
+#scope { display: block; width: 100%; cursor: crosshair; touch-action: none; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.stats { display: flex; flex-wrap: wrap; gap: 4px 28px; margin-top: 10px; font: 400 13px/1.5 var(--mono); }
+.stats b { font-weight: 600; }
+.stats span { color: var(--ink2); }
+.words { max-height: 360px; overflow: auto; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); margin-top: 8px; }
+table { width: 100%; border-collapse: collapse; font: 400 13px/1.4 var(--sans); }
+th { font: 500 13px/1.3 var(--cond); color: var(--ink2); text-align: left; padding: 6px 8px 5px 0; border-bottom: 1px solid var(--rule); position: sticky; top: 0; background: var(--paper); }
+td { padding: 4px 8px 4px 0; vertical-align: top; border-bottom: 1px solid #e8eaeb; }
+td.n { font-family: var(--mono); white-space: nowrap; }
+details { margin-top: 14px; }
+summary { font: 500 13px/1.45 var(--cond); color: var(--ink2); cursor: pointer; }
+pre.raw { max-height: 300px; overflow: auto; font: 400 12.5px/1.45 var(--mono); background: #fff; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 6px 10px; margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+footer { margin-top: 56px; padding-top: 12px; border-top: 1px solid var(--rule); font: 500 13px/1.5 var(--cond); color: var(--ink2); max-width: 100ch; }
+footer code, .note code, p code { font: 400 12px var(--mono); }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+@media (max-width: 860px) {
+  header, .cols { grid-template-columns: minmax(0, 1fr); }
+  h1 { font-size: 31px; }
+  .scenes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 24px; }
+  .opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .editor { height: 340px; }
+  .meas { margin-left: 0; text-align: left; flex-basis: 100%; }
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <div>
+      <h1>Protocol Emulator: playground</h1>
+      <p>Pick a protocol, change its firmware, and run it. The program is assembled and run here, in the page, on the project's reference model; the pins come back as a waveform and the words the threads hand the host come back as a table.</p>
+    </div>
+    <div class="status"><b>The reference model, in your browser</b>This is <code>model/isa.ml</code> and the assembler, compiled to JavaScript: the same code the tests check the RTL against every cycle, and the same run as the command-line <code>pe_sim</code>, which a test compares with this build line for line. The tests judge firmware with sigrok's decoders, not with this page. The chip is designed for tapeout; nothing here has run on an FPGA or on silicon.</div>
+  </header>
+
+  <div class="cols">
+    <div>
+      <h2 id="fwtitle">The firmware</h2>
+      <div id="threads"></div>
+    </div>
+    <aside>
+      <ol class="scenes" id="scenes" aria-label="Protocols"></ol>
+      <h3 id="ptitle"></h3>
+      <p id="what"></p>
+      <ul class="links" id="links"></ul>
+      <p class="note" id="device"></p>
+    </aside>
+  </div>
+
+  <section>
+    <h2>The run <span>what the host and the pins are given</span></h2>
+    <div class="opts">
+      <label>Cycles<input id="cycles" inputmode="numeric" spellcheck="false"></label>
+      <label>Clock (shown in time)<input id="clock" inputmode="numeric" spellcheck="false"></label>
+      <label>Input pins read (<code>-inputs</code>)<input id="inputs" spellcheck="false"></label>
+      <label>Read without synchroniser (<code>-bypass</code>)<input id="bypass" spellcheck="false"></label>
+      <label class="wide">Pin modes (<code>-mode</code>, P=pp, od or in; unnamed pins are inputs)<input id="modes" spellcheck="false"></label>
+      <label class="wide" id="stimwrap">Stimulus (<code>-stimulus</code>: from CYCLE on, the input pins read HEX)<textarea class="small" id="stimulus" spellcheck="false" wrap="off"></textarea></label>
+    </div>
+    <div class="transport">
+      <button class="play" id="run">Run</button>
+      <button id="revert">Back to the preset</button>
+      <span class="edited" id="edited"></span>
+      <span class="hint">Ctrl+Enter runs from any box.</span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+  </section>
+
+  <section>
+    <figure>
+      <div class="transport">
+        <button id="fit">Fit whole run</button>
+        <button id="zin" aria-label="Zoom in">+</button>
+        <button id="zout" aria-label="Zoom out">&minus;</button>
+        <label class="hint"><input type="checkbox" id="allpins"> all eight pins</label>
+        <div class="meas" id="meas"></div>
+      </div>
+      <canvas id="scope" aria-label="The pins over the run"></canvas>
+      <figcaption id="cap"></figcaption>
+    </figure>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <section>
+    <h2>What the host got back <span id="rxcount"></span></h2>
+    <div id="rx"></div>
+    <details>
+      <summary>The run as <code>pe_sim</code> prints it, and the command that prints it</summary>
+      <pre class="raw" id="cmd"></pre>
+      <pre class="raw" id="raw"></pre>
+    </details>
+  </section>
+
+  <footer>
+    Made by <code>bin/playground_page.ml</code>. The programs are the files in <code>examples/</code>, generated from <code>model/firmware.ml</code>; each preset's configuration, TX words and stimulus are the ones its test uses, and each was run and checked on the native model when this page was built. The model is <code>model/isa.ml</code>, compiled with js_of_ocaml (<code>playground/pe_js.ml</code>); <code>playground/exact.js</code> runs every preset here and in the native <code>pe_sim</code> and requires the same output.
+    Set in IBM Plex. <a href="https://github.com/tavelarocque/protocol-emulator">Source, tests and proofs</a>. Recorded runs with drawings of the bench: <a href="demo.html">demo.html</a>.
+  </footer>
+</div>
+
+<script>/*MODEL*/</script>
+<script>
+"use strict";
+const PRESETS = /*PRESETS*/null;
+const REPO = "https://github.com/tavelarocque/protocol-emulator/blob/main/";
+const MAX_CYCLES = 5000000;
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const INK = css("--ink"), INK2 = css("--ink2");
+// One colour to a signal, in the order oscilloscopes use, darkened for paper.
+const CHANNELS = ["#b88a00", "#00838f", "#b0307a", "#2e7d32", "#5e4fa2", "#a0522d", "#37474f", "#c2185b"];
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+let preset = null, result = null, view = { from: 0, to: 1 }, cursor = null;
+
+/* ------------------------------------------------------------- the editors */
+
+function editorHtml(t, i, two) {
+  return '<h3>' + (two ? "Thread " + i + ": " : "") + esc(t.firmware) +
+    ' <span><a href="' + REPO + t.file + '">' + esc(t.file) + '</a></span></h3>' +
+    '<div class="editor"><div class="gutter" id="gut' + i + '" aria-hidden="true"></div>' +
+    '<textarea id="src' + i + '" spellcheck="false" wrap="off" autocapitalize="off" autocomplete="off" aria-label="Thread ' + i + ' program"></textarea></div>' +
+    '<div class="fields">' +
+    '<label class="wide">Configuration (<code>-config' + (i ? "1" : "") + '</code>; what is left out is the default)<input id="cfg' + i + '" spellcheck="false"></label>' +
+    '<label class="wide">TX words (<code>-tx' + (i ? "1" : "") + '</code>: one a line, decimal or 0x hex; # starts a comment line), pushed as the FIFO has room<textarea class="small" id="tx' + i + '" spellcheck="false" wrap="off"></textarea></label>' +
+    "</div>";
+}
+
+function gutter(i, bad) {
+  const src = $("src" + i), g = $("gut" + i);
+  const n = src.value.split("\n").length;
+  let s = "";
+  for (let k = 1; k <= n; k++) s += (k === bad ? '<span class="bad">' + k + "</span>" : k) + "\n";
+  g.innerHTML = s;
+  g.scrollTop = src.scrollTop;
+}
+
+function showPreset(id) {
+  preset = PRESETS.find((p) => p.id === id) || PRESETS[0];
+  for (const b of $("scenes").querySelectorAll("button")) b.setAttribute("aria-current", b.dataset.id === preset.id ? "true" : "false");
+  const two = preset.threads.length > 1;
+  $("fwtitle").innerHTML = "The firmware <span>" + (two ? "two programs, one to a thread, each in a memory of its own" : "edit it, then Run") + "</span>";
+  $("threads").innerHTML = preset.threads.map((t, i) => editorHtml(t, i, two)).join("");
+  preset.threads.forEach((t, i) => {
+    $("src" + i).value = t.source;
+    $("cfg" + i).value = t.config;
+    $("tx" + i).value = t.tx;
+    $("src" + i).addEventListener("input", () => { gutter(i, 0); markEdited(); });
+    $("src" + i).addEventListener("scroll", () => { $("gut" + i).scrollTop = $("src" + i).scrollTop; });
+    gutter(i, 0);
+  });
+  $("ptitle").innerHTML = esc(preset.title) + " <span>" + esc(preset.spec) + "</span>";
+  $("what").textContent = preset.what;
+  $("links").innerHTML = preset.links.map((l) => '<li><a href="' + esc(l.href) + '">' + esc(l.text) + "</a></li>").join("");
+  $("device").textContent = preset.stimulus
+    ? (preset.recorded
+      ? "The other side of the wire is a recording: the test's device model ran beside the firmware when this page was built, and what it drove is the stimulus below. It does not answer a changed program; change the program's timing and the device's answers stay where they were."
+      : "The input pins follow the stimulus below, which is the waveform the test feeds this receiver. Edit it to send something else.")
+    : "Nothing drives the pins from outside: input pins read " + preset.inputs + ".";
+  $("cycles").value = preset.cycles;
+  $("clock").value = preset.clock_hz;
+  $("inputs").value = preset.inputs;
+  $("bypass").value = preset.bypass;
+  $("modes").value = preset.modes.join(" ");
+  $("stimulus").value = preset.stimulus;
+  $("stimwrap").style.display = preset.stimulus ? "" : "none";
+  $("allpins").checked = false;
+  for (const el of document.querySelectorAll(".fields input, .fields textarea")) el.addEventListener("input", markEdited);
+  $("edited").textContent = "";
+  try { history.replaceState(null, "", "#" + preset.id); } catch (e) { /* a sandboxed frame has no history to write */ }
+  run(true);
+}
+
+function markEdited() { $("edited").textContent = "edited: Run to see it"; }
+
+/* --------------------------------------------------------------------- run */
+
+function job() {
+  return {
+    threads: preset.threads.map((t, i) => ({ source: $("src" + i).value, config: $("cfg" + i).value, tx: $("tx" + i).value })),
+    modes: $("modes").value.split(/[\s,]+/).filter((m) => m),
+    cycles: Math.max(1, Math.min(MAX_CYCLES, parseInt($("cycles").value, 10) || 0)),
+    inputs: $("inputs").value.trim() || "0xFF",
+    bypass: $("bypass").value.trim() || "0",
+    stimulus: $("stimulus").value,
+    lines: true,
+  };
+}
+
+function showError(r) {
+  const two = preset.threads.length > 1;
+  let where = "";
+  if (r.thread >= 0) {
+    where = (two ? "Thread " + r.thread + ", " : "") + (r.line > 0 ? "line " + r.line + ": " : "");
+    if (r.line > 0) {
+      gutter(r.thread, r.line);
+      const src = $("src" + r.thread), lines = src.value.split("\n");
+      const start = lines.slice(0, r.line - 1).join("\n").length + (r.line > 1 ? 1 : 0);
+      src.focus(); src.setSelectionRange(start, start + lines[r.line - 1].length);
+      src.scrollTop = Math.max(0, (r.line - 6) * parseFloat(getComputedStyle(src).lineHeight));
+      $("gut" + r.thread).scrollTop = src.scrollTop;
+      where += lines[r.line - 1].trim() + "\n  ";
+    }
+  }
+  $("error").textContent = (r.line > 0 ? "Assembler: " : "") + where + r.message;
+  $("error").classList.add("on");
+}
+
+function run(fresh) {
+  const j = job();
+  $("error").classList.remove("on");
+  preset.threads.forEach((t, i) => gutter(i, 0));
+  if ((parseInt($("cycles").value, 10) || 0) > MAX_CYCLES) $("cycles").value = MAX_CYCLES;
+  $("run").textContent = "Running";
+  const t0 = performance.now();
+  let r;
+  try { r = peModel.run(j); } catch (e) { r = { ok: false, thread: -1, line: 0, message: String(e && e.message || e) }; }
+  const ms = performance.now() - t0;
+  $("run").textContent = "Run";
+  if (!r.ok) { showError(r); return; }
+  if (!fresh) $("edited").textContent = "";
+  const changes = [], rx = [];
+  for (const line of r.output.split("\n")) {
+    const f = line.split(" ");
+    if (f[0] === "lines") changes.push([+f[1], parseInt(f[2], 16)]);
+    else if (f[0] === "rx" || f[0] === "rx1") rx.push({ c: +f[1], thread: f[0] === "rx" ? 0 : 1, w: +f[2] });
+  }
+  result = { job: j, output: r.output, changes, rx, words: r.words, instructions: r.instructions, ms, cycles: j.cycles, clock: Math.max(1, parseInt($("clock").value, 10) || preset.clock_hz) };
+  cursor = null;
+  const dense = changes.length > 300;
+  view = { from: 0, to: dense ? Math.max(40, Math.round(j.cycles / 8)) : j.cycles };
+  // a run that only starts late (a receiver, a frame after a gap) opens where its pins first move
+  if (dense && changes.length > 1 && changes[1][0] > view.to) { view.from = Math.max(0, changes[1][0] - 200); view.to = Math.min(j.cycles, view.from + Math.round(j.cycles / 8)); }
+  showResult();
+}
+
+function fmtTime(cycles) {
+  const us = cycles / (result.clock / 1e6);
+  if (Math.abs(us) < 10) return (us * 1000).toFixed(0) + " ns";
+  if (Math.abs(us) < 1000) return us.toFixed(us < 100 ? 1 : 0) + " µs";
+  return (us / 1000).toFixed(us < 100000 ? 2 : 1) + " ms";
+}
+const hex = (w) => "0x" + w.toString(16).toUpperCase().padStart(4, "0");
+
+function showResult() {
+  const r = result, two = preset.threads.length > 1;
+  $("stats").innerHTML = preset.threads.map((t, i) =>
+    "<div><b>" + (two ? "thread " + i + ": " : "") + r.instructions[i] + "</b> instructions, <b>" + r.words[i] + "</b> of 256 words of program memory</div>").join("") +
+    "<div><b>" + r.cycles.toLocaleString("en") + "</b> cycles <span>(" + fmtTime(r.cycles) + " at " + r.clock / 1e6 + " MHz)</span></div>" +
+    "<div><span>run in " + Math.round(r.ms) + " ms</span></div>";
+  $("cap").innerHTML = "<b>Figure 1.</b> The level on each wire, cycle by cycle, from this run of the reference model" +
+    (r.changes.length > 300 ? ". It opens on an eighth of the run; Fit whole run shows the rest" : "") +
+    ". Scroll to zoom, shift-scroll or drag to pan, click to place the cursor. Marks under the time axis are the cycles in which a thread handed the host a word.";
+  $("rxcount").textContent = r.rx.length ? r.rx.length + (r.rx.length === 1 ? " word" : " words") : "";
+  $("rx").innerHTML = r.rx.length
+    ? '<div class="words"><table><thead><tr><th>Cycle</th><th>At</th><th>Thread</th><th>Word</th><th>Decimal</th><th>Bits</th></tr></thead><tbody>' +
+      r.rx.map((x) => "<tr><td class=\"n\">" + x.c.toLocaleString("en") + '</td><td class="n">' + fmtTime(x.c) + "</td><td>" + x.thread + '</td><td class="n">' + hex(x.w) + '</td><td class="n">' + x.w + '</td><td class="n">' + x.w.toString(2).padStart(16, "0").replace(/(\d{4})(?=\d)/g, "$1 ") + "</td></tr>").join("") + "</tbody></table></div>"
+    : '<p class="note">No words came back: ' + (preset.threads.some((t, i) => /\bpush\b/i.test(r.job.threads[i].source.replace(/;.*$/gm, ""))) ? "the threads push nothing in this run." : "these programs only send.") + "</p>";
+  $("raw").textContent = r.output;
+  $("cmd").textContent = command(r.job);
+  drawScope();
+}
+
+function command(j) {
+  const t = preset.threads;
+  let c = "pe_sim run " + t[0].file;
+  if (j.threads[0].config) c += " -config " + j.threads[0].config;
+  for (const m of j.modes) c += " -mode " + m;
+  c += " -tx thread0.tx -cycles " + j.cycles;
+  if (Number(j.inputs) !== 255) c += " -inputs " + j.inputs;
+  if (j.stimulus.trim()) c += " -stimulus stimulus.txt";
+  if (Number(j.bypass)) c += " -bypass " + j.bypass;
+  if (t[1]) c += " -thread1 " + t[1].file + (j.threads[1].config ? " -config1 " + j.threads[1].config : "") + " -tx1 thread1.tx";
+  return c + " -lines\n\n(with this page's TX words in thread0.tx" + (t[1] ? " and thread1.tx" : "") + (j.stimulus.trim() ? " and its stimulus in stimulus.txt" : "") + ", and the programs as edited here)";
+}
+
+/* --------------------------------------------------------------- Figure 1 */
+
+function fitCanvas(cv) {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * dpr) || cv.height !== Math.round(r.height * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [g, r.width, r.height];
+}
+
+const GUTTER = 86, AXIS = 30, ROW = 54;
+const xOf = (c, w) => GUTTER + (c - view.from) / (view.to - view.from) * (w - GUTTER - 10);
+const cOf = (x, w) => view.from + (x - GUTTER) / (w - GUTTER - 10) * (view.to - view.from);
+
+function shownPins() {
+  if (!$("allpins").checked) return preset.pins;
+  return [0, 1, 2, 3, 4, 5, 6, 7].map((k) => preset.pins.find((p) => p.pin === k) || { pin: k, name: "" });
+}
+
+function lastAt(list, c) {
+  let lo = -1, hi = list.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (list[mid][0] <= c) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+
+function drawScope() {
+  if (!result) return;
+  const cv = $("scope"), r = result, pins = shownPins();
+  cv.style.height = AXIS + pins.length * ROW + 10 + "px";
+  const [g, w, h] = fitCanvas(cv);
+  g.clearRect(0, 0, w, h);
+  const cond = (px, weight) => (weight || 500) + " " + px + "px " + css("--cond"), mono = (px, weight) => (weight || 400) + " " + px + "px " + css("--mono");
+  // time axis: ticks on 1, 2, 5, in the one unit named at its left
+  const spanUs = (view.to - view.from) / (r.clock / 1e6), unit = spanUs < 5 ? ["ns", 1e-3] : spanUs < 5000 ? ["µs", 1] : ["ms", 1e3];
+  const raw = spanUs / unit[1] / 7, mag = Math.pow(10, Math.floor(Math.log10(raw))), step = [1, 2, 5, 10].map((k) => k * mag).find((t) => t >= raw);
+  const perUnit = r.clock / 1e6 * unit[1];
+  g.font = cond(12); g.textBaseline = "middle"; g.fillStyle = INK2; g.fillText(unit[0], 8, 11);
+  g.strokeStyle = "#e3e6e8"; g.lineWidth = 1;
+  for (let t = Math.ceil(view.from / perUnit / step) * step; t * perUnit <= view.to; t += step) {
+    const x = Math.round(xOf(t * perUnit, w)) + 0.5;
+    g.beginPath(); g.moveTo(x, AXIS - 10); g.lineTo(x, h - 6); g.stroke();
+    g.fillText(String(+t.toPrecision(6)), x + 3, 11);
+  }
+  g.strokeStyle = INK; g.beginPath(); g.moveTo(GUTTER, AXIS - 4.5); g.lineTo(w - 10, AXIS - 4.5); g.stroke();
+  // the words the threads pushed
+  g.fillStyle = INK;
+  for (const e of r.rx) { const x = xOf(e.c, w); if (x >= GUTTER && x <= w - 10) { g.beginPath(); g.moveTo(x - 3.5, AXIS + 3); g.lineTo(x + 3.5, AXIS + 3); g.lineTo(x, AXIS - 3); g.fill(); } }
+
+  pins.forEach((p, row) => {
+    const y0 = AXIS + row * ROW, hiY = y0 + 12, loY = y0 + ROW - 10, col = CHANNELS[row % CHANNELS.length];
+    g.fillStyle = col; g.fillRect(8, hiY, 3, loY - hiY);
+    g.fillStyle = INK; g.font = mono(12, 600); g.fillText(p.name || "P" + p.pin, 18, (hiY + loY) / 2 - 7);
+    g.fillStyle = INK2; g.font = mono(11); g.fillText("P" + p.pin, 18, (hiY + loY) / 2 + 8);
+    g.strokeStyle = "#e3e6e8"; g.lineWidth = 1; g.beginPath(); g.moveTo(GUTTER, y0 + ROW - 0.5); g.lineTo(w - 10, y0 + ROW - 0.5); g.stroke();
+    if (!r.changes.length) return;
+    // the trace: at most one vertical stroke a pixel, so a long run draws fast
+    g.strokeStyle = col; g.lineWidth = 1.5; g.beginPath();
+    let i = Math.max(0, lastAt(r.changes, view.from)), lv = (r.changes[i][1] >> p.pin) & 1, lastX = -1;
+    g.moveTo(GUTTER, lv ? hiY : loY);
+    for (i++; i < r.changes.length && r.changes[i][0] <= view.to; i++) {
+      const nv = (r.changes[i][1] >> p.pin) & 1;
+      if (nv === lv) continue;
+      const x = xOf(r.changes[i][0], w);
+      if (x - lastX < 0.5) { g.lineTo(x, hiY); g.lineTo(x, loY); g.moveTo(x, nv ? hiY : loY); }
+      else { g.lineTo(x, lv ? hiY : loY); g.lineTo(x, nv ? hiY : loY); }
+      lv = nv; lastX = x;
+    }
+    g.lineTo(w - 10, lv ? hiY : loY); g.stroke();
+  });
+  if (cursor != null) {
+    const x = Math.round(xOf(cursor, w)) + 0.5;
+    if (x >= GUTTER && x <= w - 9) { g.strokeStyle = INK; g.lineWidth = 1; g.beginPath(); g.moveTo(x, AXIS - 10); g.lineTo(x, h - 6); g.stroke(); }
+  }
+  let m = "view " + fmtTime(view.from) + " to " + fmtTime(view.to);
+  if (cursor != null) {
+    const k = lastAt(r.changes, cursor), v = k < 0 ? 0 : r.changes[k][1];
+    m = "cursor " + fmtTime(cursor) + " <span>cycle " + Math.round(cursor).toLocaleString("en") + ", pins 0x" + v.toString(16).toUpperCase().padStart(2, "0") + "</span><br>" + m;
+  }
+  $("meas").innerHTML = m;
+}
+
+/* ----------------------------------------------------------------- controls */
+
+function zoom(k, at) {
+  const span = view.to - view.from, total = result.cycles;
+  at = at == null ? (view.from + view.to) / 2 : at;
+  const ns = Math.max(20, Math.min(total, span * k));
+  view = { from: at - (at - view.from) * ns / span, to: at + (view.to - at) * ns / span };
+  clampView();
+}
+function clampView() {
+  const total = result.cycles, span = Math.min(total, view.to - view.from);
+  if (view.from < 0) view.from = 0;
+  if (view.from + span > total) view.from = total - span;
+  view.to = view.from + span; drawScope();
+}
+$("fit").onclick = () => { view = { from: 0, to: result.cycles }; drawScope(); };
+$("zin").onclick = () => zoom(0.5, cursor);
+$("zout").onclick = () => zoom(2, cursor);
+$("allpins").onchange = drawScope;
+for (const el of document.querySelectorAll(".opts input, .opts textarea")) el.addEventListener("input", markEdited);
+$("run").onclick = () => run(false);
+$("revert").onclick = () => showPreset(preset.id);
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(false); } });
+
+let drag = null;
+$("scope").addEventListener("pointerdown", (e) => { $("scope").setPointerCapture(e.pointerId); drag = { x: e.clientX, from: view.from, to: view.to, moved: false }; });
+$("scope").addEventListener("pointermove", (e) => {
+  if (!drag || !e.buttons) return;
+  const r = $("scope").getBoundingClientRect(), dx = e.clientX - drag.x;
+  if (Math.abs(dx) > 3) drag.moved = true;
+  if (drag.moved) { const d = -dx / (r.width - GUTTER - 10) * (drag.to - drag.from); view = { from: drag.from + d, to: drag.to + d }; clampView(); }
+});
+$("scope").addEventListener("pointerup", (e) => {
+  if (drag && !drag.moved) { const r = $("scope").getBoundingClientRect(); const c = cOf(e.clientX - r.left, r.width); cursor = c >= 0 && c <= result.cycles ? c : null; drawScope(); }
+  drag = null;
+});
+$("scope").addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = $("scope").getBoundingClientRect(), span = view.to - view.from;
+  if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) { const d = (e.deltaY || e.deltaX) / r.width * span; view = { from: view.from + d, to: view.to + d }; clampView(); }
+  else zoom(Math.exp(e.deltaY * 0.002), cOf(e.clientX - r.left, r.width));
+}, { passive: false });
+window.addEventListener("resize", drawScope);
+
+PRESETS.forEach((p, i) => {
+  const li = document.createElement("li"), b = document.createElement("button");
+  b.dataset.id = p.id; b.onclick = () => showPreset(p.id);
+  b.innerHTML = '<span class="n">' + (i + 1) + "</span><span>" + esc(p.title) + '</span><span class="spec">' + esc(p.spec) + "</span>";
+  li.appendChild(b); $("scenes").appendChild(li);
+});
+showPreset(PRESETS.some((p) => "#" + p.id === location.hash) ? location.hash.slice(1) : PRESETS[0].id);
+// The waveform is lettered in the page's own type: draw it again once that has loaded.
+if (document.fonts) document.fonts.ready.then(drawScope).catch(() => {});
+</script>
+</body>
+</html>

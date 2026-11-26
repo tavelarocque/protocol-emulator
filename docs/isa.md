@@ -406,6 +406,14 @@ per line. `pe_sim run FILE.s` runs the program on thread 0:
   each line is `CYCLE HEX` (here the `0x` may be left out), in increasing
   cycle order, and holds until the next line's cycle.
 - `-cycles N` is how long to run (100,000 if not given).
+- `-lines` prints the level on each wire instead of the output register,
+  as `lines CYCLE XX`: inputs as given, open-drain pins as the wired AND.
+  This is what the playground ([`playground.html`](playground.html)) draws.
+- `-bypass 0xNN` sets SYNC_BYPASS: those input pins are read without the
+  two-cycle synchroniser.
+- `-thread1 FILE.s` runs a second program on thread 1, from its own
+  program memory, with `-config1` and `-tx1`; its words print as
+  `rx1 CYCLE WORD`.
 
 It prints one line per event, CYCLE in decimal:
 
