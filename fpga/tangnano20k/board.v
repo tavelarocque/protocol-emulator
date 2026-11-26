@@ -39,12 +39,12 @@ module pe_tangnano20k (
   wire clk = clk27;
 `endif
 
-  wire [7:0] uo_out, uio_out, uio_oe;
+  wire [7:0] uo_out, uio_in, uio_out, uio_oe;
 
   tt_um_tavelarocque_protocol_emulator chip (
       .ui_in  ({5'b0, mosi, cs_n, sck}),
       .uo_out (uo_out),
-      .uio_in (p),
+      .uio_in (uio_in),
       .uio_out(uio_out),
       .uio_oe (uio_oe),
       .ena    (1'b1),
@@ -55,10 +55,15 @@ module pe_tangnano20k (
   assign miso   = uo_out[0];
   assign status = uo_out[6:1];
 
+  // Each protocol pin is a Gowin IOBUF, named outright: Yosys's inference
+  // of tri-states left these pins out of the first build entirely.
+  // OEN is active low.
   genvar i;
   generate
     for (i = 0; i < 8; i = i + 1) begin : pad
-      assign p[i] = uio_oe[i] ? uio_out[i] : 1'bz;
+      wire from_pad;
+      IOBUF buf_i (.O(from_pad), .IO(p[i]), .I(uio_out[i]), .OEN(~uio_oe[i]));
+      assign uio_in[i] = from_pad;
     end
   endgenerate
 

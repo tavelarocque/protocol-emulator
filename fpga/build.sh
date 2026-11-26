@@ -43,3 +43,11 @@ echo "== $name"
 # The whole utilisation table (cells in use only), whatever its spacing.
 sed -n '/Device utilisation/,/^Info: *$/p' "$out/$name.pnr.log" | grep -E "[0-9]+%" | grep -vE "[^0-9]0%$" || true
 grep -E "Max frequency for clock" "$out/$name.pnr.log" | tail -1 || true
+# Every pin of board.v must reach a pad: 20 of them (8 protocol pins,
+# clock, reset, 4 host port pins, 6 status). A pin optimised away would
+# still build, so count them.
+iob=$(sed -n 's/^Info:[[:space:]]*IOB:[[:space:]]*\([0-9]*\)\/.*/\1/p' "$out/$name.pnr.log" | tail -1)
+if [ "$iob" != 20 ]; then
+  echo "FAIL: $iob pads in use, 20 expected" >&2
+  exit 1
+fi
