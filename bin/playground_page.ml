@@ -872,6 +872,17 @@ let page ~template ~model ~fonts ~presets =
     ~f:fill
 ;;
 
+(* js_of_ocaml ends its output with a "//# buildInfo:" comment naming its
+   version, and the same release names itself "6.2.0" or "6.2.0+6.2.0"
+   depending on how opam installed it. The comment does nothing in the page,
+   so leave it out: the committed page must not depend on the install. *)
+let without_build_stamp js =
+  String.split_lines js
+  |> List.filter ~f:(fun l -> not (String.is_prefix l ~prefix:"//# buildInfo:"))
+  |> String.concat ~sep:"\n"
+  |> fun s -> s ^ "\n"
+;;
+
 let () =
   match Sys.get_argv () with
   | [| _; "presets"; dir; tests; tx_file; run_args |] ->
@@ -882,7 +893,7 @@ let () =
     print_string
       (page
          ~template:(In_channel.read_all template)
-         ~model:(In_channel.read_all model)
+         ~model:(without_build_stamp (In_channel.read_all model))
          ~fonts:(In_channel.read_all fonts)
          ~presets:(String.strip (In_channel.read_all presets)))
   | _ ->
