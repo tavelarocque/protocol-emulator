@@ -1,0 +1,1 @@
+-config clkdiv=40,sideset_base=0,sideset_count=1,out_msb_first=1,threshold=16 -mode 0=pp

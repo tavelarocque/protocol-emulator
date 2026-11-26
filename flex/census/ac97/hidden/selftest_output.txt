@@ -1,0 +1,117 @@
+ok    interface: the sheet's example gives the words printed in the sheet (0x0102, 0x0808, 0x1234, 0xEDCB, 0x01FC, 0x0000, 0x7FFF, 0x8000)
+ok    interface: the sheet's example gives the slot values in the sheet's table
+ok    interface: a frame without a command is CTRL 0, DATA 0, tag 0x9800, slots 1 and 2 zero
+ok    the sheet states the host-interface rule
+
+waveform    seed expected judge  cases   pins    decoder 
+                                 failed  check   check   what it is
+none        1    pass     pass   0/13    -       -       ideal: every change on a rising edge of BIT_CLK, first frame early
+ok    seed 1: RATE bytes=8 cycles=642, as the stand-in's own output gives
+none        2    pass     pass   0/13    -       -       ideal: every change on a rising edge of BIT_CLK, first frame early
+ok    seed 2: RATE bytes=48 cycles=5856, as the stand-in's own output gives
+none        3    pass     pass   0/13    -       -       ideal: every change on a rising edge of BIT_CLK, first frame early
+ok    seed 3: RATE bytes=80 cycles=9983, as the stand-in's own output gives
+hold1       1    pass     pass   0/13    -       -       every change 1 cycle after the falling edge before (the hold limit)
+hold1       2    pass     pass   0/13    -       -       every change 1 cycle after the falling edge before (the hold limit)
+hold1       3    pass     pass   0/13    -       -       every change 1 cycle after the falling edge before (the hold limit)
+setup1      1    pass     pass   0/13    -       -       every change 1 cycle before the falling edge that samples it (the setup limit)
+setup1      2    pass     pass   0/13    -       -       every change 1 cycle before the falling edge that samples it (the setup limit)
+setup1      3    pass     pass   0/13    -       -       every change 1 cycle before the falling edge that samples it (the setup limit)
+first255    1    pass     pass   0/13    -       -       SYNC first sampled high at falling edge 255 (the latest allowed)
+first255    2    pass     pass   0/13    -       -       SYNC first sampled high at falling edge 255 (the latest allowed)
+first255    3    pass     pass   0/13    -       -       SYNC first sampled high at falling edge 255 (the latest allowed)
+low40       1    pass     pass   0/13    -       -       SYNC and SDATA_OUT driven low only at cycle 40 (the latest allowed)
+low40       2    pass     pass   0/13    -       -       SYNC and SDATA_OUT driven low only at cycle 40 (the latest allowed)
+low40       3    pass     pass   0/13    -       -       SYNC and SDATA_OUT driven low only at cycle 40 (the latest allowed)
+glitchdata  1    pass     pass   0/13    -       -       SDATA_OUT pulses for one cycle between two falling edges (never sampled)
+glitchdata  2    pass     pass   0/13    -       -       SDATA_OUT pulses for one cycle between two falling edges (never sampled)
+glitchdata  3    pass     pass   0/13    -       -       SDATA_OUT pulses for one cycle between two falling edges (never sampled)
+flipbit     1    fail     fail   13/13   -       objects one bit of the last frame's right sample inverted
+        case 0 (no command, silence: 1 frame): FAIL: decoder: frame 0 slot 4 (right) decoded as 0x400, wanted 0x0
+flipbit     2    fail     fail   13/13   -       objects one bit of the last frame's right sample inverted
+flipbit     3    fail     fail   13/13   -       objects one bit of the last frame's right sample inverted
+lsbfirst    1    fail     fail   13/13   -       objects every slot sent least significant bit first
+        case 0 (no command, silence: 1 frame): FAIL: decoder: frame 0 slot 0 (tag) decoded as 0x19, wanted 0x9800
+lsbfirst    2    fail     fail   13/13   -       objects every slot sent least significant bit first
+lsbfirst    3    fail     fail   13/13   -       objects every slot sent least significant bit first
+noshift     1    fail     fail   12/13   -       objects 16-bit values put in the low 16 bits of their 20-bit slots
+        case 1 (the task sheet's example: 2 frames): FAIL: decoder: the decoder reported: reserved bits error at sample 478; decoder: frame 0 slot 2 (command data) decoded as 0x808, wanted 0x8080
+noshift     2    fail     fail   12/13   -       objects 16-bit values put in the low 16 bits of their 20-bit slots
+noshift     3    fail     fail   12/13   -       objects 16-bit values put in the low 16 bits of their 20-bit slots
+tagread     1    fail     fail   10/13   -       objects a read marks slot 2 valid in the tag
+        case 1 (the task sheet's example: 2 frames): FAIL: decoder: frame 1 slot 0 (tag) decoded as 0xf800, wanted 0xd800
+tagread     2    fail     fail   7/13    -       objects a read marks slot 2 valid in the tag
+tagread     3    fail     fail   8/13    -       objects a read marks slot 2 valid in the tag
+tagnocmd    1    fail     fail   5/13    -       objects a frame without a command marks slots 1 and 2 valid
+        case 0 (no command, silence: 1 frame): FAIL: decoder: frame 0 slot 0 (tag) decoded as 0xf800, wanted 0x9800
+tagnocmd    2    fail     fail   8/13    -       objects a frame without a command marks slots 1 and 2 valid
+tagnocmd    3    fail     fail   8/13    -       objects a frame without a command marks slots 1 and 2 valid
+atfall      1    fail     fail   13/13   objects -       one SDATA_OUT change in the same cycle as the falling edge that samples it
+        case 0 (no command, silence: 1 frame): FAIL: pins: SDATA_OUT changes in cycle 224, the cycle BIT_CLK falls in (setup and hold)
+atfall      2    fail     fail   13/13   objects -       one SDATA_OUT change in the same cycle as the falling edge that samples it
+atfall      3    fail     fail   13/13   objects -       one SDATA_OUT change in the same cycle as the falling edge that samples it
+syncatfall  1    fail     fail   13/13   objects -       SYNC rises in the same cycle as a falling edge
+        case 0 (no command, silence: 1 frame): FAIL: pins: SYNC changes in cycle 220, the cycle BIT_CLK falls in (setup and hold)
+syncatfall  2    fail     fail   13/13   objects -       SYNC rises in the same cycle as a falling edge
+syncatfall  3    fail     fail   13/13   objects -       SYNC rises in the same cycle as a falling edge
+sync15      1    fail     fail   13/13   objects -       SYNC high for 15 bit times, not 16
+        case 0 (no command, silence: 1 frame): FAIL: pins: SYNC is 0 at falling edge 18 (frame 0, bit time 15 of its period), wanted 1
+sync15      2    fail     fail   13/13   objects -       SYNC high for 15 bit times, not 16
+sync15      3    fail     fail   13/13   objects -       SYNC high for 15 bit times, not 16
+sync17      1    fail     fail   13/13   objects -       SYNC high for 17 bit times, not 16
+        case 0 (no command, silence: 1 frame): FAIL: pins: SYNC is 1 at falling edge 19 (frame 0, bit time 16 of its period), wanted 0
+sync17      2    fail     fail   13/13   objects -       SYNC high for 17 bit times, not 16
+sync17      3    fail     fail   13/13   objects -       SYNC high for 17 bit times, not 16
+gap1        1    fail     fail   7/13    objects -       one idle bit between two frames (a 257-bit frame period)
+        case 1 (the task sheet's example: 2 frames): FAIL: pins: SYNC is 0 at falling edge 259 (frame 1, bit time 0 of its period), wanted 1
+gap1        2    fail     fail   9/13    objects -       one idle bit between two frames (a 257-bit frame period)
+gap1        3    fail     fail   9/13    objects -       one idle bit between two frames (a 257-bit frame period)
+first256    1    fail     fail   13/13   objects -       SYNC first sampled high at falling edge 256
+        case 0 (no command, silence: 1 frame): FAIL: pins: SYNC is first high at falling edge 256, allowed 1 to 255
+first256    2    fail     fail   13/13   objects -       SYNC first sampled high at falling edge 256
+first256    3    fail     fail   13/13   objects -       SYNC first sampled high at falling edge 256
+first0      1    fail     fail   13/13   objects objects SYNC already high at the very first falling edge
+        case 0 (no command, silence: 1 frame): FAIL: pins: SYNC is first high at falling edge 0, allowed 1 to 255; decoder: decoded 0 slots (0 whole frames), wanted 13 (1 frames)
+first0      2    fail     fail   13/13   objects objects SYNC already high at the very first falling edge
+first0      3    fail     fail   13/13   objects objects SYNC already high at the very first falling edge
+low41       1    fail     fail   13/13   objects -       SYNC and SDATA_OUT driven low only at cycle 41
+        case 0 (no command, silence: 1 frame): FAIL: pins: SYNC is not low at cycle 40; pins: SDATA_OUT is not low at cycle 40
+low41       2    fail     fail   13/13   objects -       SYNC and SDATA_OUT driven low only at cycle 41
+low41       3    fail     fail   13/13   objects -       SYNC and SDATA_OUT driven low only at cycle 41
+idledata    1    fail     fail   13/13   objects -       SDATA_OUT high at one falling edge before the first frame
+        case 0 (no command, silence: 1 frame): FAIL: pins: SDATA_OUT is high at falling edge 1, which carries no frame bit
+idledata    2    fail     fail   13/13   objects -       SDATA_OUT high at one falling edge before the first frame
+idledata    3    fail     fail   13/13   objects -       SDATA_OUT high at one falling edge before the first frame
+taildata    1    fail     fail   13/13   objects -       SDATA_OUT high at one falling edge after the last frame
+        case 0 (no command, silence: 1 frame): FAIL: pins: SDATA_OUT is high at falling edge 279, which carries no frame bit
+taildata    2    fail     fail   13/13   objects -       SDATA_OUT high at one falling edge after the last frame
+taildata    3    fail     fail   13/13   objects -       SDATA_OUT high at one falling edge after the last frame
+glitchsync  1    fail     fail   13/13   objects -       SYNC pulses for one cycle between two falling edges, after the last frame
+        case 0 (no command, silence: 1 frame): FAIL: pins: SYNC changes 5 times, wanted 3 (low once at the start, then rise and fall once a frame)
+glitchsync  2    fail     fail   13/13   objects -       SYNC pulses for one cycle between two falling edges, after the last frame
+glitchsync  3    fail     fail   13/13   objects -       SYNC pulses for one cycle between two falling edges, after the last frame
+extraframe  1    fail     fail   13/13   objects objects one more frame, all zeros, after the last
+        case 0 (no command, silence: 1 frame): FAIL: pins: SYNC is 1 at falling edge 259 (frame 1, bit time 0 of its period), wanted 0; pins: SDATA_OUT is high at falling edge 260, which carries no frame bit; decoder: decoded 26 slots (2 
+extraframe  2    fail     fail   13/13   objects objects one more frame, all zeros, after the last
+extraframe  3    fail     fail   13/13   objects objects one more frame, all zeros, after the last
+dropframe   1    fail     fail   13/13   objects objects the last frame is not sent
+        case 0 (no command, silence: 1 frame): FAIL: pins: SYNC is never high at a falling edge of BIT_CLK; decoder: decoded 0 slots (0 whole frames), wanted 13 (1 frames)
+dropframe   2    fail     fail   13/13   objects objects the last frame is not sent
+dropframe   3    fail     fail   13/13   objects objects the last frame is not sent
+
+ok    run_args.txt '-mode 1=pp -mode 2=pp\n': accepted
+ok    run_args.txt '-mo 1=pp -mo 2=pp -config autopull=1\n': accepted
+ok    run_args.txt '-mode 0=in -mode 1=pp -mode 2=pp\n': accepted
+ok    run_args.txt '-mode 1=pp -mode 2=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 1=pp -mode 2=pp -stimulus s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 1=pp -mode 2=pp -s s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 1=pp -mode 2=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 1=pp -mode 2=pp -inputs 01\n': setup: FAIL: run_args.txt must not give -inputs: the test does
+ok    run_args.txt '-mode 1=pp -mode 2=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 1=pp\n-mode 2=pp\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode 1=pp\n': setup: FAIL: run_args.txt must make P1 (SYNC) and P2 (SDATA_OUT) push-pull
+ok    run_args.txt '-mode 1=pp -mode 2=od\n': setup: FAIL: run_args.txt must make P1 (SYNC) and P2 (SDATA_OUT) push-pull
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp\n': setup: FAIL: run_args.txt must leave P0 (BIT_CLK) an input
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (no command, silence: 1 frame): FAIL: pins: SYNC is not low at cycle 40; pins: SDATA_OUT is not low at cycle 40; decoder: decoded 0 slots (0 wh)
+SELFTEST PASS

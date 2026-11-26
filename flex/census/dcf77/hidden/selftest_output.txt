@@ -1,0 +1,109 @@
+ok    interface: the sheet's example gives 0x0002, 0x0001, 0x0000, 0x0000, and the sheet says so
+
+result        seed expected judge  failed  what it is
+none          1    pass     pass   0/15    ideal: each word pushed 1 cycle after its pulse's falling edge
+ok    seed 1: RATE bytes=16 cycles=14123695, as the last case's own stimulus gives
+none          2    pass     pass   0/15    ideal: each word pushed 1 cycle after its pulse's falling edge
+ok    seed 2: RATE bytes=9 cycles=9713923, as the last case's own stimulus gives
+none          3    pass     pass   0/15    ideal: each word pushed 1 cycle after its pulse's falling edge
+ok    seed 3: RATE bytes=16 cycles=15600382, as the last case's own stimulus gives
+none          7    pass     pass   0/15    ideal: each word pushed 1 cycle after its pulse's falling edge
+ok    seed 7: RATE bytes=9 cycles=9409657, as the last case's own stimulus gives
+none          11   pass     pass   0/15    ideal: each word pushed 1 cycle after its pulse's falling edge
+ok    seed 11: RATE bytes=9 cycles=10207699, as the last case's own stimulus gives
+atrise        1    pass     pass   0/15    each word pushed at its pulse's rising edge (the earliest allowed)
+atrise        2    pass     pass   0/15    each word pushed at its pulse's rising edge (the earliest allowed)
+atrise        3    pass     pass   0/15    each word pushed at its pulse's rising edge (the earliest allowed)
+atrise        7    pass     pass   0/15    each word pushed at its pulse's rising edge (the earliest allowed)
+atrise        11   pass     pass   0/15    each word pushed at its pulse's rising edge (the earliest allowed)
+deadline      1    pass     pass   0/15    each word pushed 500 ms after its pulse's rising edge (the latest allowed)
+deadline      2    pass     pass   0/15    each word pushed 500 ms after its pulse's rising edge (the latest allowed)
+deadline      3    pass     pass   0/15    each word pushed 500 ms after its pulse's rising edge (the latest allowed)
+deadline      7    pass     pass   0/15    each word pushed 500 ms after its pulse's rising edge (the latest allowed)
+deadline      11   pass     pass   0/15    each word pushed 500 ms after its pulse's rising edge (the latest allowed)
+late501       1    fail     fail   15/15   one word pushed 501 ms after its pulse's rising edge
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: word 30 pushed at cycle 4103054, 501.00 ms after its pulse's rising edge (allowed 0 to 500 ms)
+late501       2    fail     fail   15/15   one word pushed 501 ms after its pulse's rising edge
+late501       3    fail     fail   15/15   one word pushed 501 ms after its pulse's rising edge
+late501       7    fail     fail   15/15   one word pushed 501 ms after its pulse's rising edge
+late501       11   fail     fail   15/15   one word pushed 501 ms after its pulse's rising edge
+flipbit       1    fail     fail   15/15   the value of one bit inverted
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: word 58 is 0x0001, wanted 0x0000 (a 0 bit)
+flipbit       2    fail     fail   15/15   the value of one bit inverted
+flipbit       3    fail     fail   15/15   the value of one bit inverted
+flipbit       7    fail     fail   15/15   the value of one bit inverted
+flipbit       11   fail     fail   15/15   the value of one bit inverted
+noflag        1    fail     fail   15/15   the first-of-minute flag left off the last minute's bit 0
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: word 59 is 0x0000, wanted 0x0002 (first pulse after a marker)
+noflag        2    fail     fail   15/15   the first-of-minute flag left off the last minute's bit 0
+noflag        3    fail     fail   15/15   the first-of-minute flag left off the last minute's bit 0
+noflag        7    fail     fail   15/15   the first-of-minute flag left off the last minute's bit 0
+noflag        11   fail     fail   15/15   the first-of-minute flag left off the last minute's bit 0
+flagmore      1    fail     fail   13/15   the first-of-minute flag also set on the pulse after bit 0
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: word 60 is 0x0003, wanted 0x0001 (a 1 bit)
+flagmore      2    fail     fail   13/15   the first-of-minute flag also set on the pulse after bit 0
+flagmore      3    fail     fail   13/15   the first-of-minute flag also set on the pulse after bit 0
+flagmore      7    fail     fail   13/15   the first-of-minute flag also set on the pulse after bit 0
+flagmore      11   fail     fail   13/15   the first-of-minute flag also set on the pulse after bit 0
+prefix        1    fail     fail   15/15   the pulses before the first marker reported too
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: word 0 is 0x0000, wanted 0x0002 (first pulse after a marker); rx: 70 words pushed, wanted 61
+prefix        2    fail     fail   15/15   the pulses before the first marker reported too
+prefix        3    fail     fail   15/15   the pulses before the first marker reported too
+prefix        7    fail     fail   15/15   the pulses before the first marker reported too
+prefix        11   fail     fail   15/15   the pulses before the first marker reported too
+threshold200  1    fail     fail   15/15   a pulse counted as a 1 only from 200 ms (1 bits of 170 to 199 ms read as 0)
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: word 5 is 0x0000, wanted 0x0001 (a 1 bit)
+threshold200  2    fail     fail   15/15   a pulse counted as a 1 only from 200 ms (1 bits of 170 to 199 ms read as 0)
+threshold200  3    fail     fail   15/15   a pulse counted as a 1 only from 200 ms (1 bits of 170 to 199 ms read as 0)
+threshold200  7    fail     fail   15/15   a pulse counted as a 1 only from 200 ms (1 bits of 170 to 199 ms read as 0)
+threshold200  11   fail     fail   15/15   a pulse counted as a 1 only from 200 ms (1 bits of 170 to 199 ms read as 0)
+threshold120  1    fail     fail   15/15   a pulse counted as a 1 from 120 ms (0 bits of 120 to 130 ms read as 1)
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: word 9 is 0x0001, wanted 0x0000 (a 0 bit)
+threshold120  2    fail     fail   15/15   a pulse counted as a 1 from 120 ms (0 bits of 120 to 130 ms read as 1)
+threshold120  3    fail     fail   15/15   a pulse counted as a 1 from 120 ms (0 bits of 120 to 130 ms read as 1)
+threshold120  7    fail     fail   15/15   a pulse counted as a 1 from 120 ms (0 bits of 120 to 130 ms read as 1)
+threshold120  11   fail     fail   15/15   a pulse counted as a 1 from 120 ms (0 bits of 120 to 130 ms read as 1)
+count59       1    fail     fail   2/15    minutes found by counting 59 pulses after the first marker, not by the gap
+        case 5 (a pulse the receiver missed: 140 pulses, 121 words): FAIL: rx: word 30 is 0x0000, wanted 0x0002 (first pulse after a marker)
+count59       2    fail     fail   3/15    minutes found by counting 59 pulses after the first marker, not by the gap
+count59       3    fail     fail   2/15    minutes found by counting 59 pulses after the first marker, not by the gap
+count59       7    fail     fail   3/15    minutes found by counting 59 pulses after the first marker, not by the gap
+count59       11   fail     fail   5/15    minutes found by counting 59 pulses after the first marker, not by the gap
+dropword      1    fail     fail   15/15   the last word not pushed
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: 60 words pushed, wanted 61
+dropword      2    fail     fail   15/15   the last word not pushed
+dropword      3    fail     fail   15/15   the last word not pushed
+dropword      7    fail     fail   15/15   the last word not pushed
+dropword      11   fail     fail   15/15   the last word not pushed
+extraword     1    fail     fail   15/15   one word too many, after the last
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: 62 words pushed, wanted 61
+extraword     2    fail     fail   15/15   one word too many, after the last
+extraword     3    fail     fail   15/15   one word too many, after the last
+extraword     7    fail     fail   15/15   one word too many, after the last
+extraword     11   fail     fail   15/15   one word too many, after the last
+dupword       1    fail     fail   15/15   one word pushed twice
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: word 31 is 0x0000, wanted 0x0001 (a 1 bit); rx: 62 words pushed, wanted 61
+dupword       2    fail     fail   15/15   one word pushed twice
+dupword       3    fail     fail   15/15   one word pushed twice
+dupword       7    fail     fail   15/15   one word pushed twice
+dupword       11   fail     fail   15/15   one word pushed twice
+swap          1    fail     fail   15/15   two neighbouring words pushed in the wrong order
+        case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: word 0 is 0x0001, wanted 0x0002 (first pulse after a marker)
+swap          2    fail     fail   15/15   two neighbouring words pushed in the wrong order
+swap          3    fail     fail   15/15   two neighbouring words pushed in the wrong order
+swap          7    fail     fail   15/15   two neighbouring words pushed in the wrong order
+swap          11   fail     fail   15/15   two neighbouring words pushed in the wrong order
+
+ok    run_args.txt '-mode 0=in -config clkdiv=4\n': accepted
+ok    run_args.txt '\n': accepted
+ok    run_args.txt '-mo 0=in\n': accepted
+ok    run_args.txt '-mode 0=in -stimulus other.txt\n': setup: FAIL: run_args.txt must not give -stimulus
+ok    run_args.txt '-mode 0=in -s other.txt\n': setup: FAIL: run_args.txt must not give -stimulus
+ok    run_args.txt '-mode 0=in -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles
+ok    run_args.txt '-mode 0=in -inputs ff\n': setup: FAIL: run_args.txt must not give -inputs
+ok    run_args.txt '-mode 0=in -tx words.txt\n': setup: FAIL: run_args.txt must not give -tx
+ok    run_args.txt '-mode 0=in -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=in\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (joined at bit 50: 70 pulses, 61 words): FAIL: rx: 0 words pushed, wanted 61)
+SELFTEST PASS

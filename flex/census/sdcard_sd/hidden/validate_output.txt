@@ -1,0 +1,163 @@
+ok    the fixed case 'the task sheet's example' is the sheet's run
+ok    sheet example TX words: 0x0000, 0x0000, 0x0000, 0x0108, 0x0000, 0x01AA
+ok    sheet example RX words: 0x0008, 0x0000, 0x01AA
+ok    sheet example schedule: edges 80, 136, 188; edge 80 at cycle 3400
+ok    CRC example in the sheet: 40 00 00 00 00 95
+ok    CRC example in the sheet: 48 00 00 01 AA 87
+ok    CRC example in the sheet: 51 00 00 00 00 55
+ok    CRC example in the sheet: 08 00 00 01 AA 13
+ok    the two CRC7 codes (LFSR in accept.py, long division in ideal.py) agree
+
+waveform   seed expected judge  failed  what it is / first objection
+none       1    pass     pass   0/14    ideal: CMD changes 10 cycles into the low half; clock stops 3 clocks after the 8 required
+ok    seed 1: RATE bytes=106 cycles=56440, as the stand-in's own pin changes give
+none       2    pass     pass   0/14    ideal: CMD changes 10 cycles into the low half; clock stops 3 clocks after the 8 required
+ok    seed 2: RATE bytes=10 cycles=9000, as the stand-in's own pin changes give
+none       3    pass     pass   0/14    ideal: CMD changes 10 cycles into the low half; clock stops 3 clocks after the 8 required
+ok    seed 3: RATE bytes=70 cycles=43280, as the stand-in's own pin changes give
+none       7    pass     pass   0/14    ideal: CMD changes 10 cycles into the low half; clock stops 3 clocks after the 8 required
+ok    seed 7: RATE bytes=20 cycles=15280, as the stand-in's own pin changes give
+none       11   pass     pass   0/14    ideal: CMD changes 10 cycles into the low half; clock stops 3 clocks after the 8 required
+ok    seed 11: RATE bytes=10 cycles=9560, as the stand-in's own pin changes give
+jitter2    1    pass     pass   0/14    every falling edge 2 cycles late and every rising edge 2 early (the limit)
+jitter2    2    pass     pass   0/14    every falling edge 2 cycles late and every rising edge 2 early (the limit)
+jitter2    3    pass     pass   0/14    every falling edge 2 cycles late and every rising edge 2 early (the limit)
+jitter2    7    pass     pass   0/14    every falling edge 2 cycles late and every rising edge 2 early (the limit)
+jitter2    11   pass     pass   0/14    every falling edge 2 cycles late and every rising edge 2 early (the limit)
+cmdearly   1    pass     pass   0/14    CMD changes 1 cycle after the ideal falling edge (the earliest allowed)
+cmdearly   2    pass     pass   0/14    CMD changes 1 cycle after the ideal falling edge (the earliest allowed)
+cmdearly   3    pass     pass   0/14    CMD changes 1 cycle after the ideal falling edge (the earliest allowed)
+cmdearly   7    pass     pass   0/14    CMD changes 1 cycle after the ideal falling edge (the earliest allowed)
+cmdearly   11   pass     pass   0/14    CMD changes 1 cycle after the ideal falling edge (the earliest allowed)
+cmdlate    1    pass     pass   0/14    CMD changes 1 cycle before the ideal rising edge (the latest allowed)
+cmdlate    2    pass     pass   0/14    CMD changes 1 cycle before the ideal rising edge (the latest allowed)
+cmdlate    3    pass     pass   0/14    CMD changes 1 cycle before the ideal rising edge (the latest allowed)
+cmdlate    7    pass     pass   0/14    CMD changes 1 cycle before the ideal rising edge (the latest allowed)
+cmdlate    11   pass     pass   0/14    CMD changes 1 cycle before the ideal rising edge (the latest allowed)
+runon      1    pass     pass   0/14    the clock keeps running to the end of the run
+runon      2    pass     pass   0/14    the clock keeps running to the end of the run
+runon      3    pass     pass   0/14    the clock keeps running to the end of the run
+runon      7    pass     pass   0/14    the clock keeps running to the end of the run
+runon      11   pass     pass   0/14    the clock keeps running to the end of the run
+stopnow    1    pass     pass   0/14    the clock stops high, on the 8th rising edge after the last end bit
+stopnow    2    pass     pass   0/14    the clock stops high, on the 8th rising edge after the last end bit
+stopnow    3    pass     pass   0/14    the clock stops high, on the 8th rising edge after the last end bit
+stopnow    7    pass     pass   0/14    the clock stops high, on the 8th rising edge after the last end bit
+stopnow    11   pass     pass   0/14    the clock stops high, on the 8th rising edge after the last end bit
+flipbit    1    fail     fail   14/14   cmd: CMD changes to 1 at cycle 4430, before rising edge 106, where no change belongs; cmd:
+flipbit    2    fail     fail   14/14   cmd: CMD changes to 1 at cycle 4430, before rising edge 106, where no change belongs; cmd:
+flipbit    3    fail     fail   14/14   cmd: CMD changes to 1 at cycle 4430, before rising edge 106, where no change belongs; cmd:
+flipbit    7    fail     fail   14/14   cmd: CMD changes to 1 at cycle 4430, before rising edge 106, where no change belongs; cmd:
+flipbit    11   fail     fail   14/14   cmd: CMD changes to 1 at cycle 4430, before rising edge 106, where no change belongs; cmd:
+badcrc     1    fail     fail   14/14   cmd: CMD does not change before rising edge 126 (wanted 0 there): 2 changes missing; decod
+badcrc     2    fail     fail   14/14   cmd: CMD does not change before rising edge 126 (wanted 0 there): 2 changes missing; decod
+badcrc     3    fail     fail   14/14   cmd: CMD does not change before rising edge 126 (wanted 0 there): 2 changes missing; decod
+badcrc     7    fail     fail   14/14   cmd: CMD does not change before rising edge 126 (wanted 0 there): 2 changes missing; decod
+badcrc     11   fail     fail   14/14   cmd: CMD does not change before rising edge 126 (wanted 0 there): 2 changes missing; decod
+trans0     1    fail     fail   14/14   cmd: CMD does not change before rising edge 81 (wanted 1 there): 8 changes missing; decode
+trans0     2    fail     fail   14/14   cmd: CMD does not change before rising edge 81 (wanted 1 there): 8 changes missing; decode
+trans0     3    fail     fail   14/14   cmd: CMD does not change before rising edge 81 (wanted 1 there): 8 changes missing; decode
+trans0     7    fail     fail   14/14   cmd: CMD does not change before rising edge 81 (wanted 1 there): 8 changes missing; decode
+trans0     11   fail     fail   14/14   cmd: CMD does not change before rising edge 81 (wanted 1 there): 8 changes missing; decode
+end0       1    fail     fail   14/14   cmd: CMD changes to 1 at cycle 5310, before rising edge 128, where no change belongs; cmd:
+end0       2    fail     fail   14/14   cmd: CMD changes to 1 at cycle 5310, before rising edge 128, where no change belongs; cmd:
+end0       3    fail     fail   14/14   cmd: CMD changes to 1 at cycle 5310, before rising edge 128, where no change belongs; cmd:
+end0       7    fail     fail   14/14   cmd: CMD changes to 1 at cycle 5310, before rising edge 128, where no change belongs; cmd:
+end0       11   fail     fail   14/14   cmd: CMD changes to 1 at cycle 5310, before rising edge 128, where no change belongs; cmd:
+late3      1    fail     fail   14/14   clock: CLK edge 201 (rising edge 100) at cycle 4203, ideal 4200 (limit +-2)
+late3      2    fail     fail   14/14   clock: CLK edge 201 (rising edge 100) at cycle 4203, ideal 4200 (limit +-2)
+late3      3    fail     fail   14/14   clock: CLK edge 201 (rising edge 100) at cycle 4203, ideal 4200 (limit +-2)
+late3      7    fail     fail   14/14   clock: CLK edge 201 (rising edge 100) at cycle 4203, ideal 4200 (limit +-2)
+late3      11   fail     fail   14/14   clock: CLK edge 201 (rising edge 100) at cycle 4203, ideal 4200 (limit +-2)
+slow41     1    fail     fail   14/14   clock: CLK edge 6 (falling) at cycle 303, ideal 300 (limit +-2)
+slow41     2    fail     fail   14/14   clock: CLK edge 6 (falling) at cycle 303, ideal 300 (limit +-2)
+slow41     3    fail     fail   14/14   clock: CLK edge 6 (falling) at cycle 303, ideal 300 (limit +-2)
+slow41     7    fail     fail   14/14   clock: CLK edge 6 (falling) at cycle 303, ideal 300 (limit +-2)
+slow41     11   fail     fail   14/14   clock: CLK edge 6 (falling) at cycle 303, ideal 300 (limit +-2)
+cmdatfall  1    fail     fail   14/14   cmd: CMD changes at cycle 3380 while CLK is high in the cycle before; cmd: CMD changes at 
+cmdatfall  2    fail     fail   14/14   cmd: CMD changes at cycle 3380 while CLK is high in the cycle before; cmd: CMD changes at 
+cmdatfall  3    fail     fail   14/14   cmd: CMD changes at cycle 3380 while CLK is high in the cycle before; cmd: CMD changes at 
+cmdatfall  7    fail     fail   14/14   cmd: CMD changes at cycle 3380 while CLK is high in the cycle before; cmd: CMD changes at 
+cmdatfall  11   fail     fail   14/14   cmd: CMD changes at cycle 3380 while CLK is high in the cycle before; cmd: CMD changes at 
+cmdatrise  1    fail     fail   14/14   cmd: CMD changes at cycle 3400 while CLK is high; cmd: CMD changes at cycle 3440 while CLK
+cmdatrise  2    fail     fail   14/14   cmd: CMD changes at cycle 3400 while CLK is high; cmd: CMD changes at cycle 3440 while CLK
+cmdatrise  3    fail     fail   14/14   cmd: CMD changes at cycle 3400 while CLK is high; cmd: CMD changes at cycle 3440 while CLK
+cmdatrise  7    fail     fail   14/14   cmd: CMD changes at cycle 3400 while CLK is high; cmd: CMD changes at cycle 3440 while CLK
+cmdatrise  11   fail     fail   14/14   cmd: CMD changes at cycle 3400 while CLK is high; cmd: CMD changes at cycle 3440 while CLK
+init74     1    fail     fail   14/14   clock: CLK stopped after 133 rising edges; the schedule needs 136 (to 8 after the last end
+init74     2    fail     fail   14/14   clock: CLK stopped after 133 rising edges; the schedule needs 136 (to 8 after the last end
+init74     3    fail     fail   14/14   clock: CLK stopped after 133 rising edges; the schedule needs 136 (to 8 after the last end
+init74     7    fail     fail   14/14   clock: CLK stopped after 133 rising edges; the schedule needs 136 (to 8 after the last end
+init74     11   fail     fail   14/14   clock: CLK stopped after 133 rising edges; the schedule needs 136 (to 8 after the last end
+gap7       1    fail     fail   12/14   cmd: CMD changes to 0 at cycle 5590, before rising edge 135, where no change belongs; cmd:
+gap7       2    fail     fail   11/14   cmd: CMD changes to 0 at cycle 5590, before rising edge 135, where no change belongs; cmd:
+gap7       3    fail     fail   12/14   cmd: CMD changes to 0 at cycle 5590, before rising edge 135, where no change belongs; cmd:
+gap7       7    fail     fail   13/14   cmd: CMD changes to 0 at cycle 5590, before rising edge 135, where no change belongs; cmd:
+gap7       11   fail     fail   12/14   cmd: CMD changes to 0 at cycle 5590, before rising edge 135, where no change belongs; cmd:
+gap9       1    fail     fail   12/14   cmd: CMD changes to 0 at cycle 5670, before rising edge 137, where no change belongs; cmd:
+gap9       2    fail     fail   11/14   cmd: CMD changes to 0 at cycle 5670, before rising edge 137, where no change belongs; cmd:
+gap9       3    fail     fail   12/14   cmd: CMD changes to 0 at cycle 5670, before rising edge 137, where no change belongs; cmd:
+gap9       7    fail     fail   13/14   cmd: CMD changes to 0 at cycle 5670, before rising edge 137, where no change belongs; cmd:
+gap9       11   fail     fail   12/14   cmd: CMD changes to 0 at cycle 5670, before rising edge 137, where no change belongs; cmd:
+earlystop  1    fail     fail   14/14   clock: CLK stopped after 135 rising edges; the schedule needs 136 (to 8 after the last end
+earlystop  2    fail     fail   14/14   clock: CLK stopped after 135 rising edges; the schedule needs 136 (to 8 after the last end
+earlystop  3    fail     fail   14/14   clock: CLK stopped after 135 rising edges; the schedule needs 136 (to 8 after the last end
+earlystop  7    fail     fail   14/14   clock: CLK stopped after 135 rising edges; the schedule needs 136 (to 8 after the last end
+earlystop  11   fail     fail   14/14   clock: CLK stopped after 135 rising edges; the schedule needs 136 (to 8 after the last end
+glitch     1    fail     fail   14/14   cmd: CMD changes to 0 at cycle 5425, before rising edge 131, where no change belongs; cmd:
+glitch     2    fail     fail   14/14   cmd: CMD changes to 0 at cycle 5425, before rising edge 131, where no change belongs; cmd:
+glitch     3    fail     fail   14/14   cmd: CMD changes to 0 at cycle 5425, before rising edge 131, where no change belongs; cmd:
+glitch     7    fail     fail   14/14   cmd: CMD changes to 0 at cycle 5425, before rising edge 131, where no change belongs; cmd:
+glitch     11   fail     fail   14/14   cmd: CMD changes to 0 at cycle 5425, before rising edge 131, where no change belongs; cmd:
+rxflip     1    fail     fail   12/14   rx: RX word 2 is 0x00aa, wanted 0x01aa
+rxflip     2    fail     fail   12/14   rx: RX word 2 is 0x00aa, wanted 0x01aa
+rxflip     3    fail     fail   12/14   rx: RX word 2 is 0x00aa, wanted 0x01aa
+rxflip     7    fail     fail   12/14   rx: RX word 2 is 0x00aa, wanted 0x01aa
+rxflip     11   fail     fail   12/14   rx: RX word 2 is 0x00aa, wanted 0x01aa
+rxdrop     1    fail     fail   12/14   rx: pushed 2 RX words, wanted 3
+rxdrop     2    fail     fail   12/14   rx: pushed 2 RX words, wanted 3
+rxdrop     3    fail     fail   12/14   rx: pushed 2 RX words, wanted 3
+rxdrop     7    fail     fail   12/14   rx: pushed 2 RX words, wanted 3
+rxdrop     11   fail     fail   12/14   rx: pushed 2 RX words, wanted 3
+rxextra    1    fail     fail   14/14   rx: pushed 1 RX words, wanted 0
+rxextra    2    fail     fail   14/14   rx: pushed 1 RX words, wanted 0
+rxextra    3    fail     fail   14/14   rx: pushed 1 RX words, wanted 0
+rxextra    7    fail     fail   14/14   rx: pushed 1 RX words, wanted 0
+rxextra    11   fail     fail   14/14   rx: pushed 1 RX words, wanted 0
+fixedncr   1    fail     fail   12/14   rx: RX word 0 is 0x0021, wanted 0x0008
+fixedncr   2    fail     fail   12/14   rx: RX word 0 is 0x0021, wanted 0x0008
+fixedncr   3    fail     fail   12/14   rx: RX word 0 is 0x0021, wanted 0x0008
+fixedncr   7    fail     fail   12/14   rx: RX word 0 is 0x0021, wanted 0x0008
+fixedncr   11   fail     fail   12/14   rx: RX word 0 is 0x0021, wanted 0x0008
+dropcmd    1    fail     fail   14/14   clock: CLK stopped after 92 rising edges; the schedule needs 136 (to 8 after the last end 
+dropcmd    2    fail     fail   14/14   clock: CLK stopped after 92 rising edges; the schedule needs 136 (to 8 after the last end 
+dropcmd    3    fail     fail   14/14   clock: CLK stopped after 92 rising edges; the schedule needs 136 (to 8 after the last end 
+dropcmd    7    fail     fail   14/14   clock: CLK stopped after 92 rising edges; the schedule needs 136 (to 8 after the last end 
+dropcmd    11   fail     fail   14/14   clock: CLK stopped after 92 rising edges; the schedule needs 136 (to 8 after the last end 
+tailpulse  1    fail     fail   14/14   cmd: CMD changes at cycle 5840, after the last rising edge of CLK; cmd: CMD changes at cyc
+tailpulse  2    fail     fail   14/14   cmd: CMD changes at cycle 5840, after the last rising edge of CLK; cmd: CMD changes at cyc
+tailpulse  3    fail     fail   14/14   cmd: CMD changes at cycle 5840, after the last rising edge of CLK; cmd: CMD changes at cyc
+tailpulse  7    fail     fail   14/14   cmd: CMD changes at cycle 5840, after the last rising edge of CLK; cmd: CMD changes at cyc
+tailpulse  11   fail     fail   14/14   cmd: CMD changes at cycle 5840, after the last rising edge of CLK; cmd: CMD changes at cyc
+clkextra   1    fail     fail   14/14   clock: CLK edge 279 (rising edge 139) at cycle 5940, ideal 5760 (limit +-2)
+clkextra   2    fail     fail   14/14   clock: CLK edge 279 (rising edge 139) at cycle 5940, ideal 5760 (limit +-2)
+clkextra   3    fail     fail   14/14   clock: CLK edge 279 (rising edge 139) at cycle 5940, ideal 5760 (limit +-2)
+clkextra   7    fail     fail   14/14   clock: CLK edge 279 (rising edge 139) at cycle 5940, ideal 5760 (limit +-2)
+clkextra   11   fail     fail   14/14   clock: CLK edge 279 (rising edge 139) at cycle 5940, ideal 5760 (limit +-2)
+
+ok    run_args.txt '-mode 0=pp -mode 1=od\n': accepted
+ok    run_args.txt '-mo 1=od -m 0=pp -config clkdiv=2\n': accepted
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 5=in\n': accepted
+ok    run_args.txt '-mode 0=pp -mode 1=pp\n': setup: FAIL: run_args.txt must make P0 (CLK) push-pull and P1 (CMD) open-drain
+ok    run_args.txt '-mode 0=pp\n': setup: FAIL: run_args.txt must make P0 (CLK) push-pull and P1 (CMD) open-drain
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp\n': setup: FAIL: run_args.txt: P2 is not connected and must stay an input
+ok    run_args.txt '-mode 0=pp -mode 1=od -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -stimulus s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -s s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -inputs ff\n': setup: FAIL: run_args.txt must not give -inputs: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-mode 1=od\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode 0=pp -mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (CMD0 alone: 1 command, 0 responses): FAIL: clock: CLK stopped after 0 rising edges; the schedule needs)
+VALIDATE PASS

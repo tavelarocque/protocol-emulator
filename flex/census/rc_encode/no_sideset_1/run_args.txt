@@ -1,0 +1,1 @@
+-config clkdiv=400,autopull=1,threshold=12 -mode 0=pp

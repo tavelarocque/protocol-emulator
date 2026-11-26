@@ -1,0 +1,1 @@
+-config clkdiv=10,out_base=0,out_count=4,set_base=0,set_count=5,in_base=0,threshold=16,sideset_base=5,sideset_count=1,out_msb_first=1,autopull=1 -mode 0=od -mode 1=od -mode 2=od -mode 3=od -mode 4=pp -mode 5=pp

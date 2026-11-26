@@ -1,0 +1,1 @@
+-config start=58,timeout_vector=26,timeout=30,clkdiv=4,sideset_base=0,sideset_count=2,threshold=16,out_msb_first=1,in_base=0,crc_poly=128,crc_init=0 -mode 0=pp -mode 1=pp

@@ -1,0 +1,189 @@
+ok    interface: the task sheet's example gives the words printed in the sheet
+ok    interface: the sheet's example CRCs and edge list are the judge's
+ok    interface: the run length is the sheet's formula
+
+waveform    seed expected judge  cases   waveform decoder 
+                                 failed  check    check   what it is
+none        1    pass     pass   0/15    -        -       ideal: TSS of 5 bits, first TSS at cycle 500, CID plus 1 bit between frames
+
+ok    seed 1: RATE bytes=68 cycles=4335, as the generator's edges give
+
+none        2    pass     pass   0/15    -        -       ideal: TSS of 5 bits, first TSS at cycle 500, CID plus 1 bit between frames
+
+ok    seed 2: RATE bytes=96 cycles=5735, as the generator's edges give
+
+none        3    pass     pass   0/15    -        -       ideal: TSS of 5 bits, first TSS at cycle 500, CID plus 1 bit between frames
+
+ok    seed 3: RATE bytes=62 cycles=3535, as the generator's edges give
+
+none        7    pass     pass   0/15    -        -       ideal: TSS of 5 bits, first TSS at cycle 500, CID plus 1 bit between frames
+
+ok    seed 7: RATE bytes=50 cycles=3435, as the generator's edges give
+
+none        11   pass     pass   0/15    -        -       ideal: TSS of 5 bits, first TSS at cycle 500, CID plus 1 bit between frames
+
+ok    seed 11: RATE bytes=82 cycles=6035, as the generator's edges give
+
+tss3        1    pass     pass   0/15    -        -       TSS of 3 bits (15 cycles), the shortest
+tss3        2    pass     pass   0/15    -        -       TSS of 3 bits (15 cycles), the shortest
+tss3        3    pass     pass   0/15    -        -       TSS of 3 bits (15 cycles), the shortest
+tss3        7    pass     pass   0/15    -        -       TSS of 3 bits (15 cycles), the shortest
+tss3        11   pass     pass   0/15    -        -       TSS of 3 bits (15 cycles), the shortest
+tss15       1    pass     pass   0/15    -        -       TSS of 15 bits (75 cycles), the longest
+tss15       2    pass     pass   0/15    -        -       TSS of 15 bits (75 cycles), the longest
+tss15       3    pass     pass   0/15    -        -       TSS of 15 bits (75 cycles), the longest
+tss15       7    pass     pass   0/15    -        -       TSS of 15 bits (75 cycles), the longest
+tss15       11   pass     pass   0/15    -        -       TSS of 15 bits (75 cycles), the longest
+jitter1     1    pass     pass   0/15    -        -       every edge after the FSS edge 1 cycle late or early, alternately (the limit)
+jitter1     2    pass     pass   0/15    -        -       every edge after the FSS edge 1 cycle late or early, alternately (the limit)
+jitter1     3    pass     pass   0/15    -        -       every edge after the FSS edge 1 cycle late or early, alternately (the limit)
+jitter1     7    pass     pass   0/15    -        -       every edge after the FSS edge 1 cycle late or early, alternately (the limit)
+jitter1     11   pass     pass   0/15    -        -       every edge after the FSS edge 1 cycle late or early, alternately (the limit)
+gapmin      1    pass     pass   0/15    -        -       next TSS exactly 60 cycles after the FES edge (the shortest)
+gapmin      2    pass     pass   0/15    -        -       next TSS exactly 60 cycles after the FES edge (the shortest)
+gapmin      3    pass     pass   0/15    -        -       next TSS exactly 60 cycles after the FES edge (the shortest)
+gapmin      7    pass     pass   0/15    -        -       next TSS exactly 60 cycles after the FES edge (the shortest)
+gapmin      11   pass     pass   0/15    -        -       next TSS exactly 60 cycles after the FES edge (the shortest)
+gapmax      1    pass     pass   0/15    -        -       next TSS exactly 10000 cycles after the FES edge (the longest)
+gapmax      2    pass     pass   0/15    -        -       next TSS exactly 10000 cycles after the FES edge (the longest)
+gapmax      3    pass     pass   0/15    -        -       next TSS exactly 10000 cycles after the FES edge (the longest)
+gapmax      7    pass     pass   0/15    -        -       next TSS exactly 10000 cycles after the FES edge (the longest)
+gapmax      11   pass     pass   0/15    -        -       next TSS exactly 10000 cycles after the FES edge (the longest)
+start10000  1    pass     pass   0/15    -        -       first TSS at cycle 10000 (the limit)
+start10000  2    pass     pass   0/15    -        -       first TSS at cycle 10000 (the limit)
+start10000  3    pass     pass   0/15    -        -       first TSS at cycle 10000 (the limit)
+start10000  7    pass     pass   0/15    -        -       first TSS at cycle 10000 (the limit)
+start10000  11   pass     pass   0/15    -        -       first TSS at cycle 10000 (the limit)
+flipbit     1    fail     fail   13/15   objects  objects one payload bit of the last frame inverted (CRC computed on the wrong data)
+flipbit     2    fail     fail   14/15   objects  objects one payload bit of the last frame inverted (CRC computed on the wrong data)
+flipbit     3    fail     fail   14/15   objects  objects one payload bit of the last frame inverted (CRC computed on the wrong data)
+flipbit     7    fail     fail   13/15   objects  objects one payload bit of the last frame inverted (CRC computed on the wrong data)
+flipbit     11   fail     fail   14/15   objects  objects one payload bit of the last frame inverted (CRC computed on the wrong data)
+flipcrc     1    fail     fail   15/15   objects  objects one frame CRC bit of the last frame inverted
+flipcrc     2    fail     fail   15/15   objects  objects one frame CRC bit of the last frame inverted
+flipcrc     3    fail     fail   15/15   objects  objects one frame CRC bit of the last frame inverted
+flipcrc     7    fail     fail   15/15   objects  objects one frame CRC bit of the last frame inverted
+flipcrc     11   fail     fail   15/15   objects  objects one frame CRC bit of the last frame inverted
+badhcrc     1    fail     fail   15/15   objects  objects header CRC sent as 0
+badhcrc     2    fail     fail   15/15   objects  objects header CRC sent as 0
+badhcrc     3    fail     fail   15/15   objects  objects header CRC sent as 0
+badhcrc     7    fail     fail   15/15   objects  objects header CRC sent as 0
+badhcrc     11   fail     fail   15/15   objects  objects header CRC sent as 0
+chanb       1    fail     fail   15/15   objects  objects frame CRC with channel B's initial value
+chanb       2    fail     fail   15/15   objects  objects frame CRC with channel B's initial value
+chanb       3    fail     fail   15/15   objects  objects frame CRC with channel B's initial value
+chanb       7    fail     fail   15/15   objects  objects frame CRC with channel B's initial value
+chanb       11   fail     fail   15/15   objects  objects frame CRC with channel B's initial value
+lsbfirst    1    fail     fail   11/15   objects  objects payload bytes sent least significant bit first
+lsbfirst    2    fail     fail   11/15   objects  objects payload bytes sent least significant bit first
+lsbfirst    3    fail     fail   11/15   objects  objects payload bytes sent least significant bit first
+lsbfirst    7    fail     fail   11/15   objects  objects payload bytes sent least significant bit first
+lsbfirst    11   fail     fail   11/15   objects  objects payload bytes sent least significant bit first
+swapbytes   1    fail     fail   11/15   objects  objects the two bytes of every payload word swapped
+swapbytes   2    fail     fail   11/15   objects  objects the two bytes of every payload word swapped
+swapbytes   3    fail     fail   11/15   objects  objects the two bytes of every payload word swapped
+swapbytes   7    fail     fail   11/15   objects  objects the two bytes of every payload word swapped
+swapbytes   11   fail     fail   11/15   objects  objects the two bytes of every payload word swapped
+late2       1    fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles late
+late2       2    fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles late
+late2       3    fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles late
+late2       7    fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles late
+late2       11   fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles late
+early2      1    fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles early
+early2      2    fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles early
+early2      3    fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles early
+early2      7    fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles early
+early2      11   fail     fail   15/15   objects  -       one edge in the middle of the first frame 2 cycles early
+slow6       1    fail     fail   15/15   objects  objects bits of 6 cycles
+slow6       2    fail     fail   15/15   objects  objects bits of 6 cycles
+slow6       3    fail     fail   15/15   objects  objects bits of 6 cycles
+slow6       7    fail     fail   15/15   objects  objects bits of 6 cycles
+slow6       11   fail     fail   15/15   objects  objects bits of 6 cycles
+tss2        1    fail     fail   15/15   objects  -       TSS of 2 bits
+tss2        2    fail     fail   15/15   objects  -       TSS of 2 bits
+tss2        3    fail     fail   15/15   objects  -       TSS of 2 bits
+tss2        7    fail     fail   15/15   objects  -       TSS of 2 bits
+tss2        11   fail     fail   15/15   objects  -       TSS of 2 bits
+tss16       1    fail     fail   15/15   objects  -       TSS of 16 bits
+tss16       2    fail     fail   15/15   objects  -       TSS of 16 bits
+tss16       3    fail     fail   15/15   objects  -       TSS of 16 bits
+tss16       7    fail     fail   15/15   objects  -       TSS of 16 bits
+tss16       11   fail     fail   15/15   objects  -       TSS of 16 bits
+nobss       1    fail     fail   15/15   objects  objects the BSS before the frame CRC's first byte left out
+nobss       2    fail     fail   15/15   objects  objects the BSS before the frame CRC's first byte left out
+nobss       3    fail     fail   15/15   objects  objects the BSS before the frame CRC's first byte left out
+nobss       7    fail     fail   15/15   objects  objects the BSS before the frame CRC's first byte left out
+nobss       11   fail     fail   15/15   objects  objects the BSS before the frame CRC's first byte left out
+bss11       1    fail     fail   15/15   objects  -       a BSS sent as 1 1
+bss11       2    fail     fail   15/15   objects  -       a BSS sent as 1 1
+bss11       3    fail     fail   15/15   objects  -       a BSS sent as 1 1
+bss11       7    fail     fail   15/15   objects  -       a BSS sent as 1 1
+bss11       11   fail     fail   15/15   objects  -       a BSS sent as 1 1
+nofes       1    fail     fail   15/15   objects  -       no FES: the line rises after the CRC
+nofes       2    fail     fail   15/15   objects  -       no FES: the line rises after the CRC
+nofes       3    fail     fail   15/15   objects  -       no FES: the line rises after the CRC
+nofes       7    fail     fail   15/15   objects  -       no FES: the line rises after the CRC
+nofes       11   fail     fail   15/15   objects  -       no FES: the line rises after the CRC
+fes11       1    fail     fail   15/15   objects  -       FES low for two bits
+fes11       2    fail     fail   15/15   objects  -       FES low for two bits
+fes11       3    fail     fail   15/15   objects  -       FES low for two bits
+fes11       7    fail     fail   15/15   objects  -       FES low for two bits
+fes11       11   fail     fail   15/15   objects  -       FES low for two bits
+dts         1    fail     fail   15/15   objects  objects a dynamic trailing sequence after the FES
+dts         2    fail     fail   15/15   objects  objects a dynamic trailing sequence after the FES
+dts         3    fail     fail   15/15   objects  objects a dynamic trailing sequence after the FES
+dts         7    fail     fail   15/15   objects  objects a dynamic trailing sequence after the FES
+dts         11   fail     fail   15/15   objects  objects a dynamic trailing sequence after the FES
+gap59       1    fail     fail   9/15    objects  -       next TSS 59 cycles after the FES edge
+gap59       2    fail     fail   7/15    objects  -       next TSS 59 cycles after the FES edge
+gap59       3    fail     fail   6/15    objects  -       next TSS 59 cycles after the FES edge
+gap59       7    fail     fail   9/15    objects  -       next TSS 59 cycles after the FES edge
+gap59       11   fail     fail   9/15    objects  -       next TSS 59 cycles after the FES edge
+gap10001    1    fail     fail   9/15    objects  -       next TSS 10001 cycles after the FES edge
+gap10001    2    fail     fail   7/15    objects  -       next TSS 10001 cycles after the FES edge
+gap10001    3    fail     fail   6/15    objects  -       next TSS 10001 cycles after the FES edge
+gap10001    7    fail     fail   9/15    objects  -       next TSS 10001 cycles after the FES edge
+gap10001    11   fail     fail   9/15    objects  -       next TSS 10001 cycles after the FES edge
+start10001  1    fail     fail   15/15   objects  -       first TSS at cycle 10001
+start10001  2    fail     fail   15/15   objects  -       first TSS at cycle 10001
+start10001  3    fail     fail   15/15   objects  -       first TSS at cycle 10001
+start10001  7    fail     fail   15/15   objects  -       first TSS at cycle 10001
+start10001  11   fail     fail   15/15   objects  -       first TSS at cycle 10001
+idlelow     1    fail     fail   15/15   objects  -       P0 low at cycle 0
+idlelow     2    fail     fail   15/15   objects  -       P0 low at cycle 0
+idlelow     3    fail     fail   15/15   objects  -       P0 low at cycle 0
+idlelow     7    fail     fail   15/15   objects  -       P0 low at cycle 0
+idlelow     11   fail     fail   15/15   objects  -       P0 low at cycle 0
+tail        1    fail     fail   15/15   objects  objects a one-cycle low pulse 3000 cycles after the last frame
+tail        2    fail     fail   15/15   objects  objects a one-cycle low pulse 3000 cycles after the last frame
+tail        3    fail     fail   15/15   objects  objects a one-cycle low pulse 3000 cycles after the last frame
+tail        7    fail     fail   15/15   objects  objects a one-cycle low pulse 3000 cycles after the last frame
+tail        11   fail     fail   15/15   objects  objects a one-cycle low pulse 3000 cycles after the last frame
+dropframe   1    fail     fail   15/15   objects  objects the last frame is not sent
+dropframe   2    fail     fail   15/15   objects  objects the last frame is not sent
+dropframe   3    fail     fail   15/15   objects  objects the last frame is not sent
+dropframe   7    fail     fail   15/15   objects  objects the last frame is not sent
+dropframe   11   fail     fail   15/15   objects  objects the last frame is not sent
+extraframe  1    fail     fail   15/15   objects  objects the last frame is sent twice
+extraframe  2    fail     fail   15/15   objects  objects the last frame is sent twice
+extraframe  3    fail     fail   15/15   objects  objects the last frame is sent twice
+extraframe  7    fail     fail   15/15   objects  objects the last frame is sent twice
+extraframe  11   fail     fail   15/15   objects  objects the last frame is sent twice
+cycleoff    1    fail     fail   15/15   objects  objects cycle count sent one higher (header CRC still right)
+cycleoff    2    fail     fail   15/15   objects  objects cycle count sent one higher (header CRC still right)
+cycleoff    3    fail     fail   15/15   objects  objects cycle count sent one higher (header CRC still right)
+cycleoff    7    fail     fail   15/15   objects  objects cycle count sent one higher (header CRC still right)
+cycleoff    11   fail     fail   15/15   objects  objects cycle count sent one higher (header CRC still right)
+
+ok    run_args.txt '-mode 0=pp -config clkdiv=1\n': accepted
+ok    run_args.txt '-mo 0=pp\n': accepted
+ok    run_args.txt '-mode 0=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 1 frame, 2 payload bytes): FAIL: waveform: 0 separate bursts of ed)
+SELFTEST PASS

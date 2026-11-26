@@ -1,0 +1,135 @@
+ok    interface: the sheet's example gives the words printed in the sheet (0x00A5, 0x0000, 0x00FF)
+ok    sheet: the 0xA5 example's changes are the judge's (16667, 33333, 50000, 66667, 75000, 83333, 100000, 116667 and 133333)
+ok    sheet: last change at half-bit 17 when D0 = 0, at 16 when D0 = 1
+
+waveform     seed expected judge  failed  waveform decoder what it is
+none         1    pass     pass   0/13    -        -       ideal: low at cycle 20, first rise at 60000, rests of 100000
+ok    seed 1: RATE bytes=1 cycles=193313, as the generator's changes give
+none         2    pass     pass   0/13    -        -       ideal: low at cycle 20, first rise at 60000, rests of 100000
+ok    seed 2: RATE bytes=4 cycles=1026647, as the generator's changes give
+none         3    pass     pass   0/13    -        -       ideal: low at cycle 20, first rise at 60000, rests of 100000
+ok    seed 3: RATE bytes=2 cycles=468313, as the generator's changes give
+none         7    pass     pass   0/13    -        -       ideal: low at cycle 20, first rise at 60000, rests of 100000
+ok    seed 7: RATE bytes=7 cycles=1843313, as the generator's changes give
+jitter80     1    pass     pass   0/13    -        -       every change after a frame's rise 80 cycles off, alternately late and early (the limit)
+jitter80     2    pass     pass   0/13    -        -       every change after a frame's rise 80 cycles off, alternately late and early (the limit)
+jitter80     3    pass     pass   0/13    -        -       every change after a frame's rise 80 cycles off, alternately late and early (the limit)
+jitter80     7    pass     pass   0/13    -        -       every change after a frame's rise 80 cycles off, alternately late and early (the limit)
+whole8333    1    pass     pass   0/13    -        -       half-bits of a whole 8333 cycles: 5.7 cycles short by the end
+whole8333    2    pass     pass   0/13    -        -       half-bits of a whole 8333 cycles: 5.7 cycles short by the end
+whole8333    3    pass     pass   0/13    -        -       half-bits of a whole 8333 cycles: 5.7 cycles short by the end
+whole8333    7    pass     pass   0/13    -        -       half-bits of a whole 8333 cycles: 5.7 cycles short by the end
+lowat1000    1    pass     pass   0/13    -        -       P0 driven low at cycle 1000 (the limit)
+lowat1000    2    pass     pass   0/13    -        -       P0 driven low at cycle 1000 (the limit)
+lowat1000    3    pass     pass   0/13    -        -       P0 driven low at cycle 1000 (the limit)
+lowat1000    7    pass     pass   0/13    -        -       P0 driven low at cycle 1000 (the limit)
+start50000   1    pass     pass   0/13    -        -       first rise at cycle 50000 (the limit)
+start50000   2    pass     pass   0/13    -        -       first rise at cycle 50000 (the limit)
+start50000   3    pass     pass   0/13    -        -       first rise at cycle 50000 (the limit)
+start50000   7    pass     pass   0/13    -        -       first rise at cycle 50000 (the limit)
+start200000  1    pass     pass   0/13    -        -       first rise at cycle 200000 (the limit)
+start200000  2    pass     pass   0/13    -        -       first rise at cycle 200000 (the limit)
+start200000  3    pass     pass   0/13    -        -       first rise at cycle 200000 (the limit)
+start200000  7    pass     pass   0/13    -        -       first rise at cycle 200000 (the limit)
+rest50000    1    pass     pass   0/13    -        -       rests of exactly 50000 cycles after the stop bits (the limit)
+rest50000    2    pass     pass   0/13    -        -       rests of exactly 50000 cycles after the stop bits (the limit)
+rest50000    3    pass     pass   0/13    -        -       rests of exactly 50000 cycles after the stop bits (the limit)
+rest50000    7    pass     pass   0/13    -        -       rests of exactly 50000 cycles after the stop bits (the limit)
+rest200000   1    pass     pass   0/13    -        -       rests of exactly 200000 cycles (the limit)
+rest200000   2    pass     pass   0/13    -        -       rests of exactly 200000 cycles (the limit)
+rest200000   3    pass     pass   0/13    -        -       rests of exactly 200000 cycles (the limit)
+rest200000   7    pass     pass   0/13    -        -       rests of exactly 200000 cycles (the limit)
+flipbit      1    fail     fail   13/13   objects  objects one data bit (D2) of the last frame inverted
+flipbit      2    fail     fail   13/13   objects  objects one data bit (D2) of the last frame inverted
+flipbit      3    fail     fail   13/13   objects  objects one data bit (D2) of the last frame inverted
+flipbit      7    fail     fail   13/13   objects  objects one data bit (D2) of the last frame inverted
+lsbfirst     1    fail     fail   10/13   objects  objects bits sent D0 first
+lsbfirst     2    fail     fail   10/13   objects  objects bits sent D0 first
+lsbfirst     3    fail     fail   9/13    objects  objects bits sent D0 first
+lsbfirst     7    fail     fail   10/13   objects  objects bits sent D0 first
+invcode      1    fail     fail   13/13   objects  objects Manchester the other way: 1 as low-high, 0 as high-low
+invcode      2    fail     fail   13/13   objects  objects Manchester the other way: 1 as low-high, 0 as high-low
+invcode      3    fail     fail   13/13   objects  objects Manchester the other way: 1 as low-high, 0 as high-low
+invcode      7    fail     fail   13/13   objects  objects Manchester the other way: 1 as low-high, 0 as high-low
+late81       1    fail     fail   13/13   objects  -       one change 81 cycles late
+late81       2    fail     fail   13/13   objects  -       one change 81 cycles late
+late81       3    fail     fail   13/13   objects  -       one change 81 cycles late
+late81       7    fail     fail   13/13   objects  -       one change 81 cycles late
+early81      1    fail     fail   13/13   objects  -       one change 81 cycles early
+early81      2    fail     fail   13/13   objects  -       one change 81 cycles early
+early81      3    fail     fail   13/13   objects  -       one change 81 cycles early
+early81      7    fail     fail   13/13   objects  -       one change 81 cycles early
+slow8400     1    fail     fail   13/13   objects  -       half-bits of 8400 cycles: the error adds up along a frame
+slow8400     2    fail     fail   13/13   objects  -       half-bits of 8400 cycles: the error adds up along a frame
+slow8400     3    fail     fail   13/13   objects  -       half-bits of 8400 cycles: the error adds up along a frame
+slow8400     7    fail     fail   13/13   objects  -       half-bits of 8400 cycles: the error adds up along a frame
+double       1    fail     fail   13/13   objects  objects half-bits of 4167 cycles (2400 a second)
+double       2    fail     fail   13/13   objects  objects half-bits of 4167 cycles (2400 a second)
+double       3    fail     fail   13/13   objects  objects half-bits of 4167 cycles (2400 a second)
+double       7    fail     fail   13/13   objects  objects half-bits of 4167 cycles (2400 a second)
+rest49999    1    fail     fail   6/13    objects  -       rests of 49999 cycles
+rest49999    2    fail     fail   8/13    objects  -       rests of 49999 cycles
+rest49999    3    fail     fail   7/13    objects  -       rests of 49999 cycles
+rest49999    7    fail     fail   8/13    objects  -       rests of 49999 cycles
+rest200001   1    fail     fail   6/13    objects  -       rests of 200001 cycles
+rest200001   2    fail     fail   8/13    objects  -       rests of 200001 cycles
+rest200001   3    fail     fail   7/13    objects  -       rests of 200001 cycles
+rest200001   7    fail     fail   8/13    objects  -       rests of 200001 cycles
+start49999   1    fail     fail   13/13   objects  -       first rise at cycle 49999
+start49999   2    fail     fail   13/13   objects  -       first rise at cycle 49999
+start49999   3    fail     fail   13/13   objects  -       first rise at cycle 49999
+start49999   7    fail     fail   13/13   objects  -       first rise at cycle 49999
+start200001  1    fail     fail   13/13   objects  -       first rise at cycle 200001
+start200001  2    fail     fail   13/13   objects  -       first rise at cycle 200001
+start200001  3    fail     fail   13/13   objects  -       first rise at cycle 200001
+start200001  7    fail     fail   13/13   objects  -       first rise at cycle 200001
+lowat1001    1    fail     fail   13/13   objects  -       P0 driven low at cycle 1001
+lowat1001    2    fail     fail   13/13   objects  -       P0 driven low at cycle 1001
+lowat1001    3    fail     fail   13/13   objects  -       P0 driven low at cycle 1001
+lowat1001    7    fail     fail   13/13   objects  -       P0 driven low at cycle 1001
+neverlow     1    fail     fail   13/13   objects  objects P0 left high until the first frame, which then begins with its data
+neverlow     2    fail     fail   13/13   objects  objects P0 left high until the first frame, which then begins with its data
+neverlow     3    fail     fail   13/13   objects  objects P0 left high until the first frame, which then begins with its data
+neverlow     7    fail     fail   13/13   objects  objects P0 left high until the first frame, which then begins with its data
+idlehigh     1    fail     fail   13/13   objects  objects the whole line inverted: idles high
+idlehigh     2    fail     fail   13/13   objects  objects the whole line inverted: idles high
+idlehigh     3    fail     fail   13/13   objects  objects the whole line inverted: idles high
+idlehigh     7    fail     fail   13/13   objects  objects the whole line inverted: idles high
+nostart      1    fail     fail   13/13   objects  objects no start bit: D7 begins at the rise
+nostart      2    fail     fail   13/13   objects  objects no start bit: D7 begins at the rise
+nostart      3    fail     fail   13/13   objects  objects no start bit: D7 begins at the rise
+nostart      7    fail     fail   13/13   objects  objects no start bit: D7 begins at the rise
+longstart    1    fail     fail   13/13   objects  objects the start bit two half-bits long
+longstart    2    fail     fail   13/13   objects  objects the start bit two half-bits long
+longstart    3    fail     fail   13/13   objects  objects the start bit two half-bits long
+longstart    7    fail     fail   13/13   objects  objects the start bit two half-bits long
+tail         1    fail     fail   13/13   objects  -       a 1 ms high pulse 15 ms after the last frame's stop bits
+tail         2    fail     fail   13/13   objects  -       a 1 ms high pulse 15 ms after the last frame's stop bits
+tail         3    fail     fail   13/13   objects  -       a 1 ms high pulse 15 ms after the last frame's stop bits
+tail         7    fail     fail   13/13   objects  -       a 1 ms high pulse 15 ms after the last frame's stop bits
+glitch       1    fail     fail   13/13   objects  -       a pulse one cycle long in the first rest
+glitch       2    fail     fail   13/13   objects  -       a pulse one cycle long in the first rest
+glitch       3    fail     fail   13/13   objects  -       a pulse one cycle long in the first rest
+glitch       7    fail     fail   13/13   objects  -       a pulse one cycle long in the first rest
+dropframe    1    fail     fail   13/13   objects  objects the last frame is not sent
+dropframe    2    fail     fail   13/13   objects  objects the last frame is not sent
+dropframe    3    fail     fail   13/13   objects  objects the last frame is not sent
+dropframe    7    fail     fail   13/13   objects  objects the last frame is not sent
+extraframe   1    fail     fail   13/13   objects  objects the last frame is sent twice
+extraframe   2    fail     fail   13/13   objects  objects the last frame is sent twice
+extraframe   3    fail     fail   13/13   objects  objects the last frame is sent twice
+extraframe   7    fail     fail   13/13   objects  objects the last frame is sent twice
+
+ok    run_args.txt '-mode 0=pp -config clkdiv=1\n': accepted
+ok    run_args.txt '-mo 0=pp\n': accepted
+ok    run_args.txt '-mode 0=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -stimulus f.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode 0=od\n': setup: FAIL: run_args.txt must make P0 push-pull (-mode 0=pp)
+ok    run_args.txt '-config clkdiv=1\n': setup: FAIL: run_args.txt must make P0 push-pull (-mode 0=pp)
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (all zeros: 1 frame): FAIL: waveform: P0 is not driven low by cycle 1000; decoder: decoded 0 )
+SELFTEST PASS

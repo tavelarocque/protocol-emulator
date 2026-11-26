@@ -1,0 +1,149 @@
+ok    interface: the sheet's example gives the words printed in it (0x0000, 0x0080, 0x0001, 0xFFC0, 0x1234)
+ok    interface: the sheet's example gives the rx words printed in it
+ok    interface: the sheet's example stimulus is the judge's (0 ff 324 f0 344 fa 364 f5 384 ff)
+ok    interface: N and L for the sheet's example (660, 16)
+ok    stimulus: sigrok decodes the ideal bus of every case, seed 1
+ok    stimulus: sigrok decodes the ideal bus of every case, seed 2
+ok    stimulus: sigrok decodes the ideal bus of every case, seed 3
+ok    stimulus: sigrok decodes the ideal bus of every case, seed 7
+ok    stimulus: sigrok decodes the ideal bus of every case, seed 11
+ok    none, seed 1: ideal: outputs change on LCLK's falling edge, clock stops after the last clock, must pass
+ok    none, seed 2: ideal: outputs change on LCLK's falling edge, clock stops after the last clock, must pass
+ok    none, seed 3: ideal: outputs change on LCLK's falling edge, clock stops after the last clock, must pass
+ok    none, seed 7: ideal: outputs change on LCLK's falling edge, clock stops after the last clock, must pass
+ok    none, seed 11: ideal: outputs change on LCLK's falling edge, clock stops after the last clock, must pass
+ok    RATE, seed 1: RATE bytes=3 cycles=1370
+ok    RATE, seed 2: RATE bytes=2 cycles=810
+ok    RATE, seed 3: RATE bytes=5 cycles=2330
+ok    RATE, seed 7: RATE bytes=8 cycles=3690
+ok    RATE, seed 11: RATE bytes=3 cycles=1370
+ok    runon, seed 1: LCLK keeps running on schedule to the end of the run, must pass
+ok    runon, seed 2: LCLK keeps running on schedule to the end of the run, must pass
+ok    runon, seed 3: LCLK keeps running on schedule to the end of the run, must pass
+ok    runon, seed 7: LCLK keeps running on schedule to the end of the run, must pass
+ok    runon, seed 11: LCLK keeps running on schedule to the end of the run, must pass
+ok    jitter2, seed 1: rising edges alternately 2 cycles late and 2 early (the limit), must pass
+ok    jitter2, seed 2: rising edges alternately 2 cycles late and 2 early (the limit), must pass
+ok    jitter2, seed 3: rising edges alternately 2 cycles late and 2 early (the limit), must pass
+ok    jitter2, seed 7: rising edges alternately 2 cycles late and 2 early (the limit), must pass
+ok    jitter2, seed 11: rising edges alternately 2 cycles late and 2 early (the limit), must pass
+ok    setup2, seed 1: LFRAME#/LAD change 2 cycles before the rising edge (the limit), must pass
+ok    setup2, seed 2: LFRAME#/LAD change 2 cycles before the rising edge (the limit), must pass
+ok    setup2, seed 3: LFRAME#/LAD change 2 cycles before the rising edge (the limit), must pass
+ok    setup2, seed 7: LFRAME#/LAD change 2 cycles before the rising edge (the limit), must pass
+ok    setup2, seed 11: LFRAME#/LAD change 2 cycles before the rising edge (the limit), must pass
+ok    hold1, seed 1: LFRAME#/LAD change 1 cycle after the rising edge (the limit), must pass
+ok    hold1, seed 2: LFRAME#/LAD change 1 cycle after the rising edge (the limit), must pass
+ok    hold1, seed 3: LFRAME#/LAD change 1 cycle after the rising edge (the limit), must pass
+ok    hold1, seed 7: LFRAME#/LAD change 1 cycle after the rising edge (the limit), must pass
+ok    hold1, seed 11: LFRAME#/LAD change 1 cycle after the rising edge (the limit), must pass
+ok    phase6, seed 1: LCLK high for 6 cycles, low for 14 (the limit), must pass
+ok    phase6, seed 2: LCLK high for 6 cycles, low for 14 (the limit), must pass
+ok    phase6, seed 3: LCLK high for 6 cycles, low for 14 (the limit), must pass
+ok    phase6, seed 7: LCLK high for 6 cycles, low for 14 (the limit), must pass
+ok    phase6, seed 11: LCLK high for 6 cycles, low for 14 (the limit), must pass
+ok    flipaddr, seed 1: one address bit of the last transaction inverted on the bus, must fail (13 of 13 cases fail; first: waveform: at rising edge 9 (cycle 280) LFRAME#=1 LAD=0010, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    flipaddr, seed 2: one address bit of the last transaction inverted on the bus, must fail (13 of 13 cases fail; first: waveform: at rising edge 9 (cycle 280) LFRAME#=1 LAD=0010, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    flipaddr, seed 3: one address bit of the last transaction inverted on the bus, must fail (13 of 13 cases fail; first: waveform: at rising edge 9 (cycle 280) LFRAME#=1 LAD=0010, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    flipaddr, seed 7: one address bit of the last transaction inverted on the bus, must fail (13 of 13 cases fail; first: waveform: at rising edge 9 (cycle 280) LFRAME#=1 LAD=0010, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    flipaddr, seed 11: one address bit of the last transaction inverted on the bus, must fail (13 of 13 cases fail; first: waveform: at rising edge 9 (cycle 280) LFRAME#=1 LAD=0010, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    lsnfirst, seed 1: address nibbles sent least significant first, must fail (11 of 13 cases fail; first: waveform: at rising edge 7 (cycle 240) LFRAME#=1 LAD=1000, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    lsnfirst, seed 2: address nibbles sent least significant first, must fail (11 of 13 cases fail; first: waveform: at rising edge 7 (cycle 240) LFRAME#=1 LAD=1000, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    lsnfirst, seed 3: address nibbles sent least significant first, must fail (11 of 13 cases fail; first: waveform: at rising edge 7 (cycle 240) LFRAME#=1 LAD=1000, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    lsnfirst, seed 7: address nibbles sent least significant first, must fail (11 of 13 cases fail; first: waveform: at rising edge 7 (cycle 240) LFRAME#=1 LAD=1000, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    lsnfirst, seed 11: address nibbles sent least significant first, must fail (11 of 13 cases fail; first: waveform: at rising edge 7 (cycle 240) LFRAME#=1 LAD=1000, wanted LFRAME#=1 LAD=0000; decoder: annotation 2 is)
+ok    wrongct, seed 1: memory reads sent with the I/O read cycle type, must fail (10 of 13 cases fail; first: waveform: at rising edge 5 (cycle 200) LFRAME#=1 LAD=0000, wanted LFRAME#=1 LAD=0100; decoder: annotation 1 is)
+ok    wrongct, seed 2: memory reads sent with the I/O read cycle type, must fail (8 of 13 cases fail; first: waveform: at rising edge 5 (cycle 200) LFRAME#=1 LAD=0000, wanted LFRAME#=1 LAD=0100; decoder: annotation 1 is)
+ok    wrongct, seed 3: memory reads sent with the I/O read cycle type, must fail (9 of 13 cases fail; first: waveform: at rising edge 5 (cycle 200) LFRAME#=1 LAD=0000, wanted LFRAME#=1 LAD=0100; decoder: annotation 1 is)
+ok    wrongct, seed 7: memory reads sent with the I/O read cycle type, must fail (8 of 13 cases fail; first: waveform: at rising edge 5 (cycle 200) LFRAME#=1 LAD=0000, wanted LFRAME#=1 LAD=0100; decoder: annotation 1 is)
+ok    wrongct, seed 11: memory reads sent with the I/O read cycle type, must fail (10 of 13 cases fail; first: waveform: at rising edge 5 (cycle 200) LFRAME#=1 LAD=0000, wanted LFRAME#=1 LAD=0100; decoder: annotation 1 is)
+ok    rxflip, seed 1: one bit of the last rx word wrong, must fail (13 of 13 cases fail; first: rx: rx word 0 is 0x0052, wanted 0x005a)
+ok    rxflip, seed 2: one bit of the last rx word wrong, must fail (13 of 13 cases fail; first: rx: rx word 0 is 0x0052, wanted 0x005a)
+ok    rxflip, seed 3: one bit of the last rx word wrong, must fail (13 of 13 cases fail; first: rx: rx word 0 is 0x0052, wanted 0x005a)
+ok    rxflip, seed 7: one bit of the last rx word wrong, must fail (13 of 13 cases fail; first: rx: rx word 0 is 0x0052, wanted 0x005a)
+ok    rxflip, seed 11: one bit of the last rx word wrong, must fail (13 of 13 cases fail; first: rx: rx word 0 is 0x0052, wanted 0x005a)
+ok    rxswap, seed 1: rx words with their nibbles swapped, must fail (11 of 13 cases fail; first: rx: rx word 0 is 0x00a5, wanted 0x005a)
+ok    rxswap, seed 2: rx words with their nibbles swapped, must fail (11 of 13 cases fail; first: rx: rx word 0 is 0x00a5, wanted 0x005a)
+ok    rxswap, seed 3: rx words with their nibbles swapped, must fail (11 of 13 cases fail; first: rx: rx word 0 is 0x00a5, wanted 0x005a)
+ok    rxswap, seed 7: rx words with their nibbles swapped, must fail (10 of 13 cases fail; first: rx: rx word 0 is 0x00a5, wanted 0x005a)
+ok    rxswap, seed 11: rx words with their nibbles swapped, must fail (11 of 13 cases fail; first: rx: rx word 0 is 0x00a5, wanted 0x005a)
+ok    rxextra, seed 1: one extra rx word at the end, must fail (13 of 13 cases fail; first: rx: 2 rx words, wanted 1)
+ok    rxextra, seed 2: one extra rx word at the end, must fail (13 of 13 cases fail; first: rx: 2 rx words, wanted 1)
+ok    rxextra, seed 3: one extra rx word at the end, must fail (13 of 13 cases fail; first: rx: 2 rx words, wanted 1)
+ok    rxextra, seed 7: one extra rx word at the end, must fail (13 of 13 cases fail; first: rx: 2 rx words, wanted 1)
+ok    rxextra, seed 11: one extra rx word at the end, must fail (13 of 13 cases fail; first: rx: 2 rx words, wanted 1)
+ok    late3, seed 1: one LCLK rising edge 3 cycles late, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 7 at cycle 243, ideal 240 (limit +-2))
+ok    late3, seed 2: one LCLK rising edge 3 cycles late, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 7 at cycle 243, ideal 240 (limit +-2))
+ok    late3, seed 3: one LCLK rising edge 3 cycles late, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 7 at cycle 243, ideal 240 (limit +-2))
+ok    late3, seed 7: one LCLK rising edge 3 cycles late, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 7 at cycle 243, ideal 240 (limit +-2))
+ok    late3, seed 11: one LCLK rising edge 3 cycles late, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 7 at cycle 243, ideal 240 (limit +-2))
+ok    slow21, seed 1: LCLK period 21 cycles: the error adds up, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 3 at cycle 163, ideal 160 (limit +-2); waveform: at rising edge 11 (cycle 331) LFRA)
+ok    slow21, seed 2: LCLK period 21 cycles: the error adds up, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 3 at cycle 163, ideal 160 (limit +-2); waveform: at rising edge 11 (cycle 331) LFRA)
+ok    slow21, seed 3: LCLK period 21 cycles: the error adds up, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 3 at cycle 163, ideal 160 (limit +-2); waveform: at rising edge 11 (cycle 331) LFRA)
+ok    slow21, seed 7: LCLK period 21 cycles: the error adds up, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 3 at cycle 163, ideal 160 (limit +-2); waveform: at rising edge 11 (cycle 331) LFRA)
+ok    slow21, seed 11: LCLK period 21 cycles: the error adds up, must fail (13 of 13 cases fail; first: waveform: LCLK rising edge 3 at cycle 163, ideal 160 (limit +-2); waveform: at rising edge 11 (cycle 331) LFRA)
+ok    short5, seed 1: LCLK high for 5 cycles, must fail (13 of 13 cases fail; first: waveform: LCLK high for 5 cycles from cycle 100 (at least 6))
+ok    short5, seed 2: LCLK high for 5 cycles, must fail (13 of 13 cases fail; first: waveform: LCLK high for 5 cycles from cycle 100 (at least 6))
+ok    short5, seed 3: LCLK high for 5 cycles, must fail (13 of 13 cases fail; first: waveform: LCLK high for 5 cycles from cycle 100 (at least 6))
+ok    short5, seed 7: LCLK high for 5 cycles, must fail (13 of 13 cases fail; first: waveform: LCLK high for 5 cycles from cycle 100 (at least 6))
+ok    short5, seed 11: LCLK high for 5 cycles, must fail (13 of 13 cases fail; first: waveform: LCLK high for 5 cycles from cycle 100 (at least 6))
+ok    setup1, seed 1: LFRAME#/LAD change 1 cycle before the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 179, one cycle before the LCLK rising edge at 180)
+ok    setup1, seed 2: LFRAME#/LAD change 1 cycle before the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 179, one cycle before the LCLK rising edge at 180)
+ok    setup1, seed 3: LFRAME#/LAD change 1 cycle before the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 179, one cycle before the LCLK rising edge at 180)
+ok    setup1, seed 7: LFRAME#/LAD change 1 cycle before the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 179, one cycle before the LCLK rising edge at 180)
+ok    setup1, seed 11: LFRAME#/LAD change 1 cycle before the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 179, one cycle before the LCLK rising edge at 180)
+ok    hold0, seed 1: LFRAME#/LAD change in the cycle of the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 160, in the cycle of the LCLK rising edge at 160; waveform: LFRA)
+ok    hold0, seed 2: LFRAME#/LAD change in the cycle of the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 160, in the cycle of the LCLK rising edge at 160; waveform: LFRA)
+ok    hold0, seed 3: LFRAME#/LAD change in the cycle of the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 160, in the cycle of the LCLK rising edge at 160; waveform: LFRA)
+ok    hold0, seed 7: LFRAME#/LAD change in the cycle of the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 160, in the cycle of the LCLK rising edge at 160; waveform: LFRA)
+ok    hold0, seed 11: LFRAME#/LAD change in the cycle of the rising edge, must fail (13 of 13 cases fail; first: waveform: LFRAME#/LAD output changes at cycle 160, in the cycle of the LCLK rising edge at 160; waveform: LFRA)
+ok    norelease, seed 1: LAD0 held low by the chip through the peripheral's clocks of the last read, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0111) at cycle 310, outside its part of a transaction; waveform: at ris)
+ok    norelease, seed 2: LAD0 held low by the chip through the peripheral's clocks of the last read, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0111) at cycle 310, outside its part of a transaction; waveform: at ris)
+ok    norelease, seed 3: LAD0 held low by the chip through the peripheral's clocks of the last read, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0111) at cycle 310, outside its part of a transaction; waveform: at ris)
+ok    norelease, seed 7: LAD0 held low by the chip through the peripheral's clocks of the last read, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0111) at cycle 310, outside its part of a transaction; waveform: at ris)
+ok    norelease, seed 11: LAD0 held low by the chip through the peripheral's clocks of the last read, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0111) at cycle 310, outside its part of a transaction; waveform: at ris)
+ok    ladidle, seed 1: the chip drives LAD to 0000 in the idle clocks, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0000) at cycle 90, outside its part of a transaction; waveform: at risi)
+ok    ladidle, seed 2: the chip drives LAD to 0000 in the idle clocks, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0000) at cycle 90, outside its part of a transaction; waveform: at risi)
+ok    ladidle, seed 3: the chip drives LAD to 0000 in the idle clocks, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0000) at cycle 90, outside its part of a transaction; waveform: at risi)
+ok    ladidle, seed 7: the chip drives LAD to 0000 in the idle clocks, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0000) at cycle 90, outside its part of a transaction; waveform: at risi)
+ok    ladidle, seed 11: the chip drives LAD to 0000 in the idle clocks, must fail (13 of 13 cases fail; first: waveform: the chip drives LAD (outputs 0000) at cycle 90, outside its part of a transaction; waveform: at risi)
+ok    lframe2, seed 1: LFRAME# low for two clocks (START repeated), must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 150, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    lframe2, seed 2: LFRAME# low for two clocks (START repeated), must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 150, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    lframe2, seed 3: LFRAME# low for two clocks (START repeated), must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 150, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    lframe2, seed 7: LFRAME# low for two clocks (START repeated), must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 150, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    lframe2, seed 11: LFRAME# low for two clocks (START repeated), must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 150, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    glitch, seed 1: a one-cycle low pulse on LFRAME# between two rising edges while idle, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 112, outside a START clock; waveform: LFRAME# falls 2 times, wanted 1 (one per )
+ok    glitch, seed 2: a one-cycle low pulse on LFRAME# between two rising edges while idle, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 112, outside a START clock; waveform: LFRAME# falls 2 times, wanted 1 (one per )
+ok    glitch, seed 3: a one-cycle low pulse on LFRAME# between two rising edges while idle, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 112, outside a START clock; waveform: LFRAME# falls 2 times, wanted 1 (one per )
+ok    glitch, seed 7: a one-cycle low pulse on LFRAME# between two rising edges while idle, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 112, outside a START clock; waveform: LFRAME# falls 2 times, wanted 1 (one per )
+ok    glitch, seed 11: a one-cycle low pulse on LFRAME# between two rising edges while idle, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 112, outside a START clock; waveform: LFRAME# falls 2 times, wanted 1 (one per )
+ok    lateslot, seed 1: every transaction one clock late, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 200, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    lateslot, seed 2: every transaction one clock late, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 200, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    lateslot, seed 3: every transaction one clock late, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 200, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    lateslot, seed 7: every transaction one clock late, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 200, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    lateslot, seed 11: every transaction one clock late, must fail (13 of 13 cases fail; first: waveform: LFRAME# low at cycle 200, outside a START clock; waveform: the chip drives LAD (outputs 0000) at cyc)
+ok    stopearly, seed 1: LCLK stops one clock before the last transaction ends, must fail (13 of 13 cases fail; first: waveform: LCLK has 16 rising edges, the transactions need 17 (to cycle 420); decoder: 8 annotations, wanted 9 )
+ok    stopearly, seed 2: LCLK stops one clock before the last transaction ends, must fail (13 of 13 cases fail; first: waveform: LCLK has 16 rising edges, the transactions need 17 (to cycle 420); decoder: 8 annotations, wanted 9 )
+ok    stopearly, seed 3: LCLK stops one clock before the last transaction ends, must fail (13 of 13 cases fail; first: waveform: LCLK has 16 rising edges, the transactions need 17 (to cycle 420); decoder: 8 annotations, wanted 9 )
+ok    stopearly, seed 7: LCLK stops one clock before the last transaction ends, must fail (13 of 13 cases fail; first: waveform: LCLK has 16 rising edges, the transactions need 17 (to cycle 420); decoder: 8 annotations, wanted 9 )
+ok    stopearly, seed 11: LCLK stops one clock before the last transaction ends, must fail (13 of 13 cases fail; first: waveform: LCLK has 16 rising edges, the transactions need 17 (to cycle 420); decoder: 8 annotations, wanted 9 )
+ok    dropxact, seed 1: the last transaction is not run, must fail (13 of 13 cases fail; first: waveform: LCLK has 1 rising edges, the transactions need 17 (to cycle 420); waveform: LFRAME# falls 0 times, w)
+ok    dropxact, seed 2: the last transaction is not run, must fail (13 of 13 cases fail; first: waveform: LCLK has 1 rising edges, the transactions need 17 (to cycle 420); waveform: LFRAME# falls 0 times, w)
+ok    dropxact, seed 3: the last transaction is not run, must fail (13 of 13 cases fail; first: waveform: LCLK has 1 rising edges, the transactions need 17 (to cycle 420); waveform: LFRAME# falls 0 times, w)
+ok    dropxact, seed 7: the last transaction is not run, must fail (13 of 13 cases fail; first: waveform: LCLK has 1 rising edges, the transactions need 17 (to cycle 420); waveform: LFRAME# falls 0 times, w)
+ok    dropxact, seed 11: the last transaction is not run, must fail (13 of 13 cases fail; first: waveform: LCLK has 1 rising edges, the transactions need 17 (to cycle 420); waveform: LFRAME# falls 0 times, w)
+ok    hand-in rules: run_args.txt with -tx refused
+ok    hand-in rules: run_args.txt with -stimulus refused
+ok    hand-in rules: run_args.txt with -s (prefix of -stimulus) refused
+ok    hand-in rules: run_args.txt with -cycles refused
+ok    hand-in rules: run_args.txt with -inputs refused
+ok    hand-in rules: run_args.txt with -c (ambiguous) refused
+ok    hand-in rules: run_args.txt with two lines refused
+ok    hand-in rules: run_args.txt with flag without value refused
+ok    hand-in rules: run_args.txt with LAD push-pull refused
+ok    hand-in rules: run_args.txt with LCLK open-drain refused
+ok    hand-in rules: run_args.txt with LFRAME# missing refused
+ok    hand-in rules: run_args.txt with modes in another order, with -config accepted
+ok    hand-in rules: run_args.txt with shortened -mo accepted
+ok    real simulator: an idle program is run (tx, stimulus accepted) and all 13 cases fail cleanly (waveform: LCLK has 0 rising edges, the transactions need 17 (to cycle 420); waveform: LFRA)
+SELFTEST PASS

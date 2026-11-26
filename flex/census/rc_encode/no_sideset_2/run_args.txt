@@ -1,0 +1,1 @@
+-config clkdiv=100,threshold=12 -mode 0=pp

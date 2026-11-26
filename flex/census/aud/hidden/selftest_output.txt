@@ -1,0 +1,104 @@
+ok    interface: the sheet's example gives the words printed in the sheet (0x1234, 0x0C00, 0x125A, 0x0C00, 0x1257, 0x0C00)
+ok    seed 1: sigrok reads every case's stimulus as the wanted addresses
+ok    seed 2: sigrok reads every case's stimulus as the wanted addresses
+ok    seed 3: sigrok reads every case's stimulus as the wanted addresses
+ok    seed 7: sigrok reads every case's stimulus as the wanted addresses
+ok    seed 11: sigrok reads every case's stimulus as the wanted addresses
+
+result     seed expected judge  failed  what it is
+none       1    pass     pass   0/14    ideal receiver, words 5 and 6 cycles after the last nibble's edge
+ok    seed 1: RATE bytes=104 cycles=17025, as the stimulus gives
+none       2    pass     pass   0/14    ideal receiver, words 5 and 6 cycles after the last nibble's edge
+ok    seed 2: RATE bytes=60 cycles=11825, as the stimulus gives
+none       3    pass     pass   0/14    ideal receiver, words 5 and 6 cycles after the last nibble's edge
+ok    seed 3: RATE bytes=40 cycles=6275, as the stimulus gives
+none       7    pass     pass   0/14    ideal receiver, words 5 and 6 cycles after the last nibble's edge
+ok    seed 7: RATE bytes=116 cycles=23175, as the stimulus gives
+none       11   pass     pass   0/14    ideal receiver, words 5 and 6 cycles after the last nibble's edge
+ok    seed 11: RATE bytes=84 cycles=16025, as the stimulus gives
+at_limit   1    pass     pass   0/14    words 199 and 200 cycles after the last nibble's edge, the limit
+at_limit   2    pass     pass   0/14    words 199 and 200 cycles after the last nibble's edge, the limit
+at_limit   3    pass     pass   0/14    words 199 and 200 cycles after the last nibble's edge, the limit
+at_limit   7    pass     pass   0/14    words 199 and 200 cycles after the last nibble's edge, the limit
+at_limit   11   pass     pass   0/14    words 199 and 200 cycles after the last nibble's edge, the limit
+next_edge  1    pass     pass   0/14    words pushed only at the next sync-high edge, as sigrok annotates
+next_edge  2    pass     pass   0/14    words pushed only at the next sync-high edge, as sigrok annotates
+next_edge  3    pass     pass   0/14    words pushed only at the next sync-high edge, as sigrok annotates
+next_edge  7    pass     pass   0/14    words pushed only at the next sync-high edge, as sigrok annotates
+next_edge  11   pass     pass   0/14    words pushed only at the next sync-high edge, as sigrok annotates
+too_late   1    fail     fail   14/14   the high word 201 cycles after the last nibble's edge
+           e.g. case 0 (one 32-bit address: 1 address): FAIL: rx: rx word 1 pushed at cycle 841, 201 cycles after its last nibble's edge (limit 200)
+too_late   2    fail     fail   14/14   the high word 201 cycles after the last nibble's edge
+too_late   3    fail     fail   14/14   the high word 201 cycles after the last nibble's edge
+too_late   7    fail     fail   14/14   the high word 201 cycles after the last nibble's edge
+too_late   11   fail     fail   14/14   the high word 201 cycles after the last nibble's edge
+too_early  1    fail     fail   14/14   words pushed 2 and 1 cycles before the last nibble's edge
+           e.g. case 0 (one 32-bit address: 1 address): FAIL: rx: rx word 0 pushed at cycle 638, before its last nibble's edge at 640
+too_early  2    fail     fail   14/14   words pushed 2 and 1 cycles before the last nibble's edge
+too_early  3    fail     fail   14/14   words pushed 2 and 1 cycles before the last nibble's edge
+too_early  7    fail     fail   14/14   words pushed 2 and 1 cycles before the last nibble's edge
+too_early  11   fail     fail   14/14   words pushed 2 and 1 cycles before the last nibble's edge
+bit_flip   1    fail     fail   14/14   one bit of one word flipped, in the middle address
+           e.g. case 0 (one 32-bit address: 1 address): FAIL: rx: rx word 0 (address 0, low half) is 0x5668, wanted 0x5678
+bit_flip   2    fail     fail   14/14   one bit of one word flipped, in the middle address
+bit_flip   3    fail     fail   14/14   one bit of one word flipped, in the middle address
+bit_flip   7    fail     fail   14/14   one bit of one word flipped, in the middle address
+bit_flip   11   fail     fail   14/14   one bit of one word flipped, in the middle address
+swapped    1    fail     fail   14/14   high half pushed before low half
+           e.g. case 0 (one 32-bit address: 1 address): FAIL: rx: rx word 0 (address 0, low half) is 0x1234, wanted 0x5678
+swapped    2    fail     fail   14/14   high half pushed before low half
+swapped    3    fail     fail   14/14   high half pushed before low half
+swapped    7    fail     fail   14/14   high half pushed before low half
+swapped    11   fail     fail   14/14   high half pushed before low half
+no_merge   1    fail     fail   11/14   short addresses not merged: the bits not sent read 0
+           e.g. case 1 (each width in turn: 4 addresses): FAIL: rx: rx word 3 (address 1, high half) is 0x0000, wanted 0xDEAD
+no_merge   2    fail     fail   11/14   short addresses not merged: the bits not sent read 0
+no_merge   3    fail     fail   11/14   short addresses not merged: the bits not sent read 0
+no_merge   7    fail     fail   11/14   short addresses not merged: the bits not sent read 0
+no_merge   11   fail     fail   11/14   short addresses not merged: the bits not sent read 0
+nibble_msb 1    fail     fail   13/14   nibbles taken most significant first
+           e.g. case 0 (one 32-bit address: 1 address): FAIL: rx: rx word 0 (address 0, low half) is 0x4321, wanted 0x5678
+nibble_msb 2    fail     fail   12/14   nibbles taken most significant first
+nibble_msb 3    fail     fail   13/14   nibbles taken most significant first
+nibble_msb 7    fail     fail   13/14   nibbles taken most significant first
+nibble_msb 11   fail     fail   13/14   nibbles taken most significant first
+drop_last  1    fail     fail   14/14   the last address is missing
+           e.g. case 0 (one 32-bit address: 1 address): FAIL: rx: 0 rx words, wanted 2 (two per address)
+drop_last  2    fail     fail   14/14   the last address is missing
+drop_last  3    fail     fail   14/14   the last address is missing
+drop_last  7    fail     fail   14/14   the last address is missing
+drop_last  11   fail     fail   14/14   the last address is missing
+extra      1    fail     fail   14/14   one extra word after the last address
+           e.g. case 0 (one 32-bit address: 1 address): FAIL: rx: 3 rx words, wanted 2 (two per address)
+extra      2    fail     fail   14/14   one extra word after the last address
+extra      3    fail     fail   14/14   one extra word after the last address
+extra      7    fail     fail   14/14   one extra word after the last address
+extra      11   fail     fail   14/14   one extra word after the last address
+dup        1    fail     fail   14/14   the first address pushed twice
+           e.g. case 0 (one 32-bit address: 1 address): FAIL: rx: 4 rx words, wanted 2 (two per address); rx: rx word 1 (address 0, high half) is 0x5678, wanted 0x123
+dup        2    fail     fail   14/14   the first address pushed twice
+dup        3    fail     fail   14/14   the first address pushed twice
+dup        7    fail     fail   14/14   the first address pushed twice
+dup        11   fail     fail   14/14   the first address pushed twice
+data_msb   1    fail     fail   14/14   AUDATA pins read in the wrong order (AUDATA3 as bit 0)
+           e.g. case 0 (one 32-bit address: 1 address): FAIL: rx: 0 rx words, wanted 2 (two per address)
+data_msb   2    fail     fail   14/14   AUDATA pins read in the wrong order (AUDATA3 as bit 0)
+data_msb   3    fail     fail   14/14   AUDATA pins read in the wrong order (AUDATA3 as bit 0)
+data_msb   7    fail     fail   14/14   AUDATA pins read in the wrong order (AUDATA3 as bit 0)
+data_msb   11   fail     fail   14/14   AUDATA pins read in the wrong order (AUDATA3 as bit 0)
+
+ok    run_args.txt '-config in_base=2\n': accepted
+ok    run_args.txt '-mode 6=pp -config in_base=2\n': accepted
+ok    run_args.txt '-mo 2=in\n': accepted
+ok    run_args.txt '\n': accepted
+ok    run_args.txt '-mode 0=pp\n': setup: FAIL: run_args.txt: P0 is an AUD input and must stay an input
+ok    run_args.txt '-mode 5=od\n': setup: FAIL: run_args.txt: P5 is an AUD input and must stay an input
+ok    run_args.txt '-stimulus x.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-tx x.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-tx'
+ok    run_args.txt '-inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-cycles 5\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-cycles'
+ok    run_args.txt '-c in_base=2\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-config in_base=2\n-mode 6=pp\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (one 32-bit address: 1 address): FAIL: rx: 0 rx words, wanted 2 (two per address))
+SELFTEST PASS

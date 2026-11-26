@@ -1,0 +1,134 @@
+ok    tx_words of the sheet's example: 006E 1234 5678 9ABC DEF0 0080 0013 FFFF 0001
+ok    TASK.md prints those nine words
+ok    TASK.md carries the host-interface sentence
+ok    ideal.commands_of reads the words back into accept.command_bits
+ok    the example is 70, 2 and 38 bits
+ok    example command 0: opcode 1 0, lock 1, address 1 0 1
+ok    example command 2: opcode 1 1, lock 0, address 0 1 0
+ok    seed 1 none         pass: passed (ideal: first change at cycle 200, 0 = 47 halves, 1 = 111 halves, write gap 12 FC, start gap 20 FC, 300 halves before the first command, 401 after each)
+ok    seed 1 RATE line ['RATE bytes=16 cycles=1215360'], from the generator RATE bytes=16 cycles=1215360
+ok    seed 1 slowcarrier  pass: passed (every half period 42 cycles (the limit))
+ok    seed 1 fastcarrier  pass: passed (every half period 38 cycles (the limit))
+ok    seed 1 shortest     pass: passed (0 = 1440 cycles, 1 = 4000, gaps of 800, lead and tail of exactly 8000 (all limits))
+ok    seed 1 longest      pass: passed (0 = 2320 cycles, 1 = 4880, write gaps 2400, start gaps 4000, lead 80000 (all limits))
+ok    seed 1 freeze       pass: passed (the line stops 401 halves after the last command's last gap)
+ok    seed 1 flipbit      fail: failed (one data bit of the last command inverted) | case 0 (standard write of zeros: write): FAIL: waveform: command 0: bit 32 is 1, wanted 0; decoder: annotation 33 (command 0, item 33) is '1', wanted 
+ok    seed 1 lsbfirst     fail: failed (data sent least significant bit first) | case 2 (the task sheet's example: protected write, reset, write): FAIL: waveform: command 0: bit 35 is 0, wanted 1; decoder: annotation 36 (command 0,
+ok    seed 1 droplock     fail: failed (the lock bit left out of every write) | case 0 (standard write of zeros: write): FAIL: waveform: command 0 has 37 bits, wanted 38; decoder: annotation 38 (command 0, item 38) is 'Write mode 
+ok    seed 1 half43       fail: failed (every half period 43 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 43 cycles at cycle 200 is neither a carrier half period (38 to 42) nor a gap (
+ok    seed 1 half37       fail: failed (every half period 37 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 37 cycles at cycle 200 is neither a carrier half period (38 to 42) nor a gap (
+ok    seed 1 glitch       fail: failed (one half period of 10 cycles in the lead-in) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 10 cycles at cycle 2200 is neither a carrier half period (38 to 42) nor a gap 
+ok    seed 1 zero1439     fail: failed (0 bits of 1439 cycles (the decoder still reads 0)) | case 0 (standard write of zeros: write): FAIL: waveform: command 0, bit 1: carrier of 1439 cycles between gaps (cycle 19200 to 20639), a 0 is 1440 to 
+ok    seed 1 one4881      fail: failed (1 bits of 4881 cycles (the decoder still reads 1)) | case 0 (standard write of zeros: write): FAIL: waveform: command 0, bit 0: carrier of 4881 cycles between gaps (cycle 13800 to 18681), a 0 is 1440 to 
+ok    seed 1 wgap799      fail: failed (write gaps of 799 cycles (the decoder still sees gaps)) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 799 cycles at cycle 18240 is neither a carrier half period (38 to 42) nor a ga
+ok    seed 1 wgap2401     fail: failed (write gaps of 2401 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: command 0: write gap of 2401 cycles at cycle 18240, limits 800 to 2400
+ok    seed 1 sgap4001     fail: failed (start gaps of 4001 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: start gap of 4001 cycles at cycle 12200, limits 800 to 4000
+ok    seed 1 gaphigh      fail: failed (gaps held high instead of low) | case 0 (standard write of zeros: write): FAIL: waveform: a gap of 1600 cycles at cycle 12200 holds P0 high: the field is off in a gap, P0 low
+ok    seed 1 tail7999     fail: failed (the line stops 7999 cycles after the last gap (the decoder still ends the command)) | case 0 (standard write of zeros: write): FAIL: waveform: the carrier runs 7999 cycles after the last gap (cycle 124280), at least 8000 wanted
+ok    seed 1 lead7999     fail: failed (start gap 7999 cycles after the previous command's last gap) | case 2 (the task sheet's example: protected write, reset, write): FAIL: waveform: command 0, bit 70: carrier of 7999 cycles between gaps (cycle 304760
+ok    seed 1 lead80001    fail: failed (start gap 80001 cycles after the previous command) | case 2 (the task sheet's example: protected write, reset, write): FAIL: waveform: carrier of 80001 cycles before the start gap at cycle 384761, at mos
+ok    seed 1 late         fail: failed (first change of P0 at cycle 401) | case 0 (standard write of zeros: write): FAIL: waveform: P0 first changes at cycle 401, limit 400
+ok    seed 1 dropcmd      fail: failed (the last command is not sent) | case 0 (standard write of zeros: write): FAIL: waveform: 0 commands on the line, wanted 1; decoder: annotation 0 (command 0, item 0) is 'nothing', wan
+ok    seed 1 extracmd     fail: failed (the last command is sent twice) | case 0 (standard write of zeros: write): FAIL: waveform: 2 commands on the line, wanted 1; decoder: annotation 44 (command 1, item 0) is 'Start gap', 
+ok    seed 1 nostartgap   fail: failed (no start gap: the first bit's on-time is measured from carrier start) | case 0 (standard write of zeros: write): FAIL: waveform: command 0 has 37 bits, wanted 38; decoder: annotation 1 (command 0, item 1) is '0', wanted '1
+ok    seed 2 none         pass: passed (ideal: first change at cycle 200, 0 = 47 halves, 1 = 111 halves, write gap 12 FC, start gap 20 FC, 300 halves before the first command, 401 after each)
+ok    seed 2 RATE line ['RATE bytes=12 cycles=1080960'], from the generator RATE bytes=12 cycles=1080960
+ok    seed 2 slowcarrier  pass: passed (every half period 42 cycles (the limit))
+ok    seed 2 fastcarrier  pass: passed (every half period 38 cycles (the limit))
+ok    seed 2 shortest     pass: passed (0 = 1440 cycles, 1 = 4000, gaps of 800, lead and tail of exactly 8000 (all limits))
+ok    seed 2 longest      pass: passed (0 = 2320 cycles, 1 = 4880, write gaps 2400, start gaps 4000, lead 80000 (all limits))
+ok    seed 2 freeze       pass: passed (the line stops 401 halves after the last command's last gap)
+ok    seed 2 flipbit      fail: failed (one data bit of the last command inverted) | case 0 (standard write of zeros: write): FAIL: waveform: command 0: bit 32 is 1, wanted 0; decoder: annotation 33 (command 0, item 33) is '1', wanted 
+ok    seed 2 lsbfirst     fail: failed (data sent least significant bit first) | case 2 (the task sheet's example: protected write, reset, write): FAIL: waveform: command 0: bit 35 is 0, wanted 1; decoder: annotation 36 (command 0,
+ok    seed 2 droplock     fail: failed (the lock bit left out of every write) | case 0 (standard write of zeros: write): FAIL: waveform: command 0 has 37 bits, wanted 38; decoder: annotation 38 (command 0, item 38) is 'Write mode 
+ok    seed 2 half43       fail: failed (every half period 43 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 43 cycles at cycle 200 is neither a carrier half period (38 to 42) nor a gap (
+ok    seed 2 half37       fail: failed (every half period 37 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 37 cycles at cycle 200 is neither a carrier half period (38 to 42) nor a gap (
+ok    seed 2 glitch       fail: failed (one half period of 10 cycles in the lead-in) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 10 cycles at cycle 2200 is neither a carrier half period (38 to 42) nor a gap 
+ok    seed 2 zero1439     fail: failed (0 bits of 1439 cycles (the decoder still reads 0)) | case 0 (standard write of zeros: write): FAIL: waveform: command 0, bit 1: carrier of 1439 cycles between gaps (cycle 19200 to 20639), a 0 is 1440 to 
+ok    seed 2 one4881      fail: failed (1 bits of 4881 cycles (the decoder still reads 1)) | case 0 (standard write of zeros: write): FAIL: waveform: command 0, bit 0: carrier of 4881 cycles between gaps (cycle 13800 to 18681), a 0 is 1440 to 
+ok    seed 2 wgap799      fail: failed (write gaps of 799 cycles (the decoder still sees gaps)) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 799 cycles at cycle 18240 is neither a carrier half period (38 to 42) nor a ga
+ok    seed 2 wgap2401     fail: failed (write gaps of 2401 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: command 0: write gap of 2401 cycles at cycle 18240, limits 800 to 2400
+ok    seed 2 sgap4001     fail: failed (start gaps of 4001 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: start gap of 4001 cycles at cycle 12200, limits 800 to 4000
+ok    seed 2 gaphigh      fail: failed (gaps held high instead of low) | case 0 (standard write of zeros: write): FAIL: waveform: a gap of 1600 cycles at cycle 12200 holds P0 high: the field is off in a gap, P0 low
+ok    seed 2 tail7999     fail: failed (the line stops 7999 cycles after the last gap (the decoder still ends the command)) | case 0 (standard write of zeros: write): FAIL: waveform: the carrier runs 7999 cycles after the last gap (cycle 124280), at least 8000 wanted
+ok    seed 2 lead7999     fail: failed (start gap 7999 cycles after the previous command's last gap) | case 2 (the task sheet's example: protected write, reset, write): FAIL: waveform: command 0, bit 70: carrier of 7999 cycles between gaps (cycle 304760
+ok    seed 2 lead80001    fail: failed (start gap 80001 cycles after the previous command) | case 2 (the task sheet's example: protected write, reset, write): FAIL: waveform: carrier of 80001 cycles before the start gap at cycle 384761, at mos
+ok    seed 2 late         fail: failed (first change of P0 at cycle 401) | case 0 (standard write of zeros: write): FAIL: waveform: P0 first changes at cycle 401, limit 400
+ok    seed 2 dropcmd      fail: failed (the last command is not sent) | case 0 (standard write of zeros: write): FAIL: waveform: 0 commands on the line, wanted 1; decoder: annotation 0 (command 0, item 0) is 'nothing', wan
+ok    seed 2 extracmd     fail: failed (the last command is sent twice) | case 0 (standard write of zeros: write): FAIL: waveform: 2 commands on the line, wanted 1; decoder: annotation 44 (command 1, item 0) is 'Start gap', 
+ok    seed 2 nostartgap   fail: failed (no start gap: the first bit's on-time is measured from carrier start) | case 0 (standard write of zeros: write): FAIL: waveform: command 0 has 37 bits, wanted 38; decoder: annotation 1 (command 0, item 1) is '0', wanted '1
+ok    seed 3 none         pass: passed (ideal: first change at cycle 200, 0 = 47 halves, 1 = 111 halves, write gap 12 FC, start gap 20 FC, 300 halves before the first command, 401 after each)
+ok    seed 3 RATE line ['RATE bytes=28 cycles=2169600'], from the generator RATE bytes=28 cycles=2169600
+ok    seed 3 slowcarrier  pass: passed (every half period 42 cycles (the limit))
+ok    seed 3 fastcarrier  pass: passed (every half period 38 cycles (the limit))
+ok    seed 3 shortest     pass: passed (0 = 1440 cycles, 1 = 4000, gaps of 800, lead and tail of exactly 8000 (all limits))
+ok    seed 3 longest      pass: passed (0 = 2320 cycles, 1 = 4880, write gaps 2400, start gaps 4000, lead 80000 (all limits))
+ok    seed 3 freeze       pass: passed (the line stops 401 halves after the last command's last gap)
+ok    seed 3 flipbit      fail: failed (one data bit of the last command inverted) | case 0 (standard write of zeros: write): FAIL: waveform: command 0: bit 32 is 1, wanted 0; decoder: annotation 33 (command 0, item 33) is '1', wanted 
+ok    seed 3 lsbfirst     fail: failed (data sent least significant bit first) | case 2 (the task sheet's example: protected write, reset, write): FAIL: waveform: command 0: bit 35 is 0, wanted 1; decoder: annotation 36 (command 0,
+ok    seed 3 droplock     fail: failed (the lock bit left out of every write) | case 0 (standard write of zeros: write): FAIL: waveform: command 0 has 37 bits, wanted 38; decoder: annotation 38 (command 0, item 38) is 'Write mode 
+ok    seed 3 half43       fail: failed (every half period 43 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 43 cycles at cycle 200 is neither a carrier half period (38 to 42) nor a gap (
+ok    seed 3 half37       fail: failed (every half period 37 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 37 cycles at cycle 200 is neither a carrier half period (38 to 42) nor a gap (
+ok    seed 3 glitch       fail: failed (one half period of 10 cycles in the lead-in) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 10 cycles at cycle 2200 is neither a carrier half period (38 to 42) nor a gap 
+ok    seed 3 zero1439     fail: failed (0 bits of 1439 cycles (the decoder still reads 0)) | case 0 (standard write of zeros: write): FAIL: waveform: command 0, bit 1: carrier of 1439 cycles between gaps (cycle 19200 to 20639), a 0 is 1440 to 
+ok    seed 3 one4881      fail: failed (1 bits of 4881 cycles (the decoder still reads 1)) | case 0 (standard write of zeros: write): FAIL: waveform: command 0, bit 0: carrier of 4881 cycles between gaps (cycle 13800 to 18681), a 0 is 1440 to 
+ok    seed 3 wgap799      fail: failed (write gaps of 799 cycles (the decoder still sees gaps)) | case 0 (standard write of zeros: write): FAIL: waveform: an interval of 799 cycles at cycle 18240 is neither a carrier half period (38 to 42) nor a ga
+ok    seed 3 wgap2401     fail: failed (write gaps of 2401 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: command 0: write gap of 2401 cycles at cycle 18240, limits 800 to 2400
+ok    seed 3 sgap4001     fail: failed (start gaps of 4001 cycles) | case 0 (standard write of zeros: write): FAIL: waveform: start gap of 4001 cycles at cycle 12200, limits 800 to 4000
+ok    seed 3 gaphigh      fail: failed (gaps held high instead of low) | case 0 (standard write of zeros: write): FAIL: waveform: a gap of 1600 cycles at cycle 12200 holds P0 high: the field is off in a gap, P0 low
+ok    seed 3 tail7999     fail: failed (the line stops 7999 cycles after the last gap (the decoder still ends the command)) | case 0 (standard write of zeros: write): FAIL: waveform: the carrier runs 7999 cycles after the last gap (cycle 124280), at least 8000 wanted
+ok    seed 3 lead7999     fail: failed (start gap 7999 cycles after the previous command's last gap) | case 2 (the task sheet's example: protected write, reset, write): FAIL: waveform: command 0, bit 70: carrier of 7999 cycles between gaps (cycle 304760
+ok    seed 3 lead80001    fail: failed (start gap 80001 cycles after the previous command) | case 2 (the task sheet's example: protected write, reset, write): FAIL: waveform: carrier of 80001 cycles before the start gap at cycle 384761, at mos
+ok    seed 3 late         fail: failed (first change of P0 at cycle 401) | case 0 (standard write of zeros: write): FAIL: waveform: P0 first changes at cycle 401, limit 400
+ok    seed 3 dropcmd      fail: failed (the last command is not sent) | case 0 (standard write of zeros: write): FAIL: waveform: 0 commands on the line, wanted 1; decoder: annotation 0 (command 0, item 0) is 'nothing', wan
+ok    seed 3 extracmd     fail: failed (the last command is sent twice) | case 0 (standard write of zeros: write): FAIL: waveform: 2 commands on the line, wanted 1; decoder: annotation 44 (command 1, item 0) is 'Start gap', 
+ok    seed 3 nostartgap   fail: failed (no start gap: the first bit's on-time is measured from carrier start) | case 0 (standard write of zeros: write): FAIL: waveform: command 0 has 37 bits, wanted 38; decoder: annotation 1 (command 0, item 1) is '0', wanted '1
+
+Which check objects, on the task sheet's example (W = waveform check, D = decoder):
+  none         W:ok   D:ok   
+ok    none passes both checks on the example
+  slowcarrier  W:ok   D:ok   
+ok    slowcarrier passes both checks on the example
+  fastcarrier  W:ok   D:ok   
+ok    fastcarrier passes both checks on the example
+  shortest     W:ok   D:ok   
+ok    shortest passes both checks on the example
+  longest      W:ok   D:ok   
+ok    longest passes both checks on the example
+  freeze       W:ok   D:ok   
+ok    freeze passes both checks on the example
+  flipbit      W:FAIL D:FAIL command 2: bit 32 is 1, wanted 0
+  lsbfirst     W:FAIL D:FAIL command 0: bit 35 is 0, wanted 1
+  droplock     W:FAIL D:FAIL command 0 has 69 bits, wanted 70
+  half43       W:FAIL D:ok   an interval of 43 cycles at cycle 200 is neither a carrier half period (38 to 42) nor a gap (800 or more)
+  half37       W:FAIL D:ok   an interval of 37 cycles at cycle 200 is neither a carrier half period (38 to 42) nor a gap (800 or more)
+  glitch       W:FAIL D:ok   an interval of 10 cycles at cycle 2200 is neither a carrier half period (38 to 42) nor a gap (800 or more)
+  zero1439     W:FAIL D:ok   command 0, bit 1: carrier of 1439 cycles between gaps (cycle 19200 to 20639), a 0 is 1440 to 2320 and a 1 4000
+  one4881      W:FAIL D:ok   command 0, bit 0: carrier of 4881 cycles between gaps (cycle 13800 to 18681), a 0 is 1440 to 2320 and a 1 4000
+  wgap799      W:FAIL D:ok   an interval of 799 cycles at cycle 18240 is neither a carrier half period (38 to 42) nor a gap (800 or more)
+  wgap2401     W:FAIL D:ok   command 0: write gap of 2401 cycles at cycle 18240, limits 800 to 2400
+  sgap4001     W:FAIL D:ok   start gap of 4001 cycles at cycle 12200, limits 800 to 4000
+  gaphigh      W:FAIL D:ok   a gap of 1600 cycles at cycle 12200 holds P0 high: the field is off in a gap, P0 low
+  tail7999     W:FAIL D:ok   the carrier runs 7999 cycles after the last gap (cycle 504840), at least 8000 wanted
+  lead7999     W:FAIL D:ok   command 0, bit 70: carrier of 7999 cycles between gaps (cycle 304760 to 312759), a 0 is 1440 to 2320 and a 1 4
+  lead80001    W:FAIL D:ok   carrier of 80001 cycles before the start gap at cycle 384761, at most 80000
+  late         W:FAIL D:ok   P0 first changes at cycle 401, limit 400
+  dropcmd      W:FAIL D:FAIL 2 commands on the line, wanted 3
+  extracmd     W:FAIL D:FAIL 4 commands on the line, wanted 3
+  nostartgap   W:FAIL D:FAIL command 0 has 69 bits, wanted 70
+ok    run_args '-tx f' refused
+ok    run_args '-t f' refused
+ok    run_args '-cycles 9' refused
+ok    run_args '-inputs 1' refused
+ok    run_args '-stimulus f' refused
+ok    run_args '-c x' refused
+ok    run_args '-mode 0=pp\n-config clkdiv=2' refused
+ok    run_args '-mode' refused
+ok    run_args '--mode 0=pp' refused
+ok    a two-line run_args.txt is a setup failure
+ok    run_args '-mode 0=pp' accepted
+ok    run_args '-config clkdiv=5,set_base=0 -mode 0=pp' accepted
+ok    run_args '-conf start=0 -mo 0=pp' accepted
+ok    real pe_sim, idle program: 14 cases, all fail cleanly (case 0 (standard write of zeros: write): FAIL: waveform: P0 never changes; decoder: annota)
+
+VALIDATE PASS

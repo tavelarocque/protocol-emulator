@@ -1,0 +1,1 @@
+-config start=43,threshold=8,out_msb_first=1,crc_poly=13874874,crc_init=6110079 -mode 0=pp

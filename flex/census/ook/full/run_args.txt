@@ -1,0 +1,1 @@
+-config clkdiv=25,out_msb_first=1,threshold=16,set_base=0,set_count=1,start=0 -mode 0=pp

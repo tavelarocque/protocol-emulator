@@ -1,0 +1,1 @@
+-config in_msb_first=1,out_msb_first=1,threshold=16 -mode 0=pp

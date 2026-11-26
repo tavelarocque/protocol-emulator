@@ -1,0 +1,1 @@
+-config set_base=0,set_count=2,threshold=16,out_msb_first=1,clkdiv=2,crc_poly=0x80,crc_init=0 -mode 0=pp -mode 1=pp

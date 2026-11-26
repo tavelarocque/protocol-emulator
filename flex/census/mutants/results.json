@@ -1,0 +1,578 @@
+{
+ "rc_encode": [
+  {
+   "line": 36,
+   "from": "sync:   set y, 11               ; 383",
+   "to": "sync:   set y, 10",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 18,
+   "from": "set pins, 1 [3]         ; 16..19 high",
+   "to": "set pins, 0 [3]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 28,
+   "from": "set pins, 0             ; 28     low",
+   "to": "set pins, 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 27,
+   "from": "p2long: set pins, 1 [11]        ; 16..27 high",
+   "to": "p2long: set pins, 2 [11]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 11,
+   "from": "wait0:  jmp x--, wait0 [7]",
+   "to": "wait0:  jmp x--, wait0 [6]",
+   "verdict": "PASS"
+  }
+ ],
+ "aud": [
+  {
+   "line": 63,
+   "from": "in pins, 4",
+   "to": "in pins, 3",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 20,
+   "from": "wait 1 pin 0",
+   "to": "wait 1 pin 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 45,
+   "from": "wait 1 pin 5 timeout ; AUDATA3 low: idle nibble 0x3 -> timeout_vector = idle",
+   "to": "wait 1 pin 4 timeout",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 77,
+   "from": "wait 1 pin 0",
+   "to": "wait 1 pin 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 18,
+   "from": "out x, 8            ; X = previous bits 15..8",
+   "to": "out x, 7",
+   "verdict": "FAIL"
+  }
+ ],
+ "ook": [
+  {
+   "line": 21,
+   "from": "set pins, 0 [8]         ; T0 + 20k + 10: fall",
+   "to": "set pins, 0 [9]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 28,
+   "from": "nop [3]",
+   "to": "nop [2]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 21,
+   "from": "set pins, 0 [8]         ; T0 + 20k + 10: fall",
+   "to": "set pins, 0 [9]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 24,
+   "from": "nop [9]                 ; S      : low first half of the 0",
+   "to": "nop [8]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 35,
+   "from": "one:    set pins, 1 [9]         ; B      : high first half",
+   "to": "one:    set pins, 0 [9]",
+   "verdict": "FAIL"
+  }
+ ],
+ "ac97": [
+  {
+   "line": 27,
+   "from": "wait 1 pin 0         ; e+4: tag bit 12 = 1",
+   "to": "wait 0 pin 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 59,
+   "from": "set y, 4",
+   "to": "set y, 3",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 35,
+   "from": "wait 1 pin 0         ; e+16: SYNC low, tag bit 0 = 0",
+   "to": "wait 0 pin 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 40,
+   "from": "s1:     wait 1 pin 0         ; e+18..e+25: address bits, then a 0 (OSR spent)",
+   "to": "s1:     wait 1 pin 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 29,
+   "from": "wait 1 pin 0         ; e+5: tag bit 11 = 1 (no change)",
+   "to": "wait 0 pin 0",
+   "verdict": "FAIL"
+  }
+ ],
+ "lpc": [
+  {
+   "line": 35,
+   "from": "set pins, 4     side 1      ; c1 L  CYCTYPE+DIR 0100",
+   "to": "set pins, 4     side 2",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 45,
+   "from": "nop             side 1      ; t+3 L",
+   "to": "nop             side 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 44,
+   "from": "jmp y-- tw      side 3      ; t+1 H, t+2 H (SYNC)",
+   "to": "jmp y-- tw      side 2",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 35,
+   "from": "set pins, 4     side 1      ; c1 L  CYCTYPE+DIR 0100",
+   "to": "set pins, 4     side 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 56,
+   "from": "jmp addr        side 3      ; c1 H",
+   "to": "jmp addr        side 2",
+   "verdict": "FAIL"
+  }
+ ],
+ "dsi": [
+  {
+   "line": 19,
+   "from": "set pins, 0  [9]    ; t26+26i: second half low",
+   "to": "set pins, 0  [8]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 15,
+   "from": "set pins, 1  [10]   ; t0 (=t465 of previous frame): rise, start bit",
+   "to": "set pins, 1  [11]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 13,
+   "from": "out null, 8         ; t463: drop bits 15..8",
+   "to": "out null, 7",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 15,
+   "from": "set pins, 1  [10]   ; t0 (=t465 of previous frame): rise, start bit",
+   "to": "set pins, 1  [9]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 13,
+   "from": "out null, 8         ; t463: drop bits 15..8",
+   "to": "out null, 7",
+   "verdict": "FAIL"
+  }
+ ],
+ "avr_pdi": [
+  {
+   "line": 55,
+   "from": "set pins, 1      side 0 [4]      ; t0-4 stop bit 1",
+   "to": "set pins, 1      side 1 [4]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 81,
+   "from": "nop              side 0 [4]      ; stop bit 2",
+   "to": "nop              side 0 [5]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 69,
+   "from": "jmp y-- guard    side 1 [4]      ; 32 x 4 = 128 slots",
+   "to": "jmp y-- guard    side 1 [3]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 67,
+   "from": "nop              side 1 [4]",
+   "to": "nop              side 0 [4]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 38,
+   "from": "mov osr, x       side 1          ; t9   restore the word, count 0",
+   "to": "mov osr, x       side 0",
+   "verdict": "FAIL"
+  }
+ ],
+ "maple_bus": [
+  {
+   "line": 78,
+   "from": "set pins, 0         [11]   ; A-",
+   "to": "set pins, 0         [10]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 69,
+   "from": "set pins, 1         [6]",
+   "to": "set pins, 0         [6]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 16,
+   "from": "mov x, osr          [15]",
+   "to": "mov x, osr          [14]",
+   "verdict": "PASS"
+  },
+  {
+   "line": 24,
+   "from": "set x, 3",
+   "to": "set x, 4",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 18,
+   "from": "mov osr, x          [15]   ; OSR = word 0 again, full",
+   "to": "mov osr, x          [14]",
+   "verdict": "PASS"
+  }
+ ],
+ "seven_segment": [
+  {
+   "line": 20,
+   "from": "set x, 25 [13]          ; 1: b c",
+   "to": "set x, 25 [12]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 53,
+   "from": "set x, 6  [2]           ; C: a d e f",
+   "to": "set x, 5  [2]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 87,
+   "from": "out x, 4                ; bits 3..0: digit",
+   "to": "out x, 5",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 107,
+   "from": "set y, 28               ; 1 cycle",
+   "to": "set y, 29",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 61,
+   "from": "c15:    set x, 14               ; F: a e f g",
+   "to": "c15:    set x, 13",
+   "verdict": "FAIL"
+  }
+ ],
+ "iec": [
+  {
+   "line": 35,
+   "from": "jmp predelay    side 0",
+   "to": "jmp predelay    side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 73,
+   "from": "d2:     jmp !y aftersecond side 0       ; 2: SECOND sent",
+   "to": "d2:     jmp !y aftersecond side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 63,
+   "from": "jmp !osre bit   side 0          ; CLK low (fall after the bit)",
+   "to": "jmp !osre bit   side 1",
+   "verdict": "PASS"
+  },
+  {
+   "line": 78,
+   "from": "jmp idle        side 1          ; CLK released",
+   "to": "jmp idle        side 0",
+   "verdict": "PASS"
+  },
+  {
+   "line": 71,
+   "from": "d1:     jmp !y lastdata side 0          ; 1: last data byte sent",
+   "to": "d1:     jmp !y lastdata side 1",
+   "verdict": "FAIL"
+  }
+ ],
+ "t55xx": [
+  {
+   "line": 75,
+   "from": "out x, 1            side 0",
+   "to": "out x, 1            side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 32,
+   "from": "out null, 8         side 0",
+   "to": "out null, 9         side 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 66,
+   "from": "jmp !y done         side 0      ; all segments sent",
+   "to": "jmp !y done         side 1",
+   "verdict": "PASS"
+  },
+  {
+   "line": 90,
+   "from": "nop                 side 0 [7]",
+   "to": "nop                 side 0 [6]",
+   "verdict": "PASS"
+  },
+  {
+   "line": 85,
+   "from": "jmp have            side 0",
+   "to": "jmp have            side 1",
+   "verdict": "FAIL"
+  }
+ ],
+ "dcf77": [
+  {
+   "line": 18,
+   "from": "set y, 1                ; gap flag for this pulse",
+   "to": "set y, 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 14,
+   "from": "wait 1 pin 0 timeout    ; next rise within 1350 ms, else jump to gap",
+   "to": "wait 1 pin 1 timeout",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 21,
+   "from": "in y, 1                 ; word bit 1: gap flag (msb-first: ends up above the data bit)",
+   "to": "in y, 2",
+   "verdict": "PASS"
+  },
+  {
+   "line": 12,
+   "from": "wait 1 pin 0            ; first whole rising edge",
+   "to": "wait 1 pin 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 12,
+   "from": "wait 1 pin 0            ; first whole rising edge",
+   "to": "wait 0 pin 0",
+   "verdict": "PASS"
+  }
+ ],
+ "sda2506": [
+  {
+   "line": 17,
+   "from": "nop             side 1 [1]  ; t13",
+   "to": "nop             side 1 [0]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 33,
+   "from": "set pins, 1     side 0 [7]  ; slot n t5: CE falls with DATA high",
+   "to": "set pins, 1     side 1 [7]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 43,
+   "from": "jmp next        side 0",
+   "to": "jmp next        side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 20,
+   "from": "set pins, 0     side 0 [6]  ; slot n t5: CE falls with DATA low",
+   "to": "set pins, 1     side 0 [6]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 42,
+   "from": "tov:    set pins, 3     side 0      ; slot n+2 + 20000 ticks: CE rises",
+   "to": "tov:    set pins, 3     side 1",
+   "verdict": "FAIL"
+  }
+ ],
+ "swim": [
+  {
+   "line": 208,
+   "from": "set pins, 0 [1]           ; t5+198: parity",
+   "to": "set pins, 0 [2]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 166,
+   "from": "jmp !osre bl1 [1]",
+   "to": "jmp !osre bl1 [2]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 167,
+   "from": "set pins, 1 [1]",
+   "to": "set pins, 2 [1]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 72,
+   "from": "rx0:    nop [15]                  ; r0-7 (first frame: from rd, page 2)",
+   "to": "rx0:    nop [14]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 190,
+   "from": "out x, 1                  ; t4+220: X = command bit 1 (1 = WOTF)",
+   "to": "out x, 2",
+   "verdict": "FAIL"
+  }
+ ],
+ "flexray": [
+  {
+   "line": 30,
+   "from": "mov y, isr [3]          ; U+6  Y = Y'",
+   "to": "mov y, isr [4]",
+   "verdict": "PASS"
+  },
+  {
+   "line": 78,
+   "from": "cl:     mov isr, crc [1]        ; T'+2 byte 2: second read, CRC bits 23..16 of the register",
+   "to": "cl:     mov isr, crc [0]",
+   "verdict": "PASS"
+  },
+  {
+   "line": 64,
+   "from": "pz:     set pins, 0 [4]         ; c10 / T+5: BSS low",
+   "to": "pz:     set pins, 1 [4]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 30,
+   "from": "mov y, isr [3]          ; U+6  Y = Y'",
+   "to": "mov y, isr [2]",
+   "verdict": "PASS"
+  },
+  {
+   "line": 17,
+   "from": "set pins, 0             ; T+5  BSS low",
+   "to": "set pins, 1",
+   "verdict": "FAIL"
+  }
+ ],
+ "em4305": [
+  {
+   "line": 15,
+   "from": "data:   out x, 1            side 0      ; t1  X = bit",
+   "to": "data:   out x, 1            side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 56,
+   "from": "mov osr, osr        side 1      ; t8",
+   "to": "mov osr, osr        side 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 61,
+   "from": "pull                side 0      ; t9",
+   "to": "pull                side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 129,
+   "from": "set x, 8            side 1",
+   "to": "set x, 8            side 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 71,
+   "from": "e6:     jmp x-- e7          side 0      ; t9",
+   "to": "e6:     jmp x-- e7          side 1",
+   "verdict": "FAIL"
+  }
+ ],
+ "sdcard_sd": [
+  {
+   "line": 39,
+   "from": "out null, 14    side 0",
+   "to": "out null, 13    side 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 9,
+   "from": "in x, 5         side 1 [6]      ; ISR = 10011",
+   "to": "in x, 5         side 0 [6]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 31,
+   "from": "jmp L2          side 0          ; F",
+   "to": "jmp L2          side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 42,
+   "from": "out null, 13    side 0",
+   "to": "out null, 13    side 1",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 66,
+   "from": "set x, 7        side 0          ; M",
+   "to": "set x, 7        side 1",
+   "verdict": "FAIL"
+  }
+ ],
+ "usb_power_delivery": [
+  {
+   "line": 36,
+   "from": "in y, 5",
+   "to": "in y, 6",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 39,
+   "from": "ksent:  set y, 1                    ; sentinel then a 0: chunk is bits 0..14",
+   "to": "ksent:  set y, 0",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 167,
+   "from": "m2:     set x, 21 [4]               ; 4,5",
+   "to": "m2:     set x, 21 [5]",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 34,
+   "from": "in y, 4",
+   "to": "in y, 3",
+   "verdict": "FAIL"
+  },
+  {
+   "line": 18,
+   "from": "gap:    set x, 31 [15]",
+   "to": "gap:    set x, 30 [15]",
+   "verdict": "PASS"
+  }
+ ]
+}

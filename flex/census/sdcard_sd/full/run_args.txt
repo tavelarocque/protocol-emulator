@@ -1,0 +1,1 @@
+-config clkdiv=10,sideset_base=0,sideset_count=1,out_base=1,out_count=1,set_base=1,set_count=1,in_base=1,threshold=16,out_msb_first=1,in_msb_first=1,autopush=1,crc_poly=0x48,crc_init=0x48,timeout=0,timeout_vector=7 -mode 0=pp -mode 1=od

@@ -1,0 +1,191 @@
+ok    interface: the task sheet's example gives the words printed in the sheet (0x01A5, 0x0012, 0x0034, 0x01FF)
+ok    interface: a one-byte frame is one word with bit 8 set; bit 8 only on last bytes
+ok    example: the sheet's table for 0xA5 is the judge's ideal (46 transitions)
+ok    example: the generator's transitions for 0xA5 are the judge's ideal
+
+waveform    seed expected judge  cases   waveform decoder 
+                                 failed  check    check   what it is
+none        1    pass     pass   0/15    -        -       ideal: P0 low at cycle 1, first frame at cycle 8000, gaps of exactly 5000 cycles
+
+ok    seed 1: RATE bytes=16 cycles=96999, as the generator's transitions give
+
+none        2    pass     pass   0/15    -        -       ideal: P0 low at cycle 1, first frame at cycle 8000, gaps of exactly 5000 cycles
+
+ok    seed 2: RATE bytes=38 cycles=244999, as the generator's transitions give
+
+none        3    pass     pass   0/15    -        -       ideal: P0 low at cycle 1, first frame at cycle 8000, gaps of exactly 5000 cycles
+
+ok    seed 3: RATE bytes=44 cycles=253999, as the generator's transitions give
+
+none        7    pass     pass   0/15    -        -       ideal: P0 low at cycle 1, first frame at cycle 8000, gaps of exactly 5000 cycles
+
+ok    seed 7: RATE bytes=1 cycles=21749, as the generator's transitions give
+
+none        11   pass     pass   0/15    -        -       ideal: P0 low at cycle 1, first frame at cycle 8000, gaps of exactly 5000 cycles
+
+ok    seed 11: RATE bytes=7 cycles=45999, as the generator's transitions give
+
+jitter2     1    pass     pass   0/15    -        -       every other transition 2 cycles late, the rest 2 early (the limit)
+jitter2     2    pass     pass   0/15    -        -       every other transition 2 cycles late, the rest 2 early (the limit)
+jitter2     3    pass     pass   0/15    -        -       every other transition 2 cycles late, the rest 2 early (the limit)
+jitter2     7    pass     pass   0/15    -        -       every other transition 2 cycles late, the rest 2 early (the limit)
+jitter2     11   pass     pass   0/15    -        -       every other transition 2 cycles late, the rest 2 early (the limit)
+gap20000    1    pass     pass   0/15    -        -       gaps of exactly 20000 cycles (the limit)
+gap20000    2    pass     pass   0/15    -        -       gaps of exactly 20000 cycles (the limit)
+gap20000    3    pass     pass   0/15    -        -       gaps of exactly 20000 cycles (the limit)
+gap20000    7    pass     pass   0/15    -        -       gaps of exactly 20000 cycles (the limit)
+gap20000    11   pass     pass   0/15    -        -       gaps of exactly 20000 cycles (the limit)
+start5000   1    pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start5000   2    pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start5000   3    pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start5000   7    pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start5000   11   pass     pass   0/15    -        -       first frame at cycle 5000 (the earliest allowed)
+start20000  1    pass     pass   0/15    -        -       first frame at cycle 20000 (the limit)
+start20000  2    pass     pass   0/15    -        -       first frame at cycle 20000 (the limit)
+start20000  3    pass     pass   0/15    -        -       first frame at cycle 20000 (the limit)
+start20000  7    pass     pass   0/15    -        -       first frame at cycle 20000 (the limit)
+start20000  11   pass     pass   0/15    -        -       first frame at cycle 20000 (the limit)
+low100      1    pass     pass   0/15    -        -       P0 driven low at cycle 100 (the limit)
+low100      2    pass     pass   0/15    -        -       P0 driven low at cycle 100 (the limit)
+low100      3    pass     pass   0/15    -        -       P0 driven low at cycle 100 (the limit)
+low100      7    pass     pass   0/15    -        -       P0 driven low at cycle 100 (the limit)
+low100      11   pass     pass   0/15    -        -       P0 driven low at cycle 100 (the limit)
+flipbit     1    fail     fail   15/15   objects  objects one data bit of the last frame inverted
+flipbit     2    fail     fail   15/15   objects  objects one data bit of the last frame inverted
+flipbit     3    fail     fail   15/15   objects  objects one data bit of the last frame inverted
+flipbit     7    fail     fail   15/15   objects  objects one data bit of the last frame inverted
+flipbit     11   fail     fail   15/15   objects  objects one data bit of the last frame inverted
+lsbfirst    1    fail     fail   12/15   objects  objects bytes sent least significant bit first
+lsbfirst    2    fail     fail   12/15   objects  objects bytes sent least significant bit first
+lsbfirst    3    fail     fail   12/15   objects  objects bytes sent least significant bit first
+lsbfirst    7    fail     fail   12/15   objects  objects bytes sent least significant bit first
+lsbfirst    11   fail     fail   11/15   objects  objects bytes sent least significant bit first
+ieee        1    fail     fail   15/15   objects  objects the other Manchester convention: a 1 is low then high
+ieee        2    fail     fail   15/15   objects  objects the other Manchester convention: a 1 is low then high
+ieee        3    fail     fail   15/15   objects  objects the other Manchester convention: a 1 is low then high
+ieee        7    fail     fail   15/15   objects  objects the other Manchester convention: a 1 is low then high
+ieee        11   fail     fail   15/15   objects  objects the other Manchester convention: a 1 is low then high
+inverted    1    fail     fail   15/15   objects  objects the whole line inverted: idle high, carrier on when low
+inverted    2    fail     fail   15/15   objects  objects the whole line inverted: idle high, carrier on when low
+inverted    3    fail     fail   15/15   objects  objects the whole line inverted: idle high, carrier on when low
+inverted    7    fail     fail   15/15   objects  objects the whole line inverted: idle high, carrier on when low
+inverted    11   fail     fail   15/15   objects  objects the whole line inverted: idle high, carrier on when low
+pre15       1    fail     fail   15/15   objects  objects a preamble of 15 bits, not 16
+pre15       2    fail     fail   15/15   objects  objects a preamble of 15 bits, not 16
+pre15       3    fail     fail   15/15   objects  objects a preamble of 15 bits, not 16
+pre15       7    fail     fail   15/15   objects  objects a preamble of 15 bits, not 16
+pre15       11   fail     fail   15/15   objects  objects a preamble of 15 bits, not 16
+pre24       1    fail     fail   15/15   objects  objects a preamble of 24 bits, not 16
+pre24       2    fail     fail   15/15   objects  objects a preamble of 24 bits, not 16
+pre24       3    fail     fail   15/15   objects  objects a preamble of 24 bits, not 16
+pre24       7    fail     fail   15/15   objects  objects a preamble of 24 bits, not 16
+pre24       11   fail     fail   15/15   objects  objects a preamble of 24 bits, not 16
+nosync      1    fail     fail   15/15   objects  objects no sync nibble
+nosync      2    fail     fail   15/15   objects  objects no sync nibble
+nosync      3    fail     fail   15/15   objects  objects no sync nibble
+nosync      7    fail     fail   15/15   objects  objects no sync nibble
+nosync      11   fail     fail   15/15   objects  objects no sync nibble
+sync1010    1    fail     fail   15/15   objects  objects sync nibble 1, 0, 1, 0
+sync1010    2    fail     fail   15/15   objects  objects sync nibble 1, 0, 1, 0
+sync1010    3    fail     fail   15/15   objects  objects sync nibble 1, 0, 1, 0
+sync1010    7    fail     fail   15/15   objects  objects sync nibble 1, 0, 1, 0
+sync1010    11   fail     fail   15/15   objects  objects sync nibble 1, 0, 1, 0
+late3       1    fail     fail   15/15   objects  -       one transition 3 cycles late
+late3       2    fail     fail   15/15   objects  -       one transition 3 cycles late
+late3       3    fail     fail   15/15   objects  -       one transition 3 cycles late
+late3       7    fail     fail   15/15   objects  -       one transition 3 cycles late
+late3       11   fail     fail   15/15   objects  -       one transition 3 cycles late
+early3      1    fail     fail   15/15   objects  -       one transition 3 cycles early
+early3      2    fail     fail   15/15   objects  -       one transition 3 cycles early
+early3      3    fail     fail   15/15   objects  -       one transition 3 cycles early
+early3      7    fail     fail   15/15   objects  -       one transition 3 cycles early
+early3      11   fail     fail   15/15   objects  -       one transition 3 cycles early
+slow501     1    fail     fail   15/15   objects  -       bits of 501 cycles: the error adds up along a frame
+slow501     2    fail     fail   15/15   objects  -       bits of 501 cycles: the error adds up along a frame
+slow501     3    fail     fail   15/15   objects  -       bits of 501 cycles: the error adds up along a frame
+slow501     7    fail     fail   15/15   objects  -       bits of 501 cycles: the error adds up along a frame
+slow501     11   fail     fail   15/15   objects  -       bits of 501 cycles: the error adds up along a frame
+fast400     1    fail     fail   15/15   objects  -       bits of 400 cycles (2500 bit/s)
+fast400     2    fail     fail   15/15   objects  -       bits of 400 cycles (2500 bit/s)
+fast400     3    fail     fail   15/15   objects  -       bits of 400 cycles (2500 bit/s)
+fast400     7    fail     fail   15/15   objects  -       bits of 400 cycles (2500 bit/s)
+fast400     11   fail     fail   15/15   objects  -       bits of 400 cycles (2500 bit/s)
+gap4999     1    fail     fail   9/15    objects  -       gaps of 4999 cycles
+gap4999     2    fail     fail   9/15    objects  -       gaps of 4999 cycles
+gap4999     3    fail     fail   11/15   objects  -       gaps of 4999 cycles
+gap4999     7    fail     fail   8/15    objects  -       gaps of 4999 cycles
+gap4999     11   fail     fail   7/15    objects  -       gaps of 4999 cycles
+gap1500     1    fail     fail   9/15    objects  -       gaps of 1500 cycles
+gap1500     2    fail     fail   9/15    objects  -       gaps of 1500 cycles
+gap1500     3    fail     fail   11/15   objects  -       gaps of 1500 cycles
+gap1500     7    fail     fail   8/15    objects  -       gaps of 1500 cycles
+gap1500     11   fail     fail   7/15    objects  -       gaps of 1500 cycles
+gap20001    1    fail     fail   9/15    objects  -       gaps of 20001 cycles
+gap20001    2    fail     fail   9/15    objects  -       gaps of 20001 cycles
+gap20001    3    fail     fail   11/15   objects  -       gaps of 20001 cycles
+gap20001    7    fail     fail   8/15    objects  -       gaps of 20001 cycles
+gap20001    11   fail     fail   7/15    objects  -       gaps of 20001 cycles
+start4999   1    fail     fail   15/15   objects  -       first frame at cycle 4999
+start4999   2    fail     fail   15/15   objects  -       first frame at cycle 4999
+start4999   3    fail     fail   15/15   objects  -       first frame at cycle 4999
+start4999   7    fail     fail   15/15   objects  -       first frame at cycle 4999
+start4999   11   fail     fail   15/15   objects  -       first frame at cycle 4999
+start20001  1    fail     fail   15/15   objects  -       first frame at cycle 20001
+start20001  2    fail     fail   15/15   objects  -       first frame at cycle 20001
+start20001  3    fail     fail   15/15   objects  -       first frame at cycle 20001
+start20001  7    fail     fail   15/15   objects  -       first frame at cycle 20001
+start20001  11   fail     fail   15/15   objects  -       first frame at cycle 20001
+low101      1    fail     fail   15/15   objects  -       P0 driven low at cycle 101
+low101      2    fail     fail   15/15   objects  -       P0 driven low at cycle 101
+low101      3    fail     fail   15/15   objects  -       P0 driven low at cycle 101
+low101      7    fail     fail   15/15   objects  -       P0 driven low at cycle 101
+low101      11   fail     fail   15/15   objects  -       P0 driven low at cycle 101
+neverlow    1    fail     fail   15/15   objects  objects P0 left high from reset until 250 cycles before the first frame
+neverlow    2    fail     fail   15/15   objects  objects P0 left high from reset until 250 cycles before the first frame
+neverlow    3    fail     fail   15/15   objects  objects P0 left high from reset until 250 cycles before the first frame
+neverlow    7    fail     fail   15/15   objects  objects P0 left high from reset until 250 cycles before the first frame
+neverlow    11   fail     fail   15/15   objects  objects P0 left high from reset until 250 cycles before the first frame
+nofall      1    fail     fail   10/15   objects  objects a frame ending in a 0 leaves the line high (no fall at its end)
+nofall      2    fail     fail   10/15   objects  objects a frame ending in a 0 leaves the line high (no fall at its end)
+nofall      3    fail     fail   12/15   objects  objects a frame ending in a 0 leaves the line high (no fall at its end)
+nofall      7    fail     fail   10/15   objects  objects a frame ending in a 0 leaves the line high (no fall at its end)
+nofall      11   fail     fail   10/15   objects  objects a frame ending in a 0 leaves the line high (no fall at its end)
+latefall    1    fail     fail   10/15   objects  -       a frame ending in a 0 falls 3 cycles after the end of its last bit
+latefall    2    fail     fail   10/15   objects  -       a frame ending in a 0 falls 3 cycles after the end of its last bit
+latefall    3    fail     fail   12/15   objects  -       a frame ending in a 0 falls 3 cycles after the end of its last bit
+latefall    7    fail     fail   10/15   objects  -       a frame ending in a 0 falls 3 cycles after the end of its last bit
+latefall    11   fail     fail   10/15   objects  -       a frame ending in a 0 falls 3 cycles after the end of its last bit
+tail        1    fail     fail   15/15   objects  -       a 1-cycle pulse 5000 cycles after the last frame
+tail        2    fail     fail   15/15   objects  -       a 1-cycle pulse 5000 cycles after the last frame
+tail        3    fail     fail   15/15   objects  -       a 1-cycle pulse 5000 cycles after the last frame
+tail        7    fail     fail   15/15   objects  -       a 1-cycle pulse 5000 cycles after the last frame
+tail        11   fail     fail   15/15   objects  -       a 1-cycle pulse 5000 cycles after the last frame
+glitch      1    fail     fail   15/15   objects  objects a pulse one cycle long in the first frame's gap or tail
+glitch      2    fail     fail   15/15   objects  objects a pulse one cycle long in the first frame's gap or tail
+glitch      3    fail     fail   15/15   objects  objects a pulse one cycle long in the first frame's gap or tail
+glitch      7    fail     fail   15/15   objects  objects a pulse one cycle long in the first frame's gap or tail
+glitch      11   fail     fail   15/15   objects  objects a pulse one cycle long in the first frame's gap or tail
+dropmsg     1    fail     fail   15/15   objects  objects the last frame is not sent
+dropmsg     2    fail     fail   15/15   objects  objects the last frame is not sent
+dropmsg     3    fail     fail   15/15   objects  objects the last frame is not sent
+dropmsg     7    fail     fail   15/15   objects  objects the last frame is not sent
+dropmsg     11   fail     fail   15/15   objects  objects the last frame is not sent
+extramsg    1    fail     fail   15/15   objects  objects the last frame is sent twice
+extramsg    2    fail     fail   15/15   objects  objects the last frame is sent twice
+extramsg    3    fail     fail   15/15   objects  objects the last frame is sent twice
+extramsg    7    fail     fail   15/15   objects  objects the last frame is sent twice
+extramsg    11   fail     fail   15/15   objects  objects the last frame is sent twice
+
+ok    run_args.txt '-mode 0=pp -config clkdiv=50\n': accepted
+ok    run_args.txt '-mo 0=pp\n': accepted
+ok    run_args.txt '-mode 0=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, real_idle_high: every case fails cleanly, no RATE line (case 0 (all zeros: 1 frame, 1 byte): FAIL: waveform: P0 is not driven low by cycle 100; decoder: decoded 0 fra)
+ok    real pe_sim, real_low_only: every case fails cleanly, no RATE line (case 0 (all zeros: 1 frame, 1 byte): FAIL: waveform: 0 separate bursts of transitions on P0, wanted 1 frames; )
+SELFTEST PASS

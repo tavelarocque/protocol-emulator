@@ -1,0 +1,133 @@
+ok    interface: the task sheet's example gives the words printed in the sheet (0x0013, 0x0001, 0x0044)
+ok    interface: the task sheet's example gives the words printed in the sheet (0x000A, 0x0020, 0x004B)
+ok    interface: one word is the last; a blank's digit bits are 0
+ok    every case of every seed has 1 to 64 words and does not start with a plain blank
+
+waveform    seed expected judge  cases   waveform decoder 
+                                 failed  check    check   what it is
+none        1    pass     pass   0/17    -        -       ideal: first character at cycle 500
+
+ok    seed 1: RATE bytes=40 cycles=39000, as the generator's changes give
+
+none        2    pass     pass   0/17    -        -       ideal: first character at cycle 500
+
+ok    seed 2: RATE bytes=27 cycles=27000, as the generator's changes give
+
+none        3    pass     pass   0/17    -        -       ideal: first character at cycle 500
+
+ok    seed 3: RATE bytes=63 cycles=63000, as the generator's changes give
+
+none        7    pass     pass   0/17    -        -       ideal: first character at cycle 500
+
+ok    seed 7: RATE bytes=24 cycles=24000, as the generator's changes give
+
+none        11   pass     pass   0/17    -        -       ideal: first character at cycle 500
+
+ok    seed 11: RATE bytes=48 cycles=48000, as the generator's changes give
+
+jitter2     1    pass     pass   0/17    -        -       every change after the first alternately 2 cycles late and 2 early (the limit)
+jitter2     2    pass     pass   0/17    -        -       every change after the first alternately 2 cycles late and 2 early (the limit)
+jitter2     3    pass     pass   0/17    -        -       every change after the first alternately 2 cycles late and 2 early (the limit)
+jitter2     7    pass     pass   0/17    -        -       every change after the first alternately 2 cycles late and 2 early (the limit)
+jitter2     11   pass     pass   0/17    -        -       every change after the first alternately 2 cycles late and 2 early (the limit)
+start20000  1    pass     pass   0/17    -        -       first character at cycle 20000 (the limit)
+start20000  2    pass     pass   0/17    -        -       first character at cycle 20000 (the limit)
+start20000  3    pass     pass   0/17    -        -       first character at cycle 20000 (the limit)
+start20000  7    pass     pass   0/17    -        -       first character at cycle 20000 (the limit)
+start20000  11   pass     pass   0/17    -        -       first character at cycle 20000 (the limit)
+flipbit     1    fail     fail   17/17   objects  objects one character of each run shows the digit with bit 0 flipped
+flipbit     2    fail     fail   16/17   objects  objects one character of each run shows the digit with bit 0 flipped
+flipbit     3    fail     fail   17/17   objects  objects one character of each run shows the digit with bit 0 flipped
+flipbit     7    fail     fail   17/17   objects  objects one character of each run shows the digit with bit 0 flipped
+flipbit     11   fail     fail   17/17   objects  objects one character of each run shows the digit with bit 0 flipped
+seven_f     1    fail     fail   7/17    -        objects 7 drawn with segment f too (a common variant the decoder does not know)
+seven_f     2    fail     fail   7/17    -        objects 7 drawn with segment f too (a common variant the decoder does not know)
+seven_f     3    fail     fail   7/17    -        objects 7 drawn with segment f too (a common variant the decoder does not know)
+seven_f     7    fail     fail   7/17    -        objects 7 drawn with segment f too (a common variant the decoder does not know)
+seven_f     11   fail     fail   5/17    -        objects 7 drawn with segment f too (a common variant the decoder does not know)
+activehigh  1    fail     fail   17/17   objects  objects common-cathode levels: lit segments high
+activehigh  2    fail     fail   17/17   objects  objects common-cathode levels: lit segments high
+activehigh  3    fail     fail   17/17   objects  objects common-cathode levels: lit segments high
+activehigh  7    fail     fail   17/17   objects  objects common-cathode levels: lit segments high
+activehigh  11   fail     fail   17/17   objects  objects common-cathode levels: lit segments high
+nodp        1    fail     fail   14/17   objects  objects the decimal point is never lit
+nodp        2    fail     fail   15/17   objects  objects the decimal point is never lit
+nodp        3    fail     fail   14/17   objects  objects the decimal point is never lit
+nodp        7    fail     fail   13/17   objects  objects the decimal point is never lit
+nodp        11   fail     fail   14/17   objects  objects the decimal point is never lit
+late3       1    fail     fail   17/17   objects  -       one change 3 cycles late
+late3       2    fail     fail   17/17   objects  -       one change 3 cycles late
+late3       3    fail     fail   17/17   objects  -       one change 3 cycles late
+late3       7    fail     fail   17/17   objects  -       one change 3 cycles late
+late3       11   fail     fail   17/17   objects  -       one change 3 cycles late
+early3      1    fail     fail   17/17   objects  -       one change 3 cycles early
+early3      2    fail     fail   17/17   objects  -       one change 3 cycles early
+early3      3    fail     fail   17/17   objects  -       one change 3 cycles early
+early3      7    fail     fail   17/17   objects  -       one change 3 cycles early
+early3      11   fail     fail   17/17   objects  -       one change 3 cycles early
+slot1001    1    fail     fail   14/17   objects  objects characters of 1001 cycles: the error adds up along a run
+slot1001    2    fail     fail   13/17   objects  objects characters of 1001 cycles: the error adds up along a run
+slot1001    3    fail     fail   14/17   objects  -       characters of 1001 cycles: the error adds up along a run
+slot1001    7    fail     fail   14/17   objects  objects characters of 1001 cycles: the error adds up along a run
+slot1001    11   fail     fail   14/17   objects  -       characters of 1001 cycles: the error adds up along a run
+start20001  1    fail     fail   17/17   objects  -       first character at cycle 20001
+start20001  2    fail     fail   17/17   objects  -       first character at cycle 20001
+start20001  3    fail     fail   17/17   objects  -       first character at cycle 20001
+start20001  7    fail     fail   17/17   objects  -       first character at cycle 20001
+start20001  11   fail     fail   17/17   objects  -       first character at cycle 20001
+dp_after    1    fail     fail   13/17   objects  objects P7 changes one cycle after P0..P6 at a change of character
+dp_after    2    fail     fail   13/17   objects  objects P7 changes one cycle after P0..P6 at a change of character
+dp_after    3    fail     fail   13/17   objects  objects P7 changes one cycle after P0..P6 at a change of character
+dp_after    7    fail     fail   12/17   objects  objects P7 changes one cycle after P0..P6 at a change of character
+dp_after    11   fail     fail   13/17   objects  objects P7 changes one cycle after P0..P6 at a change of character
+two_halves  1    fail     fail   16/17   objects  objects P0..P3 change one cycle before P4..P7 at every change
+two_halves  2    fail     fail   15/17   objects  objects P0..P3 change one cycle before P4..P7 at every change
+two_halves  3    fail     fail   15/17   objects  objects P0..P3 change one cycle before P4..P7 at every change
+two_halves  7    fail     fail   16/17   objects  objects P0..P3 change one cycle before P4..P7 at every change
+two_halves  11   fail     fail   16/17   objects  objects P0..P3 change one cycle before P4..P7 at every change
+repeatblink 1    fail     fail   9/17    objects  objects a blank of one cycle between two equal characters
+repeatblink 2    fail     fail   8/17    objects  objects a blank of one cycle between two equal characters
+repeatblink 3    fail     fail   9/17    objects  objects a blank of one cycle between two equal characters
+repeatblink 7    fail     fail   9/17    objects  objects a blank of one cycle between two equal characters
+repeatblink 11   fail     fail   9/17    objects  objects a blank of one cycle between two equal characters
+noblank     1    fail     fail   14/17   objects  objects the last character stays lit after its slot
+noblank     2    fail     fail   15/17   objects  objects the last character stays lit after its slot
+noblank     3    fail     fail   15/17   objects  objects the last character stays lit after its slot
+noblank     7    fail     fail   15/17   objects  objects the last character stays lit after its slot
+noblank     11   fail     fail   15/17   objects  objects the last character stays lit after its slot
+early_on    1    fail     fail   17/17   objects  objects the pins show 8 from cycle 1, before the first character
+early_on    2    fail     fail   17/17   objects  objects the pins show 8 from cycle 1, before the first character
+early_on    3    fail     fail   17/17   objects  objects the pins show 8 from cycle 1, before the first character
+early_on    7    fail     fail   17/17   objects  objects the pins show 8 from cycle 1, before the first character
+early_on    11   fail     fail   17/17   objects  objects the pins show 8 from cycle 1, before the first character
+dropchar    1    fail     fail   14/17   objects  objects the last character is not shown: the blank comes a slot early
+dropchar    2    fail     fail   15/17   objects  objects the last character is not shown: the blank comes a slot early
+dropchar    3    fail     fail   15/17   objects  objects the last character is not shown: the blank comes a slot early
+dropchar    7    fail     fail   15/17   objects  objects the last character is not shown: the blank comes a slot early
+dropchar    11   fail     fail   15/17   objects  objects the last character is not shown: the blank comes a slot early
+extrachar   1    fail     fail   14/17   objects  objects the last character is shown for two slots
+extrachar   2    fail     fail   15/17   objects  objects the last character is shown for two slots
+extrachar   3    fail     fail   15/17   objects  objects the last character is shown for two slots
+extrachar   7    fail     fail   15/17   objects  objects the last character is shown for two slots
+extrachar   11   fail     fail   15/17   objects  objects the last character is shown for two slots
+tail        1    fail     fail   17/17   objects  objects a stray change to 8 and back 3000 cycles after the blank
+tail        2    fail     fail   17/17   objects  objects a stray change to 8 and back 3000 cycles after the blank
+tail        3    fail     fail   17/17   objects  objects a stray change to 8 and back 3000 cycles after the blank
+tail        7    fail     fail   17/17   objects  objects a stray change to 8 and back 3000 cycles after the blank
+tail        11   fail     fail   17/17   objects  objects a stray change to 8 and back 3000 cycles after the blank
+
+ok    run_args.txt ' -mode 6=pp -mode 7=pp -config clkdiv=1\n': accepted
+ok    run_args.txt '=pp -mo 4=pp -mo 5=pp -mo 6=pp -mo 7=pp\n': accepted
+ok    run_args.txt '=pp -mode 6=pp -mode 7=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '5=pp -mode 6=pp -mode 7=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt 'de 5=pp -mode 6=pp -mode 7=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt 'e 5=pp -mode 6=pp -mode 7=pp -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt 'p -mode 6=pp -mode 7=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt ' 5=pp -mode 6=pp -mode 7=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt ' -mode 6=pp -mode 7=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt 'e 4=pp -mode 5=pp -mode 6=pp -mode 7=od\n': setup: FAIL: run_args.txt must make all eight pins push-pull (-mode P=pp); missing P7
+ok    run_args.txt 'e 4=pp -mode 5=pp -mode 6=pp -mode 7=pp\n': setup: FAIL: run_args.txt must make all eight pins push-pull (-mode P=pp); missing P3
+ok    run_args.txt 'e 5=pp -mode 6=pp -mode 7=pp -mode 2=in\n': setup: FAIL: run_args.txt must make all eight pins push-pull (-mode P=pp); missing P2
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 3 words): FAIL: waveform: the pins never change; decoder: decoded )
+SELFTEST PASS

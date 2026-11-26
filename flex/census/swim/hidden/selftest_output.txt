@@ -1,0 +1,98 @@
+ok    interface: the task sheet's example gives the words printed in the sheet (0x0000, 0x0201, 0x0000, 0x7F80, 0x00A0, 0x0102, 0x0000, 0x4800)
+ok    timetable: the sheet's example table, ACK at 251410, next frame at 251630, its ACK at 252730
+
+waveform    seed expected judge  cases   edges   decoder rx  
+                                 failed  check   check       what it is
+none        1    pass     pass   0/15    -       -       -   ideal: enter sequence from cycle 1000, every edge at its place
+
+ok    seed 1: RATE bytes=14 cycles=282520, as the stand-in's own edges give
+
+none        2    pass     pass   0/15    -       -       -   ideal: enter sequence from cycle 1000, every edge at its place
+
+ok    seed 2: RATE bytes=128 cycles=449630, as the stand-in's own edges give
+
+none        3    pass     pass   0/15    -       -       -   ideal: enter sequence from cycle 1000, every edge at its place
+
+ok    seed 3: RATE bytes=56 cycles=350060, as the stand-in's own edges give
+
+entry400    1    pass     pass   0/15    -       -       -   enter sequence from cycle 400 (the earliest allowed)
+entry400    2    pass     pass   0/15    -       -       -   enter sequence from cycle 400 (the earliest allowed)
+entry400    3    pass     pass   0/15    -       -       -   enter sequence from cycle 400 (the earliest allowed)
+entry4000   1    pass     pass   0/15    -       -       -   enter sequence from cycle 4000 (the latest allowed)
+entry4000   2    pass     pass   0/15    -       -       -   enter sequence from cycle 4000 (the latest allowed)
+entry4000   3    pass     pass   0/15    -       -       -   enter sequence from cycle 4000 (the latest allowed)
+entryedge   1    pass     pass   0/15    -       -       -   enter sequence periods 1 cycle long and short in turn, falls 2 off (the limits)
+entryedge   2    pass     pass   0/15    -       -       -   enter sequence periods 1 cycle long and short in turn, falls 2 off (the limits)
+entryedge   3    pass     pass   0/15    -       -       -   enter sequence periods 1 cycle long and short in turn, falls 2 off (the limits)
+jitter2     1    pass     pass   0/15    -       -       -   every frame edge 2 cycles off its place, early and late in turn (the limit)
+jitter2     2    pass     pass   0/15    -       -       -   every frame edge 2 cycles off its place, early and late in turn (the limit)
+jitter2     3    pass     pass   0/15    -       -       -   every frame edge 2 cycles off its place, early and late in turn (the limit)
+flipbit     1    fail     fail   13/15   objects objects -   one data bit of the last WOTF byte inverted
+flipbit     2    fail     fail   8/15    objects objects -   one data bit of the last WOTF byte inverted
+flipbit     3    fail     fail   10/15   objects objects -   one data bit of the last WOTF byte inverted
+badparity   1    fail     fail   15/15   objects -       -   the parity bit of the first command frame inverted
+badparity   2    fail     fail   15/15   objects -       -   the parity bit of the first command frame inverted
+badparity   3    fail     fail   15/15   objects -       -   the parity bit of the first command frame inverted
+lsbfirst    1    fail     fail   14/15   objects objects -   bytes sent least significant bit first
+lsbfirst    2    fail     fail   12/15   objects objects -   bytes sent least significant bit first
+lsbfirst    3    fail     fail   13/15   objects objects -   bytes sent least significant bit first
+late3       1    fail     fail   15/15   objects -       -   one edge of a frame 3 cycles late
+late3       2    fail     fail   15/15   objects -       -   one edge of a frame 3 cycles late
+late3       3    fail     fail   15/15   objects -       -   one edge of a frame 3 cycles late
+early3      1    fail     fail   15/15   objects -       -   the first frame starts 3 cycles early
+early3      2    fail     fail   15/15   objects -       -   the first frame starts 3 cycles early
+early3      3    fail     fail   15/15   objects -       -   the first frame starts 3 cycles early
+entry399    1    fail     fail   15/15   objects -       -   enter sequence from cycle 399
+entry399    2    fail     fail   15/15   objects -       -   enter sequence from cycle 399
+entry399    3    fail     fail   15/15   objects -       -   enter sequence from cycle 399
+entry4001   1    fail     fail   15/15   objects -       -   enter sequence from cycle 4001
+entry4001   2    fail     fail   15/15   objects -       -   enter sequence from cycle 4001
+entry4001   3    fail     fail   15/15   objects -       -   enter sequence from cycle 4001
+entryrise2  1    fail     fail   15/15   objects -       -   one rising edge of the enter sequence 2 cycles late
+entryrise2  2    fail     fail   15/15   objects -       -   one rising edge of the enter sequence 2 cycles late
+entryrise2  3    fail     fail   15/15   objects -       -   one rising edge of the enter sequence 2 cycles late
+noentry     1    fail     fail   15/15   objects objects -   no enter sequence
+noentry     2    fail     fail   15/15   objects objects -   no enter sequence
+noentry     3    fail     fail   15/15   objects objects -   no enter sequence
+ignorenack  1    fail     fail   9/15    objects objects obj a NACKed frame is not resent
+ignorenack  2    fail     fail   5/15    objects objects obj a NACKed frame is not resent
+ignorenack  3    fail     fail   7/15    objects objects obj a NACKed frame is not resent
+noack       1    fail     fail   11/15   objects objects -   the host does not acknowledge the target's last data frame
+noack       2    fail     fail   10/15   objects objects -   the host does not acknowledge the target's last data frame
+noack       3    fail     fail   9/15    objects objects -   the host does not acknowledge the target's last data frame
+longack     1    fail     fail   11/15   objects objects -   the host answers the target's last data frame with a NACK
+longack     2    fail     fail   10/15   objects objects -   the host answers the target's last data frame with a NACK
+longack     3    fail     fail   9/15    objects objects -   the host answers the target's last data frame with a NACK
+collide     1    fail     fail   11/15   objects objects -   the host pulls the line low during the target's first data bit
+collide     2    fail     fail   10/15   objects objects -   the host pulls the line low during the target's first data bit
+collide     3    fail     fail   9/15    objects objects -   the host pulls the line low during the target's first data bit
+tail        1    fail     fail   15/15   objects -       -   one more 1 bit after the last operation
+tail        2    fail     fail   15/15   objects -       -   one more 1 bit after the last operation
+tail        3    fail     fail   15/15   objects -       -   one more 1 bit after the last operation
+rxwrong     1    fail     fail   11/15   -       -       obj the last rx word has bit 0 inverted
+rxwrong     2    fail     fail   10/15   -       -       obj the last rx word has bit 0 inverted
+rxwrong     3    fail     fail   9/15    -       -       obj the last rx word has bit 0 inverted
+rxextra     1    fail     fail   11/15   -       -       obj the last rx word is pushed twice
+rxextra     2    fail     fail   10/15   -       -       obj the last rx word is pushed twice
+rxextra     3    fail     fail   9/15    -       -       obj the last rx word is pushed twice
+rxlow       1    fail     fail   11/15   -       -       obj rx words carry the byte in bits 15..8
+rxlow       2    fail     fail   10/15   -       -       obj rx words carry the byte in bits 15..8
+rxlow       3    fail     fail   9/15    -       -       obj rx words carry the byte in bits 15..8
+dropop      1    fail     fail   15/15   objects objects obj the last operation is not done
+dropop      2    fail     fail   15/15   objects objects obj the last operation is not done
+dropop      3    fail     fail   15/15   objects objects obj the last operation is not done
+
+ok    run_args.txt '-mode 0=od -config clkdiv=1\n': accepted
+ok    run_args.txt '-mo 0=od\n': accepted
+ok    run_args.txt '-mode 0=pp\n': setup: FAIL: run_args.txt must give exactly one mode, 0=od (P0 open-drain), not ['0=pp']
+ok    run_args.txt '-config clkdiv=1\n': setup: FAIL: run_args.txt must give exactly one mode, 0=od (P0 open-drain), not []
+ok    run_args.txt '-mode 0=od -mode 1=pp\n': setup: FAIL: run_args.txt must give exactly one mode, 0=od (P0 open-drain), not ['0=od', '1=pp']
+ok    run_args.txt '-mode 0=od -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=od -s other.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=od -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=od -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=od -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=od\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (SRST alone: 1 operation, 0 bytes): FAIL: edges: the chip never moves P0; decoder: no enter sequence de)
+SELFTEST PASS

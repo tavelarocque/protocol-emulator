@@ -1,0 +1,1 @@
+-config clkdiv=100,timeout=1350,timeout_vector=5,in_base=0,in_msb_first=1

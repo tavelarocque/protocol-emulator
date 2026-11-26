@@ -1,0 +1,111 @@
+ok    interface: the sheet's example gives the words printed in the sheet
+ok    interface: the example's stimulus is at the cycles printed in the sheet
+ok    interface: the example has 210 slots, last edge at cycle 12475
+ok    interface: an answered last instruction is followed by 2 + 16 = 18 idle slots, as the sheet says
+
+result      seed expected judge  failed  what it is
+none        1    pass     pass   0/14    ideal: data changes on the falling edge itself []
+ok    seed 1: RATE bytes=12 cycles=21775, as the schedule gives
+none        2    pass     pass   0/14    ideal: data changes on the falling edge itself []
+ok    seed 2: RATE bytes=16 cycles=17675, as the schedule gives
+none        3    pass     pass   0/14    ideal: data changes on the falling edge itself []
+ok    seed 3: RATE bytes=11 cycles=14675, as the schedule gives
+jitter2     1    pass     pass   0/14    falling edges 2 cycles late, rising edges 2 early (the limit) []
+jitter2     2    pass     pass   0/14    falling edges 2 cycles late, rising edges 2 early (the limit) []
+jitter2     3    pass     pass   0/14    falling edges 2 cycles late, rising edges 2 early (the limit) []
+datalate    1    pass     pass   0/14    P1 changes 5 cycles before the rising edge (the limit) []
+datalate    2    pass     pass   0/14    P1 changes 5 cycles before the rising edge (the limit) []
+datalate    3    pass     pass   0/14    P1 changes 5 cycles before the rising edge (the limit) []
+rxlate      1    pass     pass   0/14    rx words pushed together at the very end of the run []
+rxlate      2    pass     pass   0/14    rx words pushed together at the very end of the run []
+rxlate      3    pass     pass   0/14    rx words pushed together at the very end of the run []
+rewrite     1    pass     pass   0/14    in every slot it sends, P1 released at the fall, then the bit 3 cycles later []
+rewrite     2    pass     pass   0/14    in every slot it sends, P1 released at the fall, then the bit 3 cycles later []
+rewrite     3    pass     pass   0/14    in every slot it sends, P1 released at the fall, then the bit 3 cycles later []
+flipbit     1    fail     fail   13/14   one data bit of the last byte sent inverted [decoder,waveform]
+        case 0 (the task sheet's example: 2 instructions, 3 bytes out, 1 back): FAIL: waveform: slot 185 (a bit the chip sends): the chip's P1 is 1 at the rising edge, wanted 0; decoder: the decoder reports a parity error at cyc
+flipbit     2    fail     fail   13/14   one data bit of the last byte sent inverted [decoder,waveform]
+        case 0 (the task sheet's example: 2 instructions, 3 bytes out, 1 back): FAIL: waveform: slot 185 (a bit the chip sends): the chip's P1 is 1 at the rising edge, wanted 0; decoder: the decoder reports a parity error at cyc
+flipbit     3    fail     fail   13/14   one data bit of the last byte sent inverted [decoder,waveform]
+        case 0 (the task sheet's example: 2 instructions, 3 bytes out, 1 back): FAIL: waveform: slot 185 (a bit the chip sends): the chip's P1 is 1 at the rising edge, wanted 0; decoder: the decoder reports a parity error at cyc
+badparity   1    fail     fail   13/14   odd parity instead of even [decoder,waveform]
+badparity   2    fail     fail   13/14   odd parity instead of even [decoder,waveform]
+badparity   3    fail     fail   13/14   odd parity instead of even [decoder,waveform]
+onestop     1    fail     fail   13/14   one stop bit per frame instead of two [decoder,rx,waveform]
+onestop     2    fail     fail   13/14   one stop bit per frame instead of two [decoder,rx,waveform]
+onestop     3    fail     fail   13/14   one stop bit per frame instead of two [decoder,rx,waveform]
+msbfirst    1    fail     fail   13/14   bytes sent most significant bit first [decoder,waveform]
+msbfirst    2    fail     fail   13/14   bytes sent most significant bit first [decoder,waveform]
+msbfirst    3    fail     fail   13/14   bytes sent most significant bit first [decoder,waveform]
+late3       1    fail     fail   14/14   one PDI_CLK edge 3 cycles late [waveform]
+        case 0 (the task sheet's example: 2 instructions, 3 bytes out, 1 back): FAIL: waveform: PDI_CLK falling edge of slot 20 at cycle 3003, ideal 3000 (limit +-2)
+late3       2    fail     fail   14/14   one PDI_CLK edge 3 cycles late [waveform]
+        case 0 (the task sheet's example: 2 instructions, 3 bytes out, 1 back): FAIL: waveform: PDI_CLK falling edge of slot 20 at cycle 3003, ideal 3000 (limit +-2)
+late3       3    fail     fail   14/14   one PDI_CLK edge 3 cycles late [waveform]
+        case 0 (the task sheet's example: 2 instructions, 3 bytes out, 1 back): FAIL: waveform: PDI_CLK falling edge of slot 20 at cycle 3003, ideal 3000 (limit +-2)
+slow51      1    fail     fail   14/14   PDI_CLK period 51 cycles [decoder,rx,waveform]
+slow51      2    fail     fail   14/14   PDI_CLK period 51 cycles [decoder,rx,waveform]
+slow51      3    fail     fail   14/14   PDI_CLK period 51 cycles [decoder,rx,waveform]
+t0late      1    fail     fail   14/14   first falling edge at cycle 2003 [waveform]
+t0late      2    fail     fail   14/14   first falling edge at cycle 2003 [waveform]
+t0late      3    fail     fail   14/14   first falling edge at cycle 2003 [waveform]
+guard127    1    fail     fail   13/14   127 guard slots before an answer [rx,waveform]
+guard127    2    fail     fail   13/14   127 guard slots before an answer [decoder,rx,waveform]
+guard127    3    fail     fail   13/14   127 guard slots before an answer [rx,waveform]
+guard129    1    fail     fail   13/14   129 guard slots before an answer [rx,waveform]
+guard129    2    fail     fail   13/14   129 guard slots before an answer [rx,waveform]
+guard129    3    fail     fail   13/14   129 guard slots before an answer [rx,waveform]
+after1      1    fail     fail   13/14   1 idle slot after an answer instead of 2 [rx,waveform]
+after1      2    fail     fail   13/14   1 idle slot after an answer instead of 2 [decoder,rx,waveform]
+after1      3    fail     fail   13/14   1 idle slot after an answer instead of 2 [rx,waveform]
+datarise4   1    fail     fail   13/14   P1 changes 4 cycles before the rising edge [waveform]
+datarise4   2    fail     fail   13/14   P1 changes 4 cycles before the rising edge [waveform]
+datarise4   3    fail     fail   13/14   P1 changes 4 cycles before the rising edge [waveform]
+databefore  1    fail     fail   13/14   P1 changes 1 cycle before the falling edge [waveform]
+databefore  2    fail     fail   13/14   P1 changes 1 cycle before the falling edge [waveform]
+databefore  3    fail     fail   13/14   P1 changes 1 cycle before the falling edge [waveform]
+nodrop      1    fail     fail   13/14   chip pulls P1 low during the device's first stop bit [decoder,waveform]
+nodrop      2    fail     fail   13/14   chip pulls P1 low during the device's first stop bit [decoder,waveform]
+nodrop      3    fail     fail   13/14   chip pulls P1 low during the device's first stop bit [decoder,waveform]
+guardpulse  1    fail     fail   14/14   chip pulls P1 low briefly inside a guard slot, released by the rise [waveform]
+guardpulse  2    fail     fail   14/14   chip pulls P1 low briefly inside a guard slot, released by the rise [waveform]
+guardpulse  3    fail     fail   14/14   chip pulls P1 low briefly inside a guard slot, released by the rise [waveform]
+rxwrong     1    fail     fail   13/14   one rx word wrong [rx]
+rxwrong     2    fail     fail   13/14   one rx word wrong [rx]
+rxwrong     3    fail     fail   13/14   one rx word wrong [rx]
+rxmissing   1    fail     fail   13/14   last rx word not pushed [rx]
+rxmissing   2    fail     fail   13/14   last rx word not pushed [rx]
+rxmissing   3    fail     fail   13/14   last rx word not pushed [rx]
+rxextra     1    fail     fail   14/14   one rx word too many [rx]
+rxextra     2    fail     fail   14/14   one rx word too many [rx]
+rxextra     3    fail     fail   14/14   one rx word too many [rx]
+rxparity    1    fail     fail   7/14    rx word carries the parity bit in bit 8 [rx]
+rxparity    2    fail     fail   9/14    rx word carries the parity bit in bit 8 [rx]
+rxparity    3    fail     fail   7/14    rx word carries the parity bit in bit 8 [rx]
+endshort    1    fail     fail   14/14   15 idle slots at the end instead of 16 [waveform]
+endshort    2    fail     fail   14/14   15 idle slots at the end instead of 16 [waveform]
+endshort    3    fail     fail   14/14   15 idle slots at the end instead of 16 [waveform]
+endlong     1    fail     fail   14/14   17 idle slots at the end [waveform]
+endlong     2    fail     fail   14/14   17 idle slots at the end [waveform]
+endlong     3    fail     fail   14/14   17 idle slots at the end [waveform]
+p2          1    fail     fail   14/14   P2 written low once [waveform]
+p2          2    fail     fail   14/14   P2 written low once [waveform]
+p2          3    fail     fail   14/14   P2 written low once [waveform]
+idlelow     1    fail     fail   14/14   P1 driven low at cycle 0 [waveform]
+idlelow     2    fail     fail   14/14   P1 driven low at cycle 0 [waveform]
+idlelow     3    fail     fail   14/14   P1 driven low at cycle 0 [waveform]
+
+ok    run_args.txt '-mode 0=pp -mode 1=od -config clkdiv=1\n': accepted
+ok    run_args.txt '-mo 0=pp -mo 1=od\n': accepted
+ok    run_args.txt '-mode 0=pp -mode 1=pp\n': setup: FAIL: run_args.txt must make P1 (PDI_DATA) open-drain: -mode 1=od
+ok    run_args.txt '-mode 1=od\n': setup: FAIL: run_args.txt must make P0 (PDI_CLK) push-pull: -mode 0=pp
+ok    run_args.txt '-mode 0=pp -mode 1=od -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -stimulus s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -st s.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -inputs ff\n': setup: FAIL: run_args.txt must not give -inputs: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-mode 1=od\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (the task sheet's example: 2 instructions, 3 bytes out, 1 back): FAIL: waveform: PDI_CLK has 0 edges, t)
+SELFTEST PASS

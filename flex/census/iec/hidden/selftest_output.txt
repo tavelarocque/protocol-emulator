@@ -1,0 +1,165 @@
+ok    interface: the sheet's example gives the words printed in the sheet
+ok    interface: the sheet's example bus bytes
+ok    interface: the sheet's stimulus example is the quickest listener's script
+ok    interface: one data byte is two words, bit 8 on the data word
+
+waveform   seed expected judge  failed  waveform decoder what it is
+none       1    pass     pass   0/15    -        -       ideal: every action near the middle of its window
+ok    seed 1: RATE bytes=7 cycles=19136, as the generator's output gives
+none       2    pass     pass   0/15    -        -       ideal: every action near the middle of its window
+ok    seed 2: RATE bytes=16 cycles=36856, as the generator's output gives
+none       3    pass     pass   0/15    -        -       ideal: every action near the middle of its window
+ok    seed 3: RATE bytes=8 cycles=22549, as the generator's output gives
+none       7    pass     pass   0/15    -        -       ideal: every action near the middle of its window
+ok    seed 7: RATE bytes=16 cycles=44008, as the generator's output gives
+none       11   pass     pass   0/15    -        -       ideal: every action near the middle of its window
+ok    seed 11: RATE bytes=25 cycles=67149, as the generator's output gives
+edgemin    1    pass     pass   0/15    -        -       every action at the earliest the sheet allows, bits of 40 cycles (20 low, 20 high), setup exactly 20
+edgemin    2    pass     pass   0/15    -        -       every action at the earliest the sheet allows, bits of 40 cycles (20 low, 20 high), setup exactly 20
+edgemin    3    pass     pass   0/15    -        -       every action at the earliest the sheet allows, bits of 40 cycles (20 low, 20 high), setup exactly 20
+edgemin    7    pass     pass   0/15    -        -       every action at the earliest the sheet allows, bits of 40 cycles (20 low, 20 high), setup exactly 20
+edgemin    11   pass     pass   0/15    -        -       every action at the earliest the sheet allows, bits of 40 cycles (20 low, 20 high), setup exactly 20
+edgemax    1    pass     pass   0/15    -        -       every action at the latest the sheet allows, bits of 100 cycles, DATA released 20 after the 8th fall
+edgemax    2    pass     pass   0/15    -        -       every action at the latest the sheet allows, bits of 100 cycles, DATA released 20 after the 8th fall
+edgemax    3    pass     pass   0/15    -        -       every action at the latest the sheet allows, bits of 100 cycles, DATA released 20 after the 8th fall
+edgemax    7    pass     pass   0/15    -        -       every action at the latest the sheet allows, bits of 100 cycles, DATA released 20 after the 8th fall
+edgemax    11   pass     pass   0/15    -        -       every action at the latest the sheet allows, bits of 100 cycles, DATA released 20 after the 8th fall
+flipbit    1    fail     fail   15/15   -        objects one data bit of the last transaction inverted
+flipbit    2    fail     fail   15/15   -        objects one data bit of the last transaction inverted
+flipbit    3    fail     fail   15/15   -        objects one data bit of the last transaction inverted
+flipbit    7    fail     fail   15/15   -        objects one data bit of the last transaction inverted
+flipbit    11   fail     fail   15/15   -        objects one data bit of the last transaction inverted
+msbfirst   1    fail     fail   15/15   -        objects bytes sent most significant bit first
+msbfirst   2    fail     fail   15/15   -        objects bytes sent most significant bit first
+msbfirst   3    fail     fail   15/15   -        objects bytes sent most significant bit first
+msbfirst   7    fail     fail   15/15   -        objects bytes sent most significant bit first
+msbfirst   11   fail     fail   15/15   -        objects bytes sent most significant bit first
+listen40   1    fail     fail   15/15   -        objects TALK (0x40) sent instead of LISTEN
+listen40   2    fail     fail   15/15   -        objects TALK (0x40) sent instead of LISTEN
+listen40   3    fail     fail   15/15   -        objects TALK (0x40) sent instead of LISTEN
+listen40   7    fail     fail   15/15   -        objects TALK (0x40) sent instead of LISTEN
+listen40   11   fail     fail   15/15   -        objects TALK (0x40) sent instead of LISTEN
+noeoi      1    fail     fail   15/15   objects  objects the last byte sent without waiting for the EOI pulse
+noeoi      2    fail     fail   15/15   objects  objects the last byte sent without waiting for the EOI pulse
+noeoi      3    fail     fail   15/15   objects  objects the last byte sent without waiting for the EOI pulse
+noeoi      7    fail     fail   15/15   objects  objects the last byte sent without waiting for the EOI pulse
+noeoi      11   fail     fail   15/15   objects  objects the last byte sent without waiting for the EOI pulse
+eoiall     1    fail     fail   12/15   objects  objects waits as for EOI on every data byte (CLK held past 200)
+eoiall     2    fail     fail   12/15   objects  objects waits as for EOI on every data byte (CLK held past 200)
+eoiall     3    fail     fail   12/15   objects  objects waits as for EOI on every data byte (CLK held past 200)
+eoiall     7    fail     fail   12/15   objects  objects waits as for EOI on every data byte (CLK held past 200)
+eoiall     11   fail     fail   12/15   objects  objects waits as for EOI on every data byte (CLK held past 200)
+noatn      1    fail     fail   15/15   objects  objects commands sent with ATN high
+noatn      2    fail     fail   15/15   objects  objects commands sent with ATN high
+noatn      3    fail     fail   15/15   objects  objects commands sent with ATN high
+noatn      7    fail     fail   15/15   objects  objects commands sent with ATN high
+noatn      11   fail     fail   15/15   objects  objects commands sent with ATN high
+atnstay    1    fail     fail   15/15   objects  objects ATN kept low through the data bytes
+atnstay    2    fail     fail   15/15   objects  objects ATN kept low through the data bytes
+atnstay    3    fail     fail   15/15   objects  objects ATN kept low through the data bytes
+atnstay    7    fail     fail   15/15   objects  objects ATN kept low through the data bytes
+atnstay    11   fail     fail   15/15   objects  objects ATN kept low through the data bytes
+nounl      1    fail     fail   15/15   objects  objects UNLISTEN not sent
+nounl      2    fail     fail   15/15   objects  objects UNLISTEN not sent
+nounl      3    fail     fail   15/15   objects  objects UNLISTEN not sent
+nounl      7    fail     fail   15/15   objects  objects UNLISTEN not sent
+nounl      11   fail     fail   15/15   objects  objects UNLISTEN not sent
+setup19    1    fail     fail   15/15   objects  -       DATA set 19 cycles before a CLK rise
+setup19    2    fail     fail   15/15   objects  -       DATA set 19 cycles before a CLK rise
+setup19    3    fail     fail   15/15   objects  -       DATA set 19 cycles before a CLK rise
+setup19    7    fail     fail   15/15   objects  -       DATA set 19 cycles before a CLK rise
+setup19    11   fail     fail   15/15   objects  -       DATA set 19 cycles before a CLK rise
+datahigh   1    fail     fail   15/15   objects  objects DATA changed while CLK is high
+datahigh   2    fail     fail   15/15   objects  objects DATA changed while CLK is high
+datahigh   3    fail     fail   15/15   objects  objects DATA changed while CLK is high
+datahigh   7    fail     fail   15/15   objects  objects DATA changed while CLK is high
+datahigh   11   fail     fail   15/15   objects  objects DATA changed while CLK is high
+high19     1    fail     fail   15/15   objects  -       CLK high for 19 cycles in each bit
+high19     2    fail     fail   15/15   objects  -       CLK high for 19 cycles in each bit
+high19     3    fail     fail   15/15   objects  -       CLK high for 19 cycles in each bit
+high19     7    fail     fail   15/15   objects  -       CLK high for 19 cycles in each bit
+high19     11   fail     fail   15/15   objects  -       CLK high for 19 cycles in each bit
+period101  1    fail     fail   15/15   objects  -       bits of 101 cycles
+period101  2    fail     fail   15/15   objects  -       bits of 101 cycles
+period101  3    fail     fail   15/15   objects  -       bits of 101 cycles
+period101  7    fail     fail   15/15   objects  -       bits of 101 cycles
+period101  11   fail     fail   15/15   objects  -       bits of 101 cycles
+ready99    1    fail     fail   15/15   objects  -       CLK released 99 cycles after the listener pulled DATA low
+ready99    2    fail     fail   15/15   objects  -       CLK released 99 cycles after the listener pulled DATA low
+ready99    3    fail     fail   15/15   objects  -       CLK released 99 cycles after the listener pulled DATA low
+ready99    7    fail     fail   15/15   objects  -       CLK released 99 cycles after the listener pulled DATA low
+ready99    11   fail     fail   15/15   objects  -       CLK released 99 cycles after the listener pulled DATA low
+ready401   1    fail     fail   15/15   objects  -       CLK released 401 cycles after the listener pulled DATA low
+ready401   2    fail     fail   15/15   objects  -       CLK released 401 cycles after the listener pulled DATA low
+ready401   3    fail     fail   15/15   objects  -       CLK released 401 cycles after the listener pulled DATA low
+ready401   7    fail     fail   15/15   objects  -       CLK released 401 cycles after the listener pulled DATA low
+ready401   11   fail     fail   15/15   objects  -       CLK released 401 cycles after the listener pulled DATA low
+rfd201     1    fail     fail   15/15   objects  -       first CLK fall 201 cycles after the listener released DATA
+rfd201     2    fail     fail   15/15   objects  -       first CLK fall 201 cycles after the listener released DATA
+rfd201     3    fail     fail   15/15   objects  -       first CLK fall 201 cycles after the listener released DATA
+rfd201     7    fail     fail   15/15   objects  -       first CLK fall 201 cycles after the listener released DATA
+rfd201     11   fail     fail   15/15   objects  -       first CLK fall 201 cycles after the listener released DATA
+eoi61      1    fail     fail   15/15   objects  -       first CLK fall 61 cycles after the EOI pulse ended
+eoi61      2    fail     fail   15/15   objects  -       first CLK fall 61 cycles after the EOI pulse ended
+eoi61      3    fail     fail   15/15   objects  -       first CLK fall 61 cycles after the EOI pulse ended
+eoi61      7    fail     fail   15/15   objects  -       first CLK fall 61 cycles after the EOI pulse ended
+eoi61      11   fail     fail   15/15   objects  -       first CLK fall 61 cycles after the EOI pulse ended
+turn19     1    fail     fail   15/15   objects  -       ATN released 19 cycles after SECOND was acknowledged
+turn19     2    fail     fail   15/15   objects  -       ATN released 19 cycles after SECOND was acknowledged
+turn19     3    fail     fail   15/15   objects  -       ATN released 19 cycles after SECOND was acknowledged
+turn19     7    fail     fail   15/15   objects  -       ATN released 19 cycles after SECOND was acknowledged
+turn19     11   fail     fail   15/15   objects  -       ATN released 19 cycles after SECOND was acknowledged
+turn91     1    fail     fail   15/15   objects  -       ATN and CLK released 91 cycles after UNLISTEN was acknowledged
+turn91     2    fail     fail   15/15   objects  -       ATN and CLK released 91 cycles after UNLISTEN was acknowledged
+turn91     3    fail     fail   15/15   objects  -       ATN and CLK released 91 cycles after UNLISTEN was acknowledged
+turn91     7    fail     fail   15/15   objects  -       ATN and CLK released 91 cycles after UNLISTEN was acknowledged
+turn91     11   fail     fail   15/15   objects  -       ATN and CLK released 91 cycles after UNLISTEN was acknowledged
+atn99      1    fail     fail   15/15   objects  -       ATN pulled low 99 cycles after the bus went free
+atn99      2    fail     fail   15/15   objects  -       ATN pulled low 99 cycles after the bus went free
+atn99      3    fail     fail   15/15   objects  -       ATN pulled low 99 cycles after the bus went free
+atn99      7    fail     fail   15/15   objects  -       ATN pulled low 99 cycles after the bus went free
+atn99      11   fail     fail   15/15   objects  -       ATN pulled low 99 cycles after the bus went free
+clk21      1    fail     fail   15/15   objects  -       CLK pulled low 21 cycles after ATN
+clk21      2    fail     fail   15/15   objects  -       CLK pulled low 21 cycles after ATN
+clk21      3    fail     fail   15/15   objects  -       CLK pulled low 21 cycles after ATN
+clk21      7    fail     fail   15/15   objects  -       CLK pulled low 21 cycles after ATN
+clk21      11   fail     fail   15/15   objects  -       CLK pulled low 21 cycles after ATN
+holddata   1    fail     fail   15/15   objects  -       DATA released 21 cycles after the 8th CLK fall
+holddata   2    fail     fail   15/15   objects  -       DATA released 21 cycles after the 8th CLK fall
+holddata   3    fail     fail   15/15   objects  -       DATA released 21 cycles after the 8th CLK fall
+holddata   7    fail     fail   15/15   objects  -       DATA released 21 cycles after the 8th CLK fall
+holddata   11   fail     fail   15/15   objects  -       DATA released 21 cycles after the 8th CLK fall
+blind      1    fail     fail   15/15   objects  objects ignores the listener and times everything from the listener's middle delays
+blind      2    fail     fail   15/15   objects  objects ignores the listener and times everything from the listener's middle delays
+blind      3    fail     fail   15/15   objects  objects ignores the listener and times everything from the listener's middle delays
+blind      7    fail     fail   15/15   objects  objects ignores the listener and times everything from the listener's middle delays
+blind      11   fail     fail   15/15   objects  objects ignores the listener and times everything from the listener's middle delays
+extrabyte  1    fail     fail   15/15   objects  objects the last data byte sent twice
+extrabyte  2    fail     fail   15/15   objects  objects the last data byte sent twice
+extrabyte  3    fail     fail   15/15   objects  objects the last data byte sent twice
+extrabyte  7    fail     fail   15/15   objects  objects the last data byte sent twice
+extrabyte  11   fail     fail   15/15   objects  objects the last data byte sent twice
+dropbyte   1    fail     fail   15/15   objects  objects the first data byte of each transaction left out
+dropbyte   2    fail     fail   15/15   objects  objects the first data byte of each transaction left out
+dropbyte   3    fail     fail   15/15   objects  objects the first data byte of each transaction left out
+dropbyte   7    fail     fail   15/15   objects  objects the first data byte of each transaction left out
+dropbyte   11   fail     fail   15/15   objects  objects the first data byte of each transaction left out
+tail       1    fail     fail   15/15   objects  -       a pulse on CLK 500 cycles after the run's last transaction
+tail       2    fail     fail   15/15   objects  -       a pulse on CLK 500 cycles after the run's last transaction
+tail       3    fail     fail   15/15   objects  -       a pulse on CLK 500 cycles after the run's last transaction
+tail       7    fail     fail   15/15   objects  -       a pulse on CLK 500 cycles after the run's last transaction
+tail       11   fail     fail   15/15   objects  -       a pulse on CLK 500 cycles after the run's last transaction
+
+ok    run_args.txt '-mode 0=od -mode 1=od -mode 2=od\n': accepted
+ok    run_args.txt '-mo 0=od -mo 1=od -mo 2=od -config clkdiv=10\n': accepted
+ok    run_args.txt '-mode 0=od -mode 1=od\n': setup: FAIL: run_args.txt must make P2 (ATN) open-drain: -mode 2=od
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=od\n': setup: FAIL: run_args.txt must make P0 (DATA) open-drain: -mode 0=od
+ok    run_args.txt '-mode 0=od -mode 1=od -mode 2=od -tx other.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-tx'
+ok    run_args.txt '-mode 0=od -mode 1=od -mode 2=od -s other.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-s'
+ok    run_args.txt '-mode 0=od -mode 1=od -mode 2=od -cycles 5\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-cycles'
+ok    run_args.txt '-mode 0=od -mode 1=od -mode 2=od -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=od -mode 1=od -mode 2=od -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=od -mode 1=od\n-mode 2=od\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (one byte, quickest listener: 1 transaction, 1 data byte): FAIL: waveform: transaction 0: ATN pulled lo)
+SELFTEST PASS

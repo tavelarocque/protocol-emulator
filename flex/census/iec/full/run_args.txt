@@ -1,0 +1,1 @@
+-config set_base=2,set_count=1,sideset_base=1,sideset_count=1,in_msb_first=1 -mode 0=od -mode 1=od -mode 2=od

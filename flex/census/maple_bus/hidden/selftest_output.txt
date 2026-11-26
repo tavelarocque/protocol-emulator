@@ -1,0 +1,173 @@
+ok    interface: the sheet's first example gives the words printed in the sheet
+ok    interface: the sheet's second example, and both checksums (0x21, 0x2B)
+ok    the sheet's table of 98 changes is the judge's ideal sequence, change for change
+ok    interface: frames follow one another with nothing between them
+
+waveform     seed expected judge  cases   waveform decoder 
+                                  failed  check    check   what it is
+none         1    pass     pass   0/16    -        -       ideal: phases of 8 cycles, first frame at 1000, idle of 400
+
+ok    seed 1: RATE bytes=208 cycles=49600, as the generator's changes give
+
+none         2    pass     pass   0/16    -        -       ideal: phases of 8 cycles, first frame at 1000, idle of 400
+
+ok    seed 2: RATE bytes=152 cycles=34520, as the generator's changes give
+
+none         3    pass     pass   0/16    -        -       ideal: phases of 8 cycles, first frame at 1000, idle of 400
+
+ok    seed 3: RATE bytes=312 cycles=72008, as the generator's changes give
+
+none         7    pass     pass   0/16    -        -       ideal: phases of 8 cycles, first frame at 1000, idle of 400
+
+ok    seed 7: RATE bytes=256 cycles=59560, as the generator's changes give
+
+none         11   pass     pass   0/16    -        -       ideal: phases of 8 cycles, first frame at 1000, idle of 400
+
+ok    seed 11: RATE bytes=20 cycles=5000, as the generator's changes give
+
+tightest     1    pass     pass   0/16    -        -       every change at the earliest the rules allow (7 and 12 cycles)
+tightest     2    pass     pass   0/16    -        -       every change at the earliest the rules allow (7 and 12 cycles)
+tightest     3    pass     pass   0/16    -        -       every change at the earliest the rules allow (7 and 12 cycles)
+tightest     7    pass     pass   0/16    -        -       every change at the earliest the rules allow (7 and 12 cycles)
+tightest     11   pass     pass   0/16    -        -       every change at the earliest the rules allow (7 and 12 cycles)
+slowest      1    pass     pass   0/16    -        -       every change inside a frame exactly 100 cycles after the one before
+slowest      2    pass     pass   0/16    -        -       every change inside a frame exactly 100 cycles after the one before
+slowest      3    pass     pass   0/16    -        -       every change inside a frame exactly 100 cycles after the one before
+slowest      7    pass     pass   0/16    -        -       every change inside a frame exactly 100 cycles after the one before
+slowest      11   pass     pass   0/16    -        -       every change inside a frame exactly 100 cycles after the one before
+gap100       1    pass     pass   0/16    -        -       idle of exactly 100 cycles between frames
+gap100       2    pass     pass   0/16    -        -       idle of exactly 100 cycles between frames
+gap100       3    pass     pass   0/16    -        -       idle of exactly 100 cycles between frames
+gap100       7    pass     pass   0/16    -        -       idle of exactly 100 cycles between frames
+gap100       11   pass     pass   0/16    -        -       idle of exactly 100 cycles between frames
+late50000    1    pass     pass   0/16    -        -       first frame at cycle 50000 and idle of exactly 50000 (the limits)
+late50000    2    pass     pass   0/16    -        -       first frame at cycle 50000 and idle of exactly 50000 (the limits)
+late50000    3    pass     pass   0/16    -        -       first frame at cycle 50000 and idle of exactly 50000 (the limits)
+late50000    7    pass     pass   0/16    -        -       first frame at cycle 50000 and idle of exactly 50000 (the limits)
+late50000    11   pass     pass   0/16    -        -       first frame at cycle 50000 and idle of exactly 50000 (the limits)
+flipbit      1    fail     fail   16/16   objects  objects one data bit inverted, the checksum left as it was
+flipbit      2    fail     fail   16/16   objects  objects one data bit inverted, the checksum left as it was
+flipbit      3    fail     fail   16/16   objects  objects one data bit inverted, the checksum left as it was
+flipbit      7    fail     fail   16/16   objects  objects one data bit inverted, the checksum left as it was
+flipbit      11   fail     fail   16/16   objects  objects one data bit inverted, the checksum left as it was
+badsum       1    fail     fail   13/16   objects  objects checksum is the sum of the bytes, not their XOR
+badsum       2    fail     fail   13/16   objects  objects checksum is the sum of the bytes, not their XOR
+badsum       3    fail     fail   13/16   objects  objects checksum is the sum of the bytes, not their XOR
+badsum       7    fail     fail   13/16   objects  objects checksum is the sum of the bytes, not their XOR
+badsum       11   fail     fail   13/16   objects  objects checksum is the sum of the bytes, not their XOR
+nosum        1    fail     fail   16/16   objects  objects no checksum byte
+nosum        2    fail     fail   16/16   objects  objects no checksum byte
+nosum        3    fail     fail   16/16   objects  objects no checksum byte
+nosum        7    fail     fail   16/16   objects  objects no checksum byte
+nosum        11   fail     fail   16/16   objects  objects no checksum byte
+lsbfirst     1    fail     fail   16/16   objects  objects bits sent least significant first
+lsbfirst     2    fail     fail   16/16   objects  objects bits sent least significant first
+lsbfirst     3    fail     fail   16/16   objects  objects bits sent least significant first
+lsbfirst     7    fail     fail   16/16   objects  objects bits sent least significant first
+lsbfirst     11   fail     fail   16/16   objects  objects bits sent least significant first
+swapbytes    1    fail     fail   16/16   objects  objects the two bytes of each TX word sent in the other order
+swapbytes    2    fail     fail   16/16   objects  objects the two bytes of each TX word sent in the other order
+swapbytes    3    fail     fail   16/16   objects  objects the two bytes of each TX word sent in the other order
+swapbytes    7    fail     fail   16/16   objects  objects the two bytes of each TX word sent in the other order
+swapbytes    11   fail     fail   16/16   objects  objects the two bytes of each TX word sent in the other order
+shortframe   1    fail     fail   15/16   objects  objects the last data word left out, the size byte unchanged
+shortframe   2    fail     fail   14/16   objects  objects the last data word left out, the size byte unchanged
+shortframe   3    fail     fail   15/16   objects  objects the last data word left out, the size byte unchanged
+shortframe   7    fail     fail   15/16   objects  objects the last data word left out, the size byte unchanged
+shortframe   11   fail     fail   15/16   objects  objects the last data word left out, the size byte unchanged
+start3       1    fail     fail   16/16   objects  objects start pattern with 3 pulses on SDCKB
+start3       2    fail     fail   16/16   objects  objects start pattern with 3 pulses on SDCKB
+start3       3    fail     fail   16/16   objects  objects start pattern with 3 pulses on SDCKB
+start3       7    fail     fail   16/16   objects  objects start pattern with 3 pulses on SDCKB
+start3       11   fail     fail   16/16   objects  objects start pattern with 3 pulses on SDCKB
+start6       1    fail     fail   16/16   objects  objects start pattern with 6 pulses (the start-with-CRC pattern)
+start6       2    fail     fail   16/16   objects  objects start pattern with 6 pulses (the start-with-CRC pattern)
+start6       3    fail     fail   16/16   objects  objects start pattern with 6 pulses (the start-with-CRC pattern)
+start6       7    fail     fail   16/16   objects  objects start pattern with 6 pulses (the start-with-CRC pattern)
+start6       11   fail     fail   16/16   objects  objects start pattern with 6 pulses (the start-with-CRC pattern)
+shortend     1    fail     fail   16/16   objects  -       end pattern without SDCKB's rise and fall (the decoder accepts it)
+shortend     2    fail     fail   16/16   objects  -       end pattern without SDCKB's rise and fall (the decoder accepts it)
+shortend     3    fail     fail   16/16   objects  -       end pattern without SDCKB's rise and fall (the decoder accepts it)
+shortend     7    fail     fail   16/16   objects  -       end pattern without SDCKB's rise and fall (the decoder accepts it)
+shortend     11   fail     fail   16/16   objects  -       end pattern without SDCKB's rise and fall (the decoder accepts it)
+dataearly    1    fail     fail   16/16   objects  -       data set before the clock line rises (the decoder accepts it)
+dataearly    2    fail     fail   16/16   objects  -       data set before the clock line rises (the decoder accepts it)
+dataearly    3    fail     fail   16/16   objects  -       data set before the clock line rises (the decoder accepts it)
+dataearly    7    fail     fail   16/16   objects  -       data set before the clock line rises (the decoder accepts it)
+dataearly    11   fail     fail   16/16   objects  -       data set before the clock line rises (the decoder accepts it)
+cross6       1    fail     fail   16/16   objects  -       one change 6 cycles after a change on the other line
+cross6       2    fail     fail   16/16   objects  -       one change 6 cycles after a change on the other line
+cross6       3    fail     fail   16/16   objects  -       one change 6 cycles after a change on the other line
+cross6       7    fail     fail   16/16   objects  -       one change 6 cycles after a change on the other line
+cross6       11   fail     fail   16/16   objects  -       one change 6 cycles after a change on the other line
+same11       1    fail     fail   16/16   objects  -       two changes of SDCKB in the start pattern 11 cycles apart
+same11       2    fail     fail   16/16   objects  -       two changes of SDCKB in the start pattern 11 cycles apart
+same11       3    fail     fail   16/16   objects  -       two changes of SDCKB in the start pattern 11 cycles apart
+same11       7    fail     fail   16/16   objects  -       two changes of SDCKB in the start pattern 11 cycles apart
+same11       11   fail     fail   16/16   objects  -       two changes of SDCKB in the start pattern 11 cycles apart
+samecycle    1    fail     fail   16/16   objects  objects one change in the same cycle as the change before it, on the other line
+samecycle    2    fail     fail   16/16   objects  objects one change in the same cycle as the change before it, on the other line
+samecycle    3    fail     fail   16/16   objects  objects one change in the same cycle as the change before it, on the other line
+samecycle    7    fail     fail   16/16   objects  objects one change in the same cycle as the change before it, on the other line
+samecycle    11   fail     fail   16/16   objects  objects one change in the same cycle as the change before it, on the other line
+slow101      1    fail     fail   16/16   objects  -       one wait of 101 cycles between changes inside a frame
+slow101      2    fail     fail   16/16   objects  -       one wait of 101 cycles between changes inside a frame
+slow101      3    fail     fail   16/16   objects  -       one wait of 101 cycles between changes inside a frame
+slow101      7    fail     fail   16/16   objects  -       one wait of 101 cycles between changes inside a frame
+slow101      11   fail     fail   16/16   objects  -       one wait of 101 cycles between changes inside a frame
+gap99        1    fail     fail   8/16    objects  -       idle of 99 cycles between frames
+gap99        2    fail     fail   7/16    objects  -       idle of 99 cycles between frames
+gap99        3    fail     fail   8/16    objects  -       idle of 99 cycles between frames
+gap99        7    fail     fail   7/16    objects  -       idle of 99 cycles between frames
+gap99        11   fail     fail   7/16    objects  -       idle of 99 cycles between frames
+gap50001     1    fail     fail   8/16    objects  -       idle of 50001 cycles between frames
+gap50001     2    fail     fail   7/16    objects  -       idle of 50001 cycles between frames
+gap50001     3    fail     fail   8/16    objects  -       idle of 50001 cycles between frames
+gap50001     7    fail     fail   7/16    objects  -       idle of 50001 cycles between frames
+gap50001     11   fail     fail   7/16    objects  -       idle of 50001 cycles between frames
+start50001   1    fail     fail   16/16   objects  -       first frame at cycle 50001
+start50001   2    fail     fail   16/16   objects  -       first frame at cycle 50001
+start50001   3    fail     fail   16/16   objects  -       first frame at cycle 50001
+start50001   7    fail     fail   16/16   objects  -       first frame at cycle 50001
+start50001   11   fail     fail   16/16   objects  -       first frame at cycle 50001
+idlelow      1    fail     fail   16/16   objects  -       SDCKB low at cycle 0, up at cycle 10
+idlelow      2    fail     fail   16/16   objects  -       SDCKB low at cycle 0, up at cycle 10
+idlelow      3    fail     fail   16/16   objects  -       SDCKB low at cycle 0, up at cycle 10
+idlelow      7    fail     fail   16/16   objects  -       SDCKB low at cycle 0, up at cycle 10
+idlelow      11   fail     fail   16/16   objects  -       SDCKB low at cycle 0, up at cycle 10
+leftlow      1    fail     fail   16/16   objects  objects SDCKB left low after the last frame (no final rise)
+leftlow      2    fail     fail   16/16   objects  objects SDCKB left low after the last frame (no final rise)
+leftlow      3    fail     fail   16/16   objects  objects SDCKB left low after the last frame (no final rise)
+leftlow      7    fail     fail   16/16   objects  objects SDCKB left low after the last frame (no final rise)
+leftlow      11   fail     fail   16/16   objects  objects SDCKB left low after the last frame (no final rise)
+tail         1    fail     fail   16/16   objects  objects one more SDCKA pulse 5000 cycles after the last frame
+tail         2    fail     fail   16/16   objects  objects one more SDCKA pulse 5000 cycles after the last frame
+tail         3    fail     fail   16/16   objects  objects one more SDCKA pulse 5000 cycles after the last frame
+tail         7    fail     fail   16/16   objects  objects one more SDCKA pulse 5000 cycles after the last frame
+tail         11   fail     fail   16/16   objects  objects one more SDCKA pulse 5000 cycles after the last frame
+dropframe    1    fail     fail   16/16   objects  objects the last frame is not sent
+dropframe    2    fail     fail   16/16   objects  objects the last frame is not sent
+dropframe    3    fail     fail   16/16   objects  objects the last frame is not sent
+dropframe    7    fail     fail   16/16   objects  objects the last frame is not sent
+dropframe    11   fail     fail   16/16   objects  objects the last frame is not sent
+extraframe   1    fail     fail   16/16   objects  objects the last frame is sent twice
+extraframe   2    fail     fail   16/16   objects  objects the last frame is sent twice
+extraframe   3    fail     fail   16/16   objects  objects the last frame is sent twice
+extraframe   7    fail     fail   16/16   objects  objects the last frame is sent twice
+extraframe   11   fail     fail   16/16   objects  objects the last frame is sent twice
+
+ok    run_args.txt '-mode 0=pp -mode 1=pp -config clkdiv=2\n': accepted
+ok    run_args.txt '-mo 0=pp -m 1=pp -mode 2=in\n': accepted
+ok    run_args.txt '-mode 0=pp\n': setup: FAIL: run_args.txt must make P1 push-pull (-mode 1=pp), and nothing else
+ok    run_args.txt '-mode 0=pp -mode 1=od\n': setup: FAIL: run_args.txt must make P1 push-pull (-mode 1=pp), and nothing else
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 1=in\n': setup: FAIL: run_args.txt must make P1 push-pull (-mode 1=pp), and nothing else
+ok    run_args.txt '-mode 0=pp -mode 1=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=pp -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -mode 1=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -mode 1=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-mode 1=pp\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode 0=pp -mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (device info request, no data: 1 frame, 4 host bytes): FAIL: waveform: 0 changes on the lines, wanted 9)
+SELFTEST PASS

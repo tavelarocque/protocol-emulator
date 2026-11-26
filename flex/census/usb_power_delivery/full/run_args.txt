@@ -1,0 +1,1 @@
+-config threshold=16,crc_in=1,crc_poly=0xEDB88320,crc_init=0xFFFFFFFF,crc_invert=1 -mode 0=pp

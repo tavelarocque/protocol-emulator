@@ -1,0 +1,167 @@
+ok    interface: 0f1000100f01 gives the words printed in the sheet (0x0018, 0x0481)
+ok    interface: 111111111111 gives the words printed in the sheet (0x0555, 0x0555)
+ok    interface: ffffffffffff gives the words printed in the sheet (0x0AAA, 0x0AAA)
+ok    interface: two words per code word, first-sent trit in bits 1..0
+ok    interface: the sheet's example table matches the judge's ideal edges
+ok    the task sheet has no em-dash
+
+waveform     seed expected judge  cases   waveform decoder 
+                                  failed  check    check   what it is
+none         1    pass     pass   0/15    -        -       ideal: fall at cycle 1, first frame at cycle 60000
+
+ok    seed 1: RATE bytes=9 cycles=624799, as the generator's edges give
+
+none         2    pass     pass   0/15    -        -       ideal: fall at cycle 1, first frame at cycle 60000
+
+ok    seed 2: RATE bytes=9 cycles=624799, as the generator's edges give
+
+none         3    pass     pass   0/15    -        -       ideal: fall at cycle 1, first frame at cycle 60000
+
+ok    seed 3: RATE bytes=12 cycles=829599, as the generator's edges give
+
+none         7    pass     pass   0/15    -        -       ideal: fall at cycle 1, first frame at cycle 60000
+
+ok    seed 7: RATE bytes=9 cycles=624799, as the generator's edges give
+
+none         11   pass     pass   0/15    -        -       ideal: fall at cycle 1, first frame at cycle 60000
+
+ok    seed 11: RATE bytes=12 cycles=829599, as the generator's edges give
+
+jitter2      1    pass     pass   0/15    -        -       every edge after a frame's first 2 cycles off, alternately late and early (the limit)
+jitter2      2    pass     pass   0/15    -        -       every edge after a frame's first 2 cycles off, alternately late and early (the limit)
+jitter2      3    pass     pass   0/15    -        -       every edge after a frame's first 2 cycles off, alternately late and early (the limit)
+jitter2      7    pass     pass   0/15    -        -       every edge after a frame's first 2 cycles off, alternately late and early (the limit)
+jitter2      11   pass     pass   0/15    -        -       every edge after a frame's first 2 cycles off, alternately late and early (the limit)
+fall100      1    pass     pass   0/15    -        -       first fall at cycle 100 (the limit)
+fall100      2    pass     pass   0/15    -        -       first fall at cycle 100 (the limit)
+fall100      3    pass     pass   0/15    -        -       first fall at cycle 100 (the limit)
+fall100      7    pass     pass   0/15    -        -       first fall at cycle 100 (the limit)
+fall100      11   pass     pass   0/15    -        -       first fall at cycle 100 (the limit)
+start50000   1    pass     pass   0/15    -        -       first frame at cycle 50000 (the earliest allowed)
+start50000   2    pass     pass   0/15    -        -       first frame at cycle 50000 (the earliest allowed)
+start50000   3    pass     pass   0/15    -        -       first frame at cycle 50000 (the earliest allowed)
+start50000   7    pass     pass   0/15    -        -       first frame at cycle 50000 (the earliest allowed)
+start50000   11   pass     pass   0/15    -        -       first frame at cycle 50000 (the earliest allowed)
+start100000  1    pass     pass   0/15    -        -       first frame at cycle 100000 (the latest allowed)
+start100000  2    pass     pass   0/15    -        -       first frame at cycle 100000 (the latest allowed)
+start100000  3    pass     pass   0/15    -        -       first frame at cycle 100000 (the latest allowed)
+start100000  7    pass     pass   0/15    -        -       first frame at cycle 100000 (the latest allowed)
+start100000  11   pass     pass   0/15    -        -       first frame at cycle 100000 (the latest allowed)
+fall101      1    fail     fail   15/15   objects  -       first fall at cycle 101
+fall101      2    fail     fail   15/15   objects  -       first fall at cycle 101
+fall101      3    fail     fail   15/15   objects  -       first fall at cycle 101
+fall101      7    fail     fail   15/15   objects  -       first fall at cycle 101
+fall101      11   fail     fail   15/15   objects  -       first fall at cycle 101
+start49999   1    fail     fail   15/15   objects  -       first frame at cycle 49999
+start49999   2    fail     fail   15/15   objects  -       first frame at cycle 49999
+start49999   3    fail     fail   15/15   objects  -       first frame at cycle 49999
+start49999   7    fail     fail   15/15   objects  -       first frame at cycle 49999
+start49999   11   fail     fail   15/15   objects  -       first frame at cycle 49999
+start100001  1    fail     fail   15/15   objects  -       first frame at cycle 100001
+start100001  2    fail     fail   15/15   objects  -       first frame at cycle 100001
+start100001  3    fail     fail   15/15   objects  -       first frame at cycle 100001
+start100001  7    fail     fail   15/15   objects  -       first frame at cycle 100001
+start100001  11   fail     fail   15/15   objects  -       first frame at cycle 100001
+nofall       1    fail     fail   15/15   objects  objects P0 never driven low first: frames sent with the line idling high (inverted)
+nofall       2    fail     fail   15/15   objects  objects P0 never driven low first: frames sent with the line idling high (inverted)
+nofall       3    fail     fail   15/15   objects  objects P0 never driven low first: frames sent with the line idling high (inverted)
+nofall       7    fail     fail   15/15   objects  objects P0 never driven low first: frames sent with the line idling high (inverted)
+nofall       11   fail     fail   15/15   objects  objects P0 never driven low first: frames sent with the line idling high (inverted)
+flipf        1    fail     fail   15/15   objects  objects one trit of the last code word sent as f instead of 0
+flipf        2    fail     fail   15/15   objects  objects one trit of the last code word sent as f instead of 0
+flipf        3    fail     fail   15/15   objects  objects one trit of the last code word sent as f instead of 0
+flipf        7    fail     fail   15/15   objects  objects one trit of the last code word sent as f instead of 0
+flipf        11   fail     fail   15/15   objects  objects one trit of the last code word sent as f instead of 0
+fasl         1    fail     fail   14/15   objects  objects trit 1 sent as f and f as 1 everywhere
+fasl         2    fail     fail   14/15   objects  objects trit 1 sent as f and f as 1 everywhere
+fasl         3    fail     fail   14/15   objects  objects trit 1 sent as f and f as 1 everywhere
+fasl         7    fail     fail   14/15   objects  objects trit 1 sent as f and f as 1 everywhere
+fasl         11   fail     fail   14/15   objects  objects trit 1 sent as f and f as 1 everywhere
+reverse      1    fail     fail   12/15   objects  objects the twelve trits of every code word sent in reverse order
+reverse      2    fail     fail   12/15   objects  objects the twelve trits of every code word sent in reverse order
+reverse      3    fail     fail   12/15   objects  objects the twelve trits of every code word sent in reverse order
+reverse      7    fail     fail   12/15   objects  objects the twelve trits of every code word sent in reverse order
+reverse      11   fail     fail   12/15   objects  objects the twelve trits of every code word sent in reverse order
+late3        1    fail     fail   15/15   objects  -       one edge of the first frame 3 cycles late
+late3        2    fail     fail   15/15   objects  -       one edge of the first frame 3 cycles late
+late3        3    fail     fail   15/15   objects  -       one edge of the first frame 3 cycles late
+late3        7    fail     fail   15/15   objects  -       one edge of the first frame 3 cycles late
+late3        11   fail     fail   15/15   objects  -       one edge of the first frame 3 cycles late
+early3       1    fail     fail   15/15   objects  -       one edge of the first frame 3 cycles early
+early3       2    fail     fail   15/15   objects  -       one edge of the first frame 3 cycles early
+early3       3    fail     fail   15/15   objects  -       one edge of the first frame 3 cycles early
+early3       7    fail     fail   15/15   objects  -       one edge of the first frame 3 cycles early
+early3       11   fail     fail   15/15   objects  -       one edge of the first frame 3 cycles early
+alpha401     1    fail     fail   15/15   objects  -       alpha of 401 cycles: the error adds up along a frame
+alpha401     2    fail     fail   15/15   objects  -       alpha of 401 cycles: the error adds up along a frame
+alpha401     3    fail     fail   15/15   objects  -       alpha of 401 cycles: the error adds up along a frame
+alpha401     7    fail     fail   15/15   objects  -       alpha of 401 cycles: the error adds up along a frame
+alpha401     11   fail     fail   15/15   objects  -       alpha of 401 cycles: the error adds up along a frame
+alpha399     1    fail     fail   15/15   objects  -       alpha of 399 cycles
+alpha399     2    fail     fail   15/15   objects  -       alpha of 399 cycles
+alpha399     3    fail     fail   15/15   objects  -       alpha of 399 cycles
+alpha399     7    fail     fail   15/15   objects  -       alpha of 399 cycles
+alpha399     11   fail     fail   15/15   objects  -       alpha of 399 cycles
+short3       1    fail     fail   14/15   objects  -       short highs of 3 alpha (lows of 13), long highs of 12 (the decoder still reads it)
+short3       2    fail     fail   14/15   objects  -       short highs of 3 alpha (lows of 13), long highs of 12 (the decoder still reads it)
+short3       3    fail     fail   14/15   objects  -       short highs of 3 alpha (lows of 13), long highs of 12 (the decoder still reads it)
+short3       7    fail     fail   14/15   objects  -       short highs of 3 alpha (lows of 13), long highs of 12 (the decoder still reads it)
+short3       11   fail     fail   14/15   objects  -       short highs of 3 alpha (lows of 13), long highs of 12 (the decoder still reads it)
+long10       1    fail     fail   14/15   objects  objects long highs of 10 alpha (lows of 6), short highs of 4 (the decoder still reads it)
+long10       2    fail     fail   14/15   objects  objects long highs of 10 alpha (lows of 6), short highs of 4 (the decoder still reads it)
+long10       3    fail     fail   14/15   objects  objects long highs of 10 alpha (lows of 6), short highs of 4 (the decoder still reads it)
+long10       7    fail     fail   14/15   objects  objects long highs of 10 alpha (lows of 6), short highs of 4 (the decoder still reads it)
+long10       11   fail     fail   14/15   objects  objects long highs of 10 alpha (lows of 6), short highs of 4 (the decoder still reads it)
+synclong     1    fail     fail   10/15   objects  -       sync low part one alpha too long (next frame late)
+synclong     2    fail     fail   8/15    objects  -       sync low part one alpha too long (next frame late)
+synclong     3    fail     fail   10/15   objects  -       sync low part one alpha too long (next frame late)
+synclong     7    fail     fail   10/15   objects  -       sync low part one alpha too long (next frame late)
+synclong     11   fail     fail   10/15   objects  -       sync low part one alpha too long (next frame late)
+syncshort    1    fail     fail   10/15   objects  -       sync low part one alpha too short (next frame early)
+syncshort    2    fail     fail   8/15    objects  -       sync low part one alpha too short (next frame early)
+syncshort    3    fail     fail   10/15   objects  -       sync low part one alpha too short (next frame early)
+syncshort    7    fail     fail   10/15   objects  -       sync low part one alpha too short (next frame early)
+syncshort    11   fail     fail   10/15   objects  -       sync low part one alpha too short (next frame early)
+synchigh8    1    fail     fail   15/15   objects  -       sync high part of 8 alpha instead of 4
+synchigh8    2    fail     fail   15/15   objects  -       sync high part of 8 alpha instead of 4
+synchigh8    3    fail     fail   15/15   objects  -       sync high part of 8 alpha instead of 4
+synchigh8    7    fail     fail   15/15   objects  -       sync high part of 8 alpha instead of 4
+synchigh8    11   fail     fail   15/15   objects  -       sync high part of 8 alpha instead of 4
+nosync       1    fail     fail   15/15   objects  objects no sync bit between frames (frames run together)
+nosync       2    fail     fail   15/15   objects  objects no sync bit between frames (frames run together)
+nosync       3    fail     fail   15/15   objects  objects no sync bit between frames (frames run together)
+nosync       7    fail     fail   15/15   objects  objects no sync bit between frames (frames run together)
+nosync       11   fail     fail   15/15   objects  objects no sync bit between frames (frames run together)
+dropframe    1    fail     fail   15/15   objects  objects the last code word is not sent
+dropframe    2    fail     fail   15/15   objects  objects the last code word is not sent
+dropframe    3    fail     fail   15/15   objects  objects the last code word is not sent
+dropframe    7    fail     fail   15/15   objects  objects the last code word is not sent
+dropframe    11   fail     fail   15/15   objects  objects the last code word is not sent
+extraframe   1    fail     fail   15/15   objects  objects the last code word is sent twice
+extraframe   2    fail     fail   15/15   objects  objects the last code word is sent twice
+extraframe   3    fail     fail   15/15   objects  objects the last code word is sent twice
+extraframe   7    fail     fail   15/15   objects  objects the last code word is sent twice
+extraframe   11   fail     fail   15/15   objects  objects the last code word is sent twice
+tail         1    fail     fail   15/15   objects  -       one more rise 3000 cycles after the last frame's end, and stays high
+tail         2    fail     fail   15/15   objects  -       one more rise 3000 cycles after the last frame's end, and stays high
+tail         3    fail     fail   15/15   objects  -       one more rise 3000 cycles after the last frame's end, and stays high
+tail         7    fail     fail   15/15   objects  -       one more rise 3000 cycles after the last frame's end, and stays high
+tail         11   fail     fail   15/15   objects  -       one more rise 3000 cycles after the last frame's end, and stays high
+glitch       1    fail     fail   15/15   objects  objects a pulse one cycle long in the low part of the first sync bit
+glitch       2    fail     fail   15/15   objects  objects a pulse one cycle long in the low part of the first sync bit
+glitch       3    fail     fail   15/15   objects  objects a pulse one cycle long in the low part of the first sync bit
+glitch       7    fail     fail   15/15   objects  objects a pulse one cycle long in the low part of the first sync bit
+glitch       11   fail     fail   15/15   objects  objects a pulse one cycle long in the low part of the first sync bit
+
+ok    run_args.txt '-mode 0=pp -config clkdiv=400\n': accepted
+ok    run_args.txt '-mo 0=pp\n': accepted
+ok    run_args.txt '-mode 0=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (all 0: 1 code word): FAIL: waveform: P0 never changes: it must go low by cycle 100; decoder:)
+SELFTEST PASS

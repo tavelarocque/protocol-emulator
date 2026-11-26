@@ -1,0 +1,212 @@
+ok    interface: the sheet's example gives the words printed in the sheet (0x0000, 0x5678, 0x1234, 0x0104, 0xBEEF, 0xDEAD)
+ok    interface: Login 0x12345678 gives the 50 bits printed in the sheet
+ok    interface: Write 4 0xDEADBEEF gives the 57 bits printed in the sheet
+ok    interface: the stand-in reads the judge's words back into the same commands
+ok    cases: no command puts nine 1 bits in a row on the line; 1 to 6 commands a run
+
+waveform    seed expected judge  cases   waveform decoder 
+                                 failed  check    check   what it is
+none        1    pass     pass   0/15    -        -       ideal: first fall at cycle 40, 400 periods of carrier before each command and after the last
+none        2    pass     pass   0/15    -        -       ideal: first fall at cycle 40, 400 periods of carrier before each command and after the last
+none        3    pass     pass   0/15    -        -       ideal: first fall at cycle 40, 400 periods of carrier before each command and after the last
+none        7    pass     pass   0/15    -        -       ideal: first fall at cycle 40, 400 periods of carrier before each command and after the last
+none        11   pass     pass   0/15    -        -       ideal: first fall at cycle 40, 400 periods of carrier before each command and after the last
+jitter2     1    pass     pass   0/15    -        -       inside commands every edge 2 cycles off its place, alternately late and early (the limit)
+jitter2     2    pass     pass   0/15    -        -       inside commands every edge 2 cycles off its place, alternately late and early (the limit)
+jitter2     3    pass     pass   0/15    -        -       inside commands every edge 2 cycles off its place, alternately late and early (the limit)
+jitter2     7    pass     pass   0/15    -        -       inside commands every edge 2 cycles off its place, alternately late and early (the limit)
+jitter2     11   pass     pass   0/15    -        -       inside commands every edge 2 cycles off its place, alternately late and early (the limit)
+idlewidth   1    pass     pass   0/15    -        -       outside commands every high 42 cycles and every low 38 (the limit)
+idlewidth   2    pass     pass   0/15    -        -       outside commands every high 42 cycles and every low 38 (the limit)
+idlewidth   3    pass     pass   0/15    -        -       outside commands every high 42 cycles and every low 38 (the limit)
+idlewidth   7    pass     pass   0/15    -        -       outside commands every high 42 cycles and every low 38 (the limit)
+idlewidth   11   pass     pass   0/15    -        -       outside commands every high 42 cycles and every low 38 (the limit)
+idle320     1    pass     pass   0/15    -        -       exactly 320 periods before each command and 320 whole pulses after the last (the limit)
+idle320     2    pass     pass   0/15    -        -       exactly 320 periods before each command and 320 whole pulses after the last (the limit)
+idle320     3    pass     pass   0/15    -        -       exactly 320 periods before each command and 320 whole pulses after the last (the limit)
+idle320     7    pass     pass   0/15    -        -       exactly 320 periods before each command and 320 whole pulses after the last (the limit)
+idle320     11   pass     pass   0/15    -        -       exactly 320 periods before each command and 320 whole pulses after the last (the limit)
+idle1280    1    pass     pass   0/15    -        -       1280 periods before each command (the limit)
+idle1280    2    pass     pass   0/15    -        -       1280 periods before each command (the limit)
+idle1280    3    pass     pass   0/15    -        -       1280 periods before each command (the limit)
+idle1280    7    pass     pass   0/15    -        -       1280 periods before each command (the limit)
+idle1280    11   pass     pass   0/15    -        -       1280 periods before each command (the limit)
+first200    1    pass     pass   0/15    -        -       P0's first fall at cycle 200 (the limit)
+first200    2    pass     pass   0/15    -        -       P0's first fall at cycle 200 (the limit)
+first200    3    pass     pass   0/15    -        -       P0's first fall at cycle 200 (the limit)
+first200    7    pass     pass   0/15    -        -       P0's first fall at cycle 200 (the limit)
+first200    11   pass     pass   0/15    -        -       P0's first fall at cycle 200 (the limit)
+carryon     1    pass     pass   0/15    -        -       the carrier runs on to the end of the run
+carryon     2    pass     pass   0/15    -        -       the carrier runs on to the end of the run
+carryon     3    pass     pass   0/15    -        -       the carrier runs on to the end of the run
+carryon     7    pass     pass   0/15    -        -       the carrier runs on to the end of the run
+carryon     11   pass     pass   0/15    -        -       the carrier runs on to the end of the run
+stophigh    1    pass     pass   0/15    -        -       after the last command's 400 pulses one more rise, then P0 stays high
+stophigh    2    pass     pass   0/15    -        -       after the last command's 400 pulses one more rise, then P0 stays high
+stophigh    3    pass     pass   0/15    -        -       after the last command's 400 pulses one more rise, then P0 stays high
+stophigh    7    pass     pass   0/15    -        -       after the last command's 400 pulses one more rise, then P0 stays high
+stophigh    11   pass     pass   0/15    -        -       after the last command's 400 pulses one more rise, then P0 stays high
+flipbit     1    fail     fail   15/15   objects  objects one data bit of the last command inverted, its parities made to match
+flipbit     2    fail     fail   15/15   objects  objects one data bit of the last command inverted, its parities made to match
+flipbit     3    fail     fail   15/15   objects  objects one data bit of the last command inverted, its parities made to match
+flipbit     7    fail     fail   15/15   objects  objects one data bit of the last command inverted, its parities made to match
+flipbit     11   fail     fail   15/15   objects  objects one data bit of the last command inverted, its parities made to match
+badrow      1    fail     fail   15/15   objects  objects the first row parity bit of the last command inverted
+badrow      2    fail     fail   15/15   objects  objects the first row parity bit of the last command inverted
+badrow      3    fail     fail   15/15   objects  objects the first row parity bit of the last command inverted
+badrow      7    fail     fail   15/15   objects  objects the first row parity bit of the last command inverted
+badrow      11   fail     fail   15/15   objects  objects the first row parity bit of the last command inverted
+badcol      1    fail     fail   15/15   objects  objects one column parity bit of the last command inverted
+badcol      2    fail     fail   15/15   objects  objects one column parity bit of the last command inverted
+badcol      3    fail     fail   15/15   objects  objects one column parity bit of the last command inverted
+badcol      7    fail     fail   15/15   objects  objects one column parity bit of the last command inverted
+badcol      11   fail     fail   15/15   objects  objects one column parity bit of the last command inverted
+lsbfirst    1    fail     fail   14/15   objects  objects each data byte sent bit 0 first
+lsbfirst    2    fail     fail   14/15   objects  objects each data byte sent bit 0 first
+lsbfirst    3    fail     fail   14/15   objects  objects each data byte sent bit 0 first
+lsbfirst    7    fail     fail   14/15   objects  objects each data byte sent bit 0 first
+lsbfirst    11   fail     fail   14/15   objects  objects each data byte sent bit 0 first
+msbytes     1    fail     fail   13/15   objects  objects the data bytes sent most significant first
+msbytes     2    fail     fail   13/15   objects  objects the data bytes sent most significant first
+msbytes     3    fail     fail   13/15   objects  objects the data bytes sent most significant first
+msbytes     7    fail     fail   13/15   objects  objects the data bytes sent most significant first
+msbytes     11   fail     fail   13/15   objects  objects the data bytes sent most significant first
+addrmsb     1    fail     fail   10/15   objects  objects a write's address sent bit 3 first
+addrmsb     2    fail     fail   11/15   objects  objects a write's address sent bit 3 first
+addrmsb     3    fail     fail   10/15   objects  objects a write's address sent bit 3 first
+addrmsb     7    fail     fail   10/15   objects  objects a write's address sent bit 3 first
+addrmsb     11   fail     fail   12/15   objects  objects a write's address sent bit 3 first
+swapcmd     1    fail     fail   15/15   objects  objects a Login sent with the Write word code and the reverse
+swapcmd     2    fail     fail   15/15   objects  objects a Login sent with the Write word code and the reverse
+swapcmd     3    fail     fail   15/15   objects  objects a Login sent with the Write word code and the reverse
+swapcmd     7    fail     fail   15/15   objects  objects a Login sent with the Write word code and the reverse
+swapcmd     11   fail     fail   15/15   objects  objects a Login sent with the Write word code and the reverse
+nolead      1    fail     fail   15/15   objects  objects no leading 0 bit
+nolead      2    fail     fail   15/15   objects  objects no leading 0 bit
+nolead      3    fail     fail   15/15   objects  objects no leading 0 bit
+nolead      7    fail     fail   15/15   objects  objects no leading 0 bit
+nolead      11   fail     fail   15/15   objects  objects no leading 0 bit
+nostop      1    fail     fail   15/15   objects  objects no stop bit
+nostop      2    fail     fail   15/15   objects  objects no stop bit
+nostop      3    fail     fail   15/15   objects  objects no stop bit
+nostop      7    fail     fail   15/15   objects  objects no stop bit
+nostop      11   fail     fail   15/15   objects  objects no stop bit
+late3       1    fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles late
+late3       2    fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles late
+late3       3    fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles late
+late3       7    fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles late
+late3       11   fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles late
+early3      1    fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles early
+early3      2    fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles early
+early3      3    fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles early
+early3      7    fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles early
+early3      11   fail     fail   15/15   objects  -       one edge in the middle of the first command 3 cycles early
+idlehigh43  1    fail     fail   15/15   objects  -       one high pulse before the first command lasts 43 cycles
+idlehigh43  2    fail     fail   15/15   objects  -       one high pulse before the first command lasts 43 cycles
+idlehigh43  3    fail     fail   15/15   objects  -       one high pulse before the first command lasts 43 cycles
+idlehigh43  7    fail     fail   15/15   objects  -       one high pulse before the first command lasts 43 cycles
+idlehigh43  11   fail     fail   15/15   objects  -       one high pulse before the first command lasts 43 cycles
+idlelow37   1    fail     fail   15/15   objects  -       one low between pulses after the first command lasts 37 cycles
+idlelow37   2    fail     fail   15/15   objects  -       one low between pulses after the first command lasts 37 cycles
+idlelow37   3    fail     fail   15/15   objects  -       one low between pulses after the first command lasts 37 cycles
+idlelow37   7    fail     fail   15/15   objects  -       one low between pulses after the first command lasts 37 cycles
+idlelow37   11   fail     fail   15/15   objects  -       one low between pulses after the first command lasts 37 cycles
+slow81      1    fail     fail   15/15   objects  -       carrier periods of 81 cycles: the error adds up along a command
+slow81      2    fail     fail   15/15   objects  -       carrier periods of 81 cycles: the error adds up along a command
+slow81      3    fail     fail   15/15   objects  -       carrier periods of 81 cycles: the error adds up along a command
+slow81      7    fail     fail   15/15   objects  -       carrier periods of 81 cycles: the error adds up along a command
+slow81      11   fail     fail   15/15   objects  -       carrier periods of 81 cycles: the error adds up along a command
+ffs54       1    fail     fail   15/15   objects  -       first field stops of 54 periods
+ffs54       2    fail     fail   15/15   objects  -       first field stops of 54 periods
+ffs54       3    fail     fail   15/15   objects  -       first field stops of 54 periods
+ffs54       7    fail     fail   15/15   objects  -       first field stops of 54 periods
+ffs54       11   fail     fail   15/15   objects  -       first field stops of 54 periods
+ffs56       1    fail     fail   15/15   objects  -       first field stops of 56 periods
+ffs56       2    fail     fail   15/15   objects  -       first field stops of 56 periods
+ffs56       3    fail     fail   15/15   objects  -       first field stops of 56 periods
+ffs56       7    fail     fail   15/15   objects  -       first field stops of 56 periods
+ffs56       11   fail     fail   15/15   objects  -       first field stops of 56 periods
+zero15      1    fail     fail   15/15   objects  objects 0 bits with the field on for 15 periods and off for 17
+zero15      2    fail     fail   15/15   objects  objects 0 bits with the field on for 15 periods and off for 17
+zero15      3    fail     fail   15/15   objects  objects 0 bits with the field on for 15 periods and off for 17
+zero15      7    fail     fail   15/15   objects  objects 0 bits with the field on for 15 periods and off for 17
+zero15      11   fail     fail   15/15   objects  objects 0 bits with the field on for 15 periods and off for 17
+zero17      1    fail     fail   15/15   objects  -       0 bits with the field on for 17 periods and off for 15
+zero17      2    fail     fail   15/15   objects  -       0 bits with the field on for 17 periods and off for 15
+zero17      3    fail     fail   15/15   objects  -       0 bits with the field on for 17 periods and off for 15
+zero17      7    fail     fail   15/15   objects  -       0 bits with the field on for 17 periods and off for 15
+zero17      11   fail     fail   15/15   objects  -       0 bits with the field on for 17 periods and off for 15
+idle319     1    fail     fail   15/15   objects  -       319 periods before each command
+idle319     2    fail     fail   15/15   objects  -       319 periods before each command
+idle319     3    fail     fail   15/15   objects  -       319 periods before each command
+idle319     7    fail     fail   15/15   objects  -       319 periods before each command
+idle319     11   fail     fail   15/15   objects  -       319 periods before each command
+idle1281    1    fail     fail   15/15   objects  -       1281 periods before each command
+idle1281    2    fail     fail   15/15   objects  -       1281 periods before each command
+idle1281    3    fail     fail   15/15   objects  -       1281 periods before each command
+idle1281    7    fail     fail   15/15   objects  -       1281 periods before each command
+idle1281    11   fail     fail   15/15   objects  -       1281 periods before each command
+tail319     1    fail     fail   15/15   objects  -       only 319 whole pulses after the last command, then P0 low
+tail319     2    fail     fail   15/15   objects  -       only 319 whole pulses after the last command, then P0 low
+tail319     3    fail     fail   15/15   objects  -       only 319 whole pulses after the last command, then P0 low
+tail319     7    fail     fail   15/15   objects  -       only 319 whole pulses after the last command, then P0 low
+tail319     11   fail     fail   15/15   objects  -       only 319 whole pulses after the last command, then P0 low
+tail0       1    fail     fail   15/15   objects  objects the field stops at once after the last command
+tail0       2    fail     fail   15/15   objects  objects the field stops at once after the last command
+tail0       3    fail     fail   15/15   objects  objects the field stops at once after the last command
+tail0       7    fail     fail   15/15   objects  objects the field stops at once after the last command
+tail0       11   fail     fail   15/15   objects  objects the field stops at once after the last command
+first201    1    fail     fail   15/15   objects  -       P0's first fall at cycle 201
+first201    2    fail     fail   15/15   objects  -       P0's first fall at cycle 201
+first201    3    fail     fail   15/15   objects  -       P0's first fall at cycle 201
+first201    7    fail     fail   15/15   objects  -       P0's first fall at cycle 201
+first201    11   fail     fail   15/15   objects  -       P0's first fall at cycle 201
+latecarrier 1    fail     fail   15/15   objects  -       P0 falls at cycle 40 but the carrier's first rise comes at cycle 200
+latecarrier 2    fail     fail   15/15   objects  -       P0 falls at cycle 40 but the carrier's first rise comes at cycle 200
+latecarrier 3    fail     fail   15/15   objects  -       P0 falls at cycle 40 but the carrier's first rise comes at cycle 200
+latecarrier 7    fail     fail   15/15   objects  -       P0 falls at cycle 40 but the carrier's first rise comes at cycle 200
+latecarrier 11   fail     fail   15/15   objects  -       P0 falls at cycle 40 but the carrier's first rise comes at cycle 200
+nofirst     1    fail     fail   15/15   objects  -       P0 high from the start until the first carrier slot at cycle 400
+nofirst     2    fail     fail   15/15   objects  -       P0 high from the start until the first carrier slot at cycle 400
+nofirst     3    fail     fail   15/15   objects  -       P0 high from the start until the first carrier slot at cycle 400
+nofirst     7    fail     fail   15/15   objects  -       P0 high from the start until the first carrier slot at cycle 400
+nofirst     11   fail     fail   15/15   objects  -       P0 high from the start until the first carrier slot at cycle 400
+glitch      1    fail     fail   15/15   objects  objects a pulse one cycle long in the middle of a 0 bit's gap
+glitch      2    fail     fail   15/15   objects  objects a pulse one cycle long in the middle of a 0 bit's gap
+glitch      3    fail     fail   15/15   objects  objects a pulse one cycle long in the middle of a 0 bit's gap
+glitch      7    fail     fail   15/15   objects  objects a pulse one cycle long in the middle of a 0 bit's gap
+glitch      11   fail     fail   15/15   objects  objects a pulse one cycle long in the middle of a 0 bit's gap
+dropout     1    fail     fail   15/15   objects  -       two pulses missing from the carrier between the first two commands
+dropout     2    fail     fail   15/15   objects  -       two pulses missing from the carrier between the first two commands
+dropout     3    fail     fail   15/15   objects  -       two pulses missing from the carrier between the first two commands
+dropout     7    fail     fail   15/15   objects  -       two pulses missing from the carrier between the first two commands
+dropout     11   fail     fail   15/15   objects  -       two pulses missing from the carrier between the first two commands
+dropcmd     1    fail     fail   15/15   objects  objects the last command is not sent
+dropcmd     2    fail     fail   15/15   objects  objects the last command is not sent
+dropcmd     3    fail     fail   15/15   objects  objects the last command is not sent
+dropcmd     7    fail     fail   15/15   objects  objects the last command is not sent
+dropcmd     11   fail     fail   15/15   objects  objects the last command is not sent
+extracmd    1    fail     fail   15/15   objects  objects the last command is sent twice
+extracmd    2    fail     fail   15/15   objects  objects the last command is sent twice
+extracmd    3    fail     fail   15/15   objects  objects the last command is sent twice
+extracmd    7    fail     fail   15/15   objects  objects the last command is sent twice
+extracmd    11   fail     fail   15/15   objects  objects the last command is sent twice
+
+ok    seed 1: RATE bytes=4 cycles=164440, as the generator's layout gives
+ok    seed 2: RATE bytes=16 cycles=729320, as the generator's layout gives
+ok    seed 3: RATE bytes=8 cycles=346760, as the generator's layout gives
+ok    seed 7: RATE bytes=4 cycles=182360, as the generator's layout gives
+ok    seed 11: RATE bytes=4 cycles=182360, as the generator's layout gives
+
+ok    run_args.txt '-mode 0=pp -config clkdiv=1\n': accepted
+ok    run_args.txt '-mo 0=pp\n': accepted
+ok    run_args.txt '-mode 0=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (login, password 0: 1 command): FAIL: waveform: P0 never changes: no carrier; decoder: the de)
+SELFTEST PASS

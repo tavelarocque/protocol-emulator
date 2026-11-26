@@ -1,0 +1,1 @@
+-config set_base=1,set_count=2,out_base=2,out_count=1,out_msb_first=1,threshold=16 -mode 1=pp -mode 2=pp

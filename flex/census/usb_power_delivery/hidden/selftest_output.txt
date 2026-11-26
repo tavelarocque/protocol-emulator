@@ -1,0 +1,166 @@
+ok    interface: the sheet's example gives the words printed in the sheet
+ok    interface: GoodCRC on SOP' gives the words printed in the sheet
+ok    the CRCs printed in the sheet are the judge's and the generator's
+ok    the example's bit count and transition places in the sheet are the judge's
+ok    the judge's 4b5b values agree with the specification's strings in the generator
+
+waveform    seed expected judge  cases   waveform decoder 
+                                 failed  check    check   what it is
+none        1    pass     pass   0/14    -        -       ideal: line low at cycle 1, first preamble at 1000, gaps of 500
+
+ok    seed 1: RATE bytes=84 cycles=90996, as the generator's transitions give
+
+none        2    pass     pass   0/14    -        -       ideal: line low at cycle 1, first preamble at 1000, gaps of 500
+
+ok    seed 2: RATE bytes=90 cycles=85942, as the generator's transitions give
+
+none        3    pass     pass   0/14    -        -       ideal: line low at cycle 1, first preamble at 1000, gaps of 500
+
+ok    seed 3: RATE bytes=20 cycles=30728, as the generator's transitions give
+
+none        7    pass     pass   0/14    -        -       ideal: line low at cycle 1, first preamble at 1000, gaps of 500
+
+ok    seed 7: RATE bytes=70 cycles=90869, as the generator's transitions give
+
+none        11   pass     pass   0/14    -        -       ideal: line low at cycle 1, first preamble at 1000, gaps of 500
+
+ok    seed 11: RATE bytes=52 cycles=69876, as the generator's transitions give
+
+jitter2     1    pass     pass   0/14    -        -       transitions alternately 2 cycles late and 2 early (the limit)
+jitter2     2    pass     pass   0/14    -        -       transitions alternately 2 cycles late and 2 early (the limit)
+jitter2     3    pass     pass   0/14    -        -       transitions alternately 2 cycles late and 2 early (the limit)
+jitter2     7    pass     pass   0/14    -        -       transitions alternately 2 cycles late and 2 early (the limit)
+jitter2     11   pass     pass   0/14    -        -       transitions alternately 2 cycles late and 2 early (the limit)
+gap40000    1    pass     pass   0/14    -        -       gaps of exactly 40000 cycles (the limit)
+gap40000    2    pass     pass   0/14    -        -       gaps of exactly 40000 cycles (the limit)
+gap40000    3    pass     pass   0/14    -        -       gaps of exactly 40000 cycles (the limit)
+gap40000    7    pass     pass   0/14    -        -       gaps of exactly 40000 cycles (the limit)
+gap40000    11   pass     pass   0/14    -        -       gaps of exactly 40000 cycles (the limit)
+start40000  1    pass     pass   0/14    -        -       first preamble at cycle 40000 (the limit)
+start40000  2    pass     pass   0/14    -        -       first preamble at cycle 40000 (the limit)
+start40000  3    pass     pass   0/14    -        -       first preamble at cycle 40000 (the limit)
+start40000  7    pass     pass   0/14    -        -       first preamble at cycle 40000 (the limit)
+start40000  11   pass     pass   0/14    -        -       first preamble at cycle 40000 (the limit)
+lowat100    1    pass     pass   0/14    -        -       P0 falls at cycle 100 (the limit), preamble at 600
+lowat100    2    pass     pass   0/14    -        -       P0 falls at cycle 100 (the limit), preamble at 600
+lowat100    3    pass     pass   0/14    -        -       P0 falls at cycle 100 (the limit), preamble at 600
+lowat100    7    pass     pass   0/14    -        -       P0 falls at cycle 100 (the limit), preamble at 600
+lowat100    11   pass     pass   0/14    -        -       P0 falls at cycle 100 (the limit), preamble at 600
+flipbit     1    fail     fail   14/14   objects  objects one data bit of the last packet inverted (CRC then wrong)
+flipbit     2    fail     fail   14/14   objects  objects one data bit of the last packet inverted (CRC then wrong)
+flipbit     3    fail     fail   14/14   objects  objects one data bit of the last packet inverted (CRC then wrong)
+flipbit     7    fail     fail   14/14   objects  objects one data bit of the last packet inverted (CRC then wrong)
+flipbit     11   fail     fail   14/14   objects  objects one data bit of the last packet inverted (CRC then wrong)
+badcrc      1    fail     fail   14/14   objects  objects right data, CRC's lowest bit inverted
+badcrc      2    fail     fail   14/14   objects  objects right data, CRC's lowest bit inverted
+badcrc      3    fail     fail   14/14   objects  objects right data, CRC's lowest bit inverted
+badcrc      7    fail     fail   14/14   objects  objects right data, CRC's lowest bit inverted
+badcrc      11   fail     fail   14/14   objects  objects right data, CRC's lowest bit inverted
+crcfwd      1    fail     fail   14/14   objects  objects CRC computed most significant bit first (wrong algorithm)
+crcfwd      2    fail     fail   14/14   objects  objects CRC computed most significant bit first (wrong algorithm)
+crcfwd      3    fail     fail   14/14   objects  objects CRC computed most significant bit first (wrong algorithm)
+crcfwd      7    fail     fail   14/14   objects  objects CRC computed most significant bit first (wrong algorithm)
+crcfwd      11   fail     fail   14/14   objects  objects CRC computed most significant bit first (wrong algorithm)
+nibbleswap  1    fail     fail   14/14   objects  objects nibbles of each byte sent high first
+nibbleswap  2    fail     fail   14/14   objects  objects nibbles of each byte sent high first
+nibbleswap  3    fail     fail   14/14   objects  objects nibbles of each byte sent high first
+nibbleswap  7    fail     fail   14/14   objects  objects nibbles of each byte sent high first
+nibbleswap  11   fail     fail   14/14   objects  objects nibbles of each byte sent high first
+late3       1    fail     fail   14/14   objects  -       one transition 3 cycles late
+late3       2    fail     fail   14/14   objects  -       one transition 3 cycles late
+late3       3    fail     fail   14/14   objects  -       one transition 3 cycles late
+late3       7    fail     fail   14/14   objects  -       one transition 3 cycles late
+late3       11   fail     fail   14/14   objects  -       one transition 3 cycles late
+early3      1    fail     fail   14/14   objects  -       one transition 3 cycles early
+early3      2    fail     fail   14/14   objects  -       one transition 3 cycles early
+early3      3    fail     fail   14/14   objects  -       one transition 3 cycles early
+early3      7    fail     fail   14/14   objects  -       one transition 3 cycles early
+early3      11   fail     fail   14/14   objects  -       one transition 3 cycles early
+slow67      1    fail     fail   14/14   objects  -       bits of 67 cycles: the error adds up along a packet
+slow67      2    fail     fail   14/14   objects  -       bits of 67 cycles: the error adds up along a packet
+slow67      3    fail     fail   14/14   objects  -       bits of 67 cycles: the error adds up along a packet
+slow67      7    fail     fail   14/14   objects  -       bits of 67 cycles: the error adds up along a packet
+slow67      11   fail     fail   14/14   objects  -       bits of 67 cycles: the error adds up along a packet
+pre62       1    fail     fail   14/14   objects  -       a preamble of 62 bits
+pre62       2    fail     fail   14/14   objects  -       a preamble of 62 bits
+pre62       3    fail     fail   14/14   objects  -       a preamble of 62 bits
+pre62       7    fail     fail   14/14   objects  -       a preamble of 62 bits
+pre62       11   fail     fail   14/14   objects  -       a preamble of 62 bits
+pre66       1    fail     fail   14/14   objects  -       a preamble of 66 bits
+pre66       2    fail     fail   14/14   objects  -       a preamble of 66 bits
+pre66       3    fail     fail   14/14   objects  -       a preamble of 66 bits
+pre66       7    fail     fail   14/14   objects  -       a preamble of 66 bits
+pre66       11   fail     fail   14/14   objects  -       a preamble of 66 bits
+wrongsop    1    fail     fail   12/14   objects  objects SOP' sent for every SOP
+wrongsop    2    fail     fail   13/14   objects  objects SOP' sent for every SOP
+wrongsop    3    fail     fail   12/14   objects  objects SOP' sent for every SOP
+wrongsop    7    fail     fail   12/14   objects  objects SOP' sent for every SOP
+wrongsop    11   fail     fail   13/14   objects  objects SOP' sent for every SOP
+noeop       1    fail     fail   14/14   objects  objects no EOP symbol
+noeop       2    fail     fail   14/14   objects  objects no EOP symbol
+noeop       3    fail     fail   14/14   objects  objects no EOP symbol
+noeop       7    fail     fail   14/14   objects  objects no EOP symbol
+noeop       11   fail     fail   14/14   objects  objects no EOP symbol
+noclose     1    fail     fail   14/14   objects  objects no transition after the last bit of EOP
+noclose     2    fail     fail   14/14   objects  objects no transition after the last bit of EOP
+noclose     3    fail     fail   14/14   objects  objects no transition after the last bit of EOP
+noclose     7    fail     fail   14/14   objects  objects no transition after the last bit of EOP
+noclose     11   fail     fail   14/14   objects  objects no transition after the last bit of EOP
+highclose   1    fail     fail   7/14    objects  -       the closing rise is not followed by a fall: line left high
+highclose   2    fail     fail   4/14    objects  -       the closing rise is not followed by a fall: line left high
+highclose   3    fail     fail   6/14    objects  -       the closing rise is not followed by a fall: line left high
+highclose   7    fail     fail   6/14    objects  -       the closing rise is not followed by a fall: line left high
+highclose   11   fail     fail   7/14    objects  -       the closing rise is not followed by a fall: line left high
+gap499      1    fail     fail   10/14   objects  -       gaps of 499 cycles
+gap499      2    fail     fail   7/14    objects  -       gaps of 499 cycles
+gap499      3    fail     fail   10/14   objects  -       gaps of 499 cycles
+gap499      7    fail     fail   9/14    objects  -       gaps of 499 cycles
+gap499      11   fail     fail   10/14   objects  -       gaps of 499 cycles
+gap40001    1    fail     fail   10/14   objects  -       gaps of 40001 cycles
+gap40001    2    fail     fail   7/14    objects  -       gaps of 40001 cycles
+gap40001    3    fail     fail   10/14   objects  -       gaps of 40001 cycles
+gap40001    7    fail     fail   9/14    objects  -       gaps of 40001 cycles
+gap40001    11   fail     fail   10/14   objects  -       gaps of 40001 cycles
+start40001  1    fail     fail   14/14   objects  -       first preamble at cycle 40001
+start40001  2    fail     fail   14/14   objects  -       first preamble at cycle 40001
+start40001  3    fail     fail   14/14   objects  -       first preamble at cycle 40001
+start40001  7    fail     fail   14/14   objects  -       first preamble at cycle 40001
+start40001  11   fail     fail   14/14   objects  -       first preamble at cycle 40001
+lowat101    1    fail     fail   14/14   objects  -       P0 falls at cycle 101
+lowat101    2    fail     fail   14/14   objects  -       P0 falls at cycle 101
+lowat101    3    fail     fail   14/14   objects  -       P0 falls at cycle 101
+lowat101    7    fail     fail   14/14   objects  -       P0 falls at cycle 101
+lowat101    11   fail     fail   14/14   objects  -       P0 falls at cycle 101
+neverlow    1    fail     fail   14/14   objects  -       P0 never driven low: preamble begins with a fall
+neverlow    2    fail     fail   14/14   objects  -       P0 never driven low: preamble begins with a fall
+neverlow    3    fail     fail   14/14   objects  -       P0 never driven low: preamble begins with a fall
+neverlow    7    fail     fail   14/14   objects  -       P0 never driven low: preamble begins with a fall
+neverlow    11   fail     fail   14/14   objects  -       P0 never driven low: preamble begins with a fall
+tail        1    fail     fail   14/14   objects  -       one more pulse 5000 cycles after the last packet
+tail        2    fail     fail   14/14   objects  -       one more pulse 5000 cycles after the last packet
+tail        3    fail     fail   14/14   objects  -       one more pulse 5000 cycles after the last packet
+tail        7    fail     fail   14/14   objects  -       one more pulse 5000 cycles after the last packet
+tail        11   fail     fail   14/14   objects  -       one more pulse 5000 cycles after the last packet
+dropmsg     1    fail     fail   14/14   objects  objects the last packet is not sent
+dropmsg     2    fail     fail   14/14   objects  objects the last packet is not sent
+dropmsg     3    fail     fail   14/14   objects  objects the last packet is not sent
+dropmsg     7    fail     fail   14/14   objects  objects the last packet is not sent
+dropmsg     11   fail     fail   14/14   objects  objects the last packet is not sent
+extramsg    1    fail     fail   14/14   objects  objects the last packet is sent twice
+extramsg    2    fail     fail   14/14   objects  objects the last packet is sent twice
+extramsg    3    fail     fail   14/14   objects  objects the last packet is sent twice
+extramsg    7    fail     fail   14/14   objects  objects the last packet is sent twice
+extramsg    11   fail     fail   14/14   objects  objects the last packet is sent twice
+
+ok    run_args.txt '-mode 0=pp -config clkdiv=1\n': accepted
+ok    run_args.txt '-mo 0=pp\n': accepted
+ok    run_args.txt '-mode 0=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -t other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -inputs ff\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-inputs'
+ok    run_args.txt '-mode 0=pp -stimulus s.txt\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-stimulus'
+ok    run_args.txt '-mode 0=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp\n-config clkdiv=1\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode\n': setup: FAIL: run_args.txt: -mode has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (GoodCRC, no data objects: 1 packet, 2 payload bytes): FAIL: waveform: P0 is still high at cy)
+SELFTEST PASS

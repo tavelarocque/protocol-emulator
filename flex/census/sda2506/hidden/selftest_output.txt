@@ -1,0 +1,146 @@
+ok    interface: the sheet's example gives 0x1201, 0x923C, 0x1200 and RX 0x003C
+ok    schedule: the sheet's worked write (CLK 2050..5150, CE fall 5250, start 5450/5550, CE rise 205600)
+ok    stimulus: sigrok decodes the ideal host and the scripted EEPROM to the payload, 75 cases
+ok    stimulus: an EEPROM 3 us late is refused (operation 0 decoded as [B5, CB: 00, addr: 2A, read, read: 2A], wanted )
+
+result       seed expected judge  failed waveform decoder rx  what it is
+none         1    pass     pass   0/15   -        -       -   ideal: CLK low at cycle 10, DATA changed at each slot boundary
+ok    seed 1: RATE bytes=6 cycles=828040, as the generator's pin changes give
+none         2    pass     pass   0/15   -        -       -   ideal: CLK low at cycle 10, DATA changed at each slot boundary
+ok    seed 2: RATE bytes=4 cycles=824840, as the generator's pin changes give
+none         3    pass     pass   0/15   -        -       -   ideal: CLK low at cycle 10, DATA changed at each slot boundary
+ok    seed 3: RATE bytes=5 cycles=826440, as the generator's pin changes give
+none         7    pass     pass   0/15   -        -       -   ideal: CLK low at cycle 10, DATA changed at each slot boundary
+ok    seed 7: RATE bytes=7 cycles=229190, as the generator's pin changes give
+none         11   pass     pass   0/15   -        -       -   ideal: CLK low at cycle 10, DATA changed at each slot boundary
+ok    seed 11: RATE bytes=6 cycles=427740, as the generator's pin changes give
+jitter2      1    pass     pass   0/15   -        -       -   every CLK and CE edge 2 cycles off its place, alternately late and early
+jitter2      2    pass     pass   0/15   -        -       -   every CLK and CE edge 2 cycles off its place, alternately late and early
+jitter2      3    pass     pass   0/15   -        -       -   every CLK and CE edge 2 cycles off its place, alternately late and early
+jitter2      7    pass     pass   0/15   -        -       -   every CLK and CE edge 2 cycles off its place, alternately late and early
+jitter2      11   pass     pass   0/15   -        -       -   every CLK and CE edge 2 cycles off its place, alternately late and early
+datawindow   1    pass     pass   0/15   -        -       -   every DATA change at the very edge of its window, alternately 20 early and 20 late
+datawindow   2    pass     pass   0/15   -        -       -   every DATA change at the very edge of its window, alternately 20 early and 20 late
+datawindow   3    pass     pass   0/15   -        -       -   every DATA change at the very edge of its window, alternately 20 early and 20 late
+datawindow   7    pass     pass   0/15   -        -       -   every DATA change at the very edge of its window, alternately 20 early and 20 late
+datawindow   11   pass     pass   0/15   -        -       -   every DATA change at the very edge of its window, alternately 20 early and 20 late
+clk1000      1    pass     pass   0/15   -        -       -   CLK brought low at cycle 1000 (the limit)
+clk1000      2    pass     pass   0/15   -        -       -   CLK brought low at cycle 1000 (the limit)
+clk1000      3    pass     pass   0/15   -        -       -   CLK brought low at cycle 1000 (the limit)
+clk1000      7    pass     pass   0/15   -        -       -   CLK brought low at cycle 1000 (the limit)
+clk1000      11   pass     pass   0/15   -        -       -   CLK brought low at cycle 1000 (the limit)
+sample_late  1    pass     pass   0/15   -        -       -   each read bit sampled 9 cycles after the next CLK fall (the last moment)
+sample_late  2    pass     pass   0/15   -        -       -   each read bit sampled 9 cycles after the next CLK fall (the last moment)
+sample_late  3    pass     pass   0/15   -        -       -   each read bit sampled 9 cycles after the next CLK fall (the last moment)
+sample_late  7    pass     pass   0/15   -        -       -   each read bit sampled 9 cycles after the next CLK fall (the last moment)
+sample_late  11   pass     pass   0/15   -        -       -   each read bit sampled 9 cycles after the next CLK fall (the last moment)
+flipbit      1    fail     fail   9/15   objects  objects -   one data bit of the first write inverted
+flipbit      2    fail     fail   9/15   objects  objects -   one data bit of the first write inverted
+flipbit      3    fail     fail   9/15   objects  objects -   one data bit of the first write inverted
+flipbit      7    fail     fail   8/15   objects  objects -   one data bit of the first write inverted
+flipbit      11   fail     fail   6/15   objects  objects -   one data bit of the first write inverted
+addrmsb      1    fail     fail   10/15  objects  objects -   addresses sent most significant bit first
+addrmsb      2    fail     fail   10/15  objects  objects -   addresses sent most significant bit first
+addrmsb      3    fail     fail   10/15  objects  objects -   addresses sent most significant bit first
+addrmsb      7    fail     fail   10/15  objects  objects -   addresses sent most significant bit first
+addrmsb      11   fail     fail   10/15  objects  objects -   addresses sent most significant bit first
+late3        1    fail     fail   15/15  objects  -       -   one CLK edge 3 cycles late
+late3        2    fail     fail   15/15  objects  -       -   one CLK edge 3 cycles late
+late3        3    fail     fail   15/15  objects  -       -   one CLK edge 3 cycles late
+late3        7    fail     fail   15/15  objects  -       -   one CLK edge 3 cycles late
+late3        11   fail     fail   15/15  objects  -       -   one CLK edge 3 cycles late
+early3       1    fail     fail   15/15  objects  -       -   one CE edge 3 cycles early
+early3       2    fail     fail   15/15  objects  -       -   one CE edge 3 cycles early
+early3       3    fail     fail   15/15  objects  -       -   one CE edge 3 cycles early
+early3       7    fail     fail   15/15  objects  -       -   one CE edge 3 cycles early
+early3       11   fail     fail   15/15  objects  -       -   one CE edge 3 cycles early
+setup21      1    fail     fail   14/15  objects  -       -   the first DATA change 21 cycles after its slot boundary (outside the +-20 window)
+setup21      2    fail     fail   14/15  objects  -       -   the first DATA change 21 cycles after its slot boundary (outside the +-20 window)
+setup21      3    fail     fail   14/15  objects  -       -   the first DATA change 21 cycles after its slot boundary (outside the +-20 window)
+setup21      7    fail     fail   14/15  objects  -       -   the first DATA change 21 cycles after its slot boundary (outside the +-20 window)
+setup21      11   fail     fail   14/15  objects  -       -   the first DATA change 21 cycles after its slot boundary (outside the +-20 window)
+slow201      1    fail     fail   15/15  objects  objects obj slots of 201 cycles: the error adds up
+slow201      2    fail     fail   15/15  objects  objects obj slots of 201 cycles: the error adds up
+slow201      3    fail     fail   15/15  objects  objects obj slots of 201 cycles: the error adds up
+slow201      7    fail     fail   15/15  objects  objects obj slots of 201 cycles: the error adds up
+slow201      11   fail     fail   15/15  objects  objects obj slots of 201 cycles: the error adds up
+shortprog    1    fail     fail   11/15  objects  objects -   CE rises 3 cycles early after a write or erase (programming time short)
+shortprog    2    fail     fail   11/15  objects  objects -   CE rises 3 cycles early after a write or erase (programming time short)
+shortprog    3    fail     fail   12/15  objects  objects -   CE rises 3 cycles early after a write or erase (programming time short)
+shortprog    7    fail     fail   12/15  objects  -       -   CE rises 3 cycles early after a write or erase (programming time short)
+shortprog    11   fail     fail   12/15  objects  objects -   CE rises 3 cycles early after a write or erase (programming time short)
+nostart      1    fail     fail   11/15  objects  -       -   no start pulse after a write or erase command
+nostart      2    fail     fail   11/15  objects  -       -   no start pulse after a write or erase command
+nostart      3    fail     fail   12/15  objects  -       -   no start pulse after a write or erase command
+nostart      7    fail     fail   12/15  objects  -       -   no start pulse after a write or erase command
+nostart      11   fail     fail   12/15  objects  -       -   no start pulse after a write or erase command
+selhigh      1    fail     fail   9/15   objects  objects -   DATA high at the fall of CE after a write command (an erase to the EEPROM)
+selhigh      2    fail     fail   9/15   objects  objects -   DATA high at the fall of CE after a write command (an erase to the EEPROM)
+selhigh      3    fail     fail   9/15   objects  objects -   DATA high at the fall of CE after a write command (an erase to the EEPROM)
+selhigh      7    fail     fail   8/15   objects  objects -   DATA high at the fall of CE after a write command (an erase to the EEPROM)
+selhigh      11   fail     fail   6/15   objects  objects -   DATA high at the fall of CE after a write command (an erase to the EEPROM)
+ninepulse    1    fail     fail   13/15  objects  objects obj nine CLK pulses in each read instead of eight
+ninepulse    2    fail     fail   13/15  objects  objects obj nine CLK pulses in each read instead of eight
+ninepulse    3    fail     fail   13/15  objects  objects obj nine CLK pulses in each read instead of eight
+ninepulse    7    fail     fail   13/15  objects  objects obj nine CLK pulses in each read instead of eight
+ninepulse    11   fail     fail   13/15  objects  objects obj nine CLK pulses in each read instead of eight
+holdlow      1    fail     fail   13/15  objects  objects obj DATA left driven low (CB = 0) through each read
+holdlow      2    fail     fail   13/15  objects  objects obj DATA left driven low (CB = 0) through each read
+holdlow      3    fail     fail   13/15  objects  objects obj DATA left driven low (CB = 0) through each read
+holdlow      7    fail     fail   13/15  objects  objects obj DATA left driven low (CB = 0) through each read
+holdlow      11   fail     fail   13/15  objects  objects obj DATA left driven low (CB = 0) through each read
+clk1001      1    fail     fail   15/15  objects  -       -   CLK brought low at cycle 1001
+clk1001      2    fail     fail   15/15  objects  -       -   CLK brought low at cycle 1001
+clk1001      3    fail     fail   15/15  objects  -       -   CLK brought low at cycle 1001
+clk1001      7    fail     fail   15/15  objects  -       -   CLK brought low at cycle 1001
+clk1001      11   fail     fail   15/15  objects  -       -   CLK brought low at cycle 1001
+tail         1    fail     fail   15/15  objects  -       -   one more CLK pulse 1150 cycles after the last CE rise
+tail         2    fail     fail   15/15  objects  -       -   one more CLK pulse 1150 cycles after the last CE rise
+tail         3    fail     fail   15/15  objects  -       -   one more CLK pulse 1150 cycles after the last CE rise
+tail         7    fail     fail   15/15  objects  -       -   one more CLK pulse 1150 cycles after the last CE rise
+tail         11   fail     fail   15/15  objects  -       -   one more CLK pulse 1150 cycles after the last CE rise
+dropop       1    fail     fail   15/15  objects  objects obj the last operation is not done
+dropop       2    fail     fail   15/15  objects  objects obj the last operation is not done
+dropop       3    fail     fail   15/15  objects  objects obj the last operation is not done
+dropop       7    fail     fail   15/15  objects  objects obj the last operation is not done
+dropop       11   fail     fail   15/15  objects  objects obj the last operation is not done
+extraop      1    fail     fail   15/15  objects  objects -   the last operation is done twice
+extraop      2    fail     fail   15/15  objects  objects -   the last operation is done twice
+extraop      3    fail     fail   15/15  objects  objects -   the last operation is done twice
+extraop      7    fail     fail   15/15  objects  objects -   the last operation is done twice
+extraop      11   fail     fail   15/15  objects  objects -   the last operation is done twice
+sample_early 1    fail     fail   13/15  -        -       obj each read bit sampled before the EEPROM has put it out (old bit)
+sample_early 2    fail     fail   13/15  -        -       obj each read bit sampled before the EEPROM has put it out (old bit)
+sample_early 3    fail     fail   12/15  -        -       obj each read bit sampled before the EEPROM has put it out (old bit)
+sample_early 7    fail     fail   13/15  -        -       obj each read bit sampled before the EEPROM has put it out (old bit)
+sample_early 11   fail     fail   13/15  -        -       obj each read bit sampled before the EEPROM has put it out (old bit)
+rxflip       1    fail     fail   13/15  -        -       obj one bit of the last RX word inverted
+rxflip       2    fail     fail   13/15  -        -       obj one bit of the last RX word inverted
+rxflip       3    fail     fail   13/15  -        -       obj one bit of the last RX word inverted
+rxflip       7    fail     fail   13/15  -        -       obj one bit of the last RX word inverted
+rxflip       11   fail     fail   13/15  -        -       obj one bit of the last RX word inverted
+rxextra      1    fail     fail   13/15  -        -       obj one more RX word after the last
+rxextra      2    fail     fail   13/15  -        -       obj one more RX word after the last
+rxextra      3    fail     fail   13/15  -        -       obj one more RX word after the last
+rxextra      7    fail     fail   13/15  -        -       obj one more RX word after the last
+rxextra      11   fail     fail   13/15  -        -       obj one more RX word after the last
+rxhigh       1    fail     fail   13/15  -        -       obj RX words carry the address in bits 14..8
+rxhigh       2    fail     fail   13/15  -        -       obj RX words carry the address in bits 14..8
+rxhigh       3    fail     fail   13/15  -        -       obj RX words carry the address in bits 14..8
+rxhigh       7    fail     fail   13/15  -        -       obj RX words carry the address in bits 14..8
+rxhigh       11   fail     fail   13/15  -        -       obj RX words carry the address in bits 14..8
+
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp\n': accepted
+ok    run_args.txt '-mo 0=pp -mo 1=od -mo 2=pp -config clkdiv=1\n': accepted
+ok    run_args.txt '-mode 0=pp -mode 1=pp -mode 2=pp\n': setup: FAIL: run_args.txt must make P1 od (the task sheet), found 'pp'
+ok    run_args.txt '-mode 0=pp -mode 1=od\n': setup: FAIL: run_args.txt must make P2 pp (the task sheet), found None
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp -tx other.txt\n': setup: FAIL: run_args.txt must not give -tx: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp -stimulus other.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp -s other.txt\n': setup: FAIL: run_args.txt must not give -stimulus: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp -cycles 5\n': setup: FAIL: run_args.txt must not give -cycles: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp -inputs ff\n': setup: FAIL: run_args.txt must not give -inputs: the test does
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp -c clkdiv=1\n': setup: FAIL: run_args.txt may hold only -config and -mode flags, not '-c'
+ok    run_args.txt '-mode 0=pp -mode 1=od\n-mode 2=pp\n': setup: FAIL: run_args.txt must be one line
+ok    run_args.txt '-mode 0=pp -mode 1=od -mode 2=pp -config\n': setup: FAIL: run_args.txt: -config has no value
+ok    real pe_sim, idle program: every case fails cleanly, no RATE line (case 0 (one read: 1 operation [R2A]): FAIL: waveform: CLK is not low by cycle 1000; waveform: CLK has 0 edges,)
+SELFTEST PASS
